@@ -1,0 +1,4879 @@
+{
+  "group": "c",
+  "opus": "DewyLinnaeus",
+  "terra": "SunnyBell",
+  "items": [
+    {
+      "item": "item-01",
+      "regions": [
+        {
+          "id": "P1",
+          "opusIndependent": {
+            "id": "P1",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "くちばし",
+                "owner": "鳥",
+                "basis": "両方",
+                "confidence": "中",
+                "evidence": "右向きに尖った直角三角形が本体の右上から外へ突き出し、図形の前端になっている",
+                "weaknesses": "隣の P2 が大きな五角形で、頭部らしいまとまりがない"
+              },
+              {
+                "rank": 2,
+                "noun": "耳",
+                "owner": "猫",
+                "basis": "全体との関係",
+                "confidence": "低",
+                "evidence": "上の角が P2 の頂と同じ高さに並び、間に V 字の切れ込みをつくる",
+                "weaknesses": "主な尖りは右を向いており、上向きの耳としては向きが合わない"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "terraIndependent": {
+            "id": "P1",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "ひれ",
+                "owner": "魚",
+                "basis": "両方",
+                "confidence": "中",
+                "evidence": "右端の広い付け根から右へ尖る。",
+                "weaknesses": "ひれの曲線や筋はない。"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "consensusCandidates": [
+            {
+              "rank": 1,
+              "noun": "くちばし",
+              "owner": "鳥",
+              "basis": "両方",
+              "confidence": "低",
+              "evidence": "Opus: 右向きに尖った直角三角形が本体の右上から外へ突き出し、図形の前端になっている／Terra（第2段階 Q1 で支持）: 右上の領域に広い付け根で接し、右へ鋭く張り出す。",
+              "weaknesses": "Opus: 隣の P2 が大きな五角形で、頭部らしいまとまりがない"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": "",
+          "agreementStatus": "合意",
+          "discussion": "Opus の「くちばし」（中）は Q1 で Terra が支持（低: 右上の領域に広い付け根で接し、右へ鋭く張り出す。）したため採用し、確信度は低。 Opus の「耳」（低）は Q2 で Terra が不支持（右向きの突出で、上に立つ細長い耳の手がかりが乏しい。）。Opus もこの理由を受け入れて取り下げ、不採用。 Terra の「ひれ」（中）は Opus が不支持（右へ尖る三角形が上部の前端から突き出す形で、ひれなら背・胸・尾のどれに当たるか位置から決まらない）とし、Q3 で Terra が取り下げた（上部右端の突出だけでは、ひれの位置を特定できない。）ため不採用。 片方だけに残った候補はない。"
+        },
+        {
+          "id": "P2",
+          "opusIndependent": {
+            "id": "P2",
+            "candidates": [],
+            "noCandidate": true,
+            "noCandidateReason": "全体の6割を占める中心の家形五角形で、領域全体として一つの部分の形をもたない"
+          },
+          "terraIndependent": {
+            "id": "P2",
+            "candidates": [],
+            "noCandidate": true,
+            "noCandidateReason": "広い中心領域で、具体的な部分の形を特定しにくい。"
+          },
+          "consensusCandidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "両者とも第1段階で見立てなし（Opus: 全体の6割を占める中心の家形五角形で、領域全体として一つの部分の形をもたない／Terra: 広い中心領域で、具体的な部分の形を特定しにくい。）",
+          "agreementStatus": "合意",
+          "discussion": "第1段階で両者とも見立てなしのため、第2段階の問いは置かず合意の見立てなしとした。"
+        },
+        {
+          "id": "P3",
+          "opusIndependent": {
+            "id": "P3",
+            "candidates": [],
+            "noCandidate": true,
+            "noCandidateReason": "下辺に並ぶ正方形で尖りも突出もなく、単独でも位置からも部分に見えにくい"
+          },
+          "terraIndependent": {
+            "id": "P3",
+            "candidates": [],
+            "noCandidate": true,
+            "noCandidateReason": "輪郭と接続だけでは、具体的な部分を十分に絞り込めない。"
+          },
+          "consensusCandidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "両者とも第1段階で見立てなし（Opus: 下辺に並ぶ正方形で尖りも突出もなく、単独でも位置からも部分に見えにくい／Terra: 輪郭と接続だけでは、具体的な部分を十分に絞り込めない。）",
+          "agreementStatus": "合意",
+          "discussion": "第1段階で両者とも見立てなしのため、第2段階の問いは置かず合意の見立てなしとした。"
+        },
+        {
+          "id": "P4",
+          "opusIndependent": {
+            "id": "P4",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "尾",
+                "owner": "猫",
+                "basis": "両方",
+                "confidence": "中",
+                "evidence": "左下の端から左上へ斜めに立ち上がる細長い帯で、本体の後ろで跳ね上がっている",
+                "weaknesses": "先端が垂直に切れていて細くならない"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "terraIndependent": {
+            "id": "P4",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "尾羽",
+                "owner": "鳥",
+                "basis": "両方",
+                "confidence": "低",
+                "evidence": "左端から斜め上へ細長く伸びる。",
+                "weaknesses": "羽先が角張り羽毛は見えない。"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "consensusCandidates": [
+            {
+              "rank": 1,
+              "noun": "尾",
+              "owner": "猫・鳥",
+              "basis": "両方",
+              "confidence": "低",
+              "evidence": "Opus（尾）: 左下の端から左上へ斜めに立ち上がる細長い帯で、本体の後ろで跳ね上がっている／Terra（尾羽）: 左端から斜め上へ細長く伸びる。",
+              "weaknesses": "Opus: 先端が垂直に切れていて細くならない／Terra: 羽先が角張り羽毛は見えない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": "",
+          "agreementStatus": "合意",
+          "discussion": "Opus「尾」（中）と Terra「尾羽」（低）を同じ見立てとして照合し、Q4 で Terra が合意名詞「尾」に同意（左端から斜め上に延びる形を尾と呼ぶことに同意し、尾羽はその限定的な読みとする。）したため「尾」で採用。確信度は Terra の回答どおり低。 片方だけに残った候補はない。"
+        }
+      ]
+    },
+    {
+      "item": "item-02",
+      "regions": [
+        {
+          "id": "P1",
+          "opusIndependent": {
+            "id": "P1",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "帆",
+                "owner": "帆船",
+                "basis": "単独",
+                "confidence": "中",
+                "evidence": "垂直な右辺と左上へ傾く長い斜辺をもつ大きな直角三角形で、上端が鋭く尖る",
+                "weaknesses": "下に船体らしい領域がない"
+              },
+              {
+                "rank": 2,
+                "noun": "背びれ",
+                "owner": "サメ",
+                "basis": "単独",
+                "confidence": "低",
+                "evidence": "斜めの前縁と垂直な後縁をもち、上へ尖る輪郭がサメの背びれに似る",
+                "weaknesses": "全体の半分以上を占め、ひれにしては大きすぎる"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "terraIndependent": {
+            "id": "P1",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "帆",
+                "owner": "帆船",
+                "basis": "単独",
+                "confidence": "中",
+                "evidence": "垂直な辺と水平な底辺を持つ三角形である。",
+                "weaknesses": "帆柱や曲面は見えない。"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "consensusCandidates": [
+            {
+              "rank": 1,
+              "noun": "帆",
+              "owner": "帆船",
+              "basis": "単独",
+              "confidence": "中",
+              "evidence": "Opus: 垂直な右辺と左上へ傾く長い斜辺をもつ大きな直角三角形で、上端が鋭く尖る／Terra: 垂直な辺と水平な底辺を持つ三角形である。",
+              "weaknesses": "Opus: 下に船体らしい領域がない／Terra: 帆柱や曲面は見えない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": "",
+          "agreementStatus": "合意",
+          "discussion": "「帆」は第1段階で両者が独立に挙げた一致（Opus 中・Terra 中）で採用し、確信度は低い方の中。 Opus の「背びれ」（低）は Q5 で Terra が不支持（領域が中心の大半を占め、背に付く小さなひれとしては大きすぎる。）。Opus もこの理由を受け入れて取り下げ、不採用。 片方だけに残った候補はない。"
+        },
+        {
+          "id": "P2",
+          "opusIndependent": {
+            "id": "P2",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "脚",
+                "owner": "",
+                "basis": "全体との関係",
+                "confidence": "低",
+                "evidence": "大きな三角形の右下から斜め右下へ伸びる帯で、先に P3 が付く",
+                "weaknesses": "帯は短く、上の三角形が胴に見えるとは限らない"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "terraIndependent": {
+            "id": "P2",
+            "candidates": [],
+            "noCandidate": true,
+            "noCandidateReason": "輪郭と接続だけでは、具体的な部分を十分に絞り込めない。"
+          },
+          "consensusCandidates": [
+            {
+              "rank": 1,
+              "noun": "脚",
+              "owner": "",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "Opus: 大きな三角形の右下から斜め右下へ伸びる帯で、先に P3 が付く／Terra（第2段階 Q6 で支持）: 中央から右下に延びて末端の四角につながる。",
+              "weaknesses": "Opus: 帯は短く、上の三角形が胴に見えるとは限らない"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": "",
+          "agreementStatus": "合意",
+          "discussion": "Opus の「脚」（低）は Q6 で Terra が支持（低: 中央から右下に延びて末端の四角につながる。）したため採用し、確信度は低。 片方だけに残った候補はない。"
+        },
+        {
+          "id": "P3",
+          "opusIndependent": {
+            "id": "P3",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "足",
+                "owner": "",
+                "basis": "全体との関係",
+                "confidence": "低",
+                "evidence": "斜めの帯 P2 の先端に付いて右へ張り出し、足先のように見える",
+                "weaknesses": "正方形で尖りがなく、足らしさは位置だけによる"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "terraIndependent": {
+            "id": "P3",
+            "candidates": [],
+            "noCandidate": true,
+            "noCandidateReason": "輪郭と接続だけでは、具体的な部分を十分に絞り込めない。"
+          },
+          "consensusCandidates": [
+            {
+              "rank": 1,
+              "noun": "足",
+              "owner": "",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "Opus: 斜めの帯 P2 の先端に付いて右へ張り出し、足先のように見える／Terra（第2段階 Q7 で支持）: 右下にある斜めの領域の先に四角く付いている。",
+              "weaknesses": "Opus: 正方形で尖りがなく、足らしさは位置だけによる"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": "",
+          "agreementStatus": "合意",
+          "discussion": "Opus の「足」（低）は Q7 で Terra が支持（低: 右下にある斜めの領域の先に四角く付いている。）したため採用し、確信度は低。 片方だけに残った候補はない。"
+        },
+        {
+          "id": "P4",
+          "opusIndependent": {
+            "id": "P4",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "脚",
+                "owner": "",
+                "basis": "全体との関係",
+                "confidence": "低",
+                "evidence": "大きな三角形の底辺から左下へ斜めに垂れ、図形の最下端に届く",
+                "weaknesses": "先端が垂直に切れており、P2 と対の脚かどうかは不確か"
+              },
+              {
+                "rank": 2,
+                "noun": "尾",
+                "owner": "",
+                "basis": "全体との関係",
+                "confidence": "低",
+                "evidence": "本体の下から後方（左下）へ斜めに伸びる帯",
+                "weaknesses": "左右どちらが前かは決まらず、尾としては太い"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "terraIndependent": {
+            "id": "P4",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "脚",
+                "owner": "動物",
+                "basis": "全体との関係",
+                "confidence": "低",
+                "evidence": "中央から左下へ細長く伸びる。",
+                "weaknesses": "関節や足先は見えない。"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "consensusCandidates": [
+            {
+              "rank": 1,
+              "noun": "脚",
+              "owner": "動物",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "Opus: 大きな三角形の底辺から左下へ斜めに垂れ、図形の最下端に届く／Terra: 中央から左下へ細長く伸びる。",
+              "weaknesses": "Opus: 先端が垂直に切れており、P2 と対の脚かどうかは不確か／Terra: 関節や足先は見えない。"
+            },
+            {
+              "rank": 2,
+              "noun": "尾",
+              "owner": "",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "Opus: 本体の下から後方（左下）へ斜めに伸びる帯／Terra（第2段階 Q8 で支持）: 左下端へ細長く伸び、後方の尾とも読める。",
+              "weaknesses": "Opus: 左右どちらが前かは決まらず、尾としては太い"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": "",
+          "agreementStatus": "合意",
+          "discussion": "「脚」は第1段階で両者が独立に挙げた一致（Opus 低・Terra 低）で採用し、確信度は低い方の低。 Opus の「尾」（低）は Q8 で Terra が支持（低: 左下端へ細長く伸び、後方の尾とも読める。）したため採用し、確信度は低。 片方だけに残った候補はない。"
+        }
+      ]
+    },
+    {
+      "item": "item-03",
+      "regions": [
+        {
+          "id": "P1",
+          "opusIndependent": {
+            "id": "P1",
+            "candidates": [],
+            "noCandidate": true,
+            "noCandidateReason": "下端が二股に分かれて脚らしさはあるが、領域全体は図形の大半を占める本体で一つの部分に当たらない"
+          },
+          "terraIndependent": {
+            "id": "P1",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "脚",
+                "owner": "動物",
+                "basis": "全体との関係",
+                "confidence": "低",
+                "evidence": "下端が二股に分かれ下へ伸びる。",
+                "weaknesses": "二股が一領域で関節や足先は明確でない。"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "consensusCandidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "第2段階の検討で双方の候補がすべて取り下げられ、両者とも見立てなしで一致。Opus は第1段階で見立てなし（下端が二股に分かれて脚らしさはあるが、領域全体は図形の大半を占める本体で一つの部分に当たらない）",
+          "agreementStatus": "合意",
+          "discussion": "Terra の「脚」（低）は Opus が不支持（二股は下端の約4分の1だけで、領域の大半は肩から下の本体にあたる）とし、Q9 で Terra が取り下げた（二股は領域の下端に限られ、領域の大半まで脚と呼ぶには広すぎる。）ため不採用。"
+        },
+        {
+          "id": "P2",
+          "opusIndependent": {
+            "id": "P2",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "翼",
+                "owner": "鳥",
+                "basis": "全体との関係",
+                "confidence": "低",
+                "evidence": "頭のように見える上部の下で右へ張り出し、反対側の P5 と対になる",
+                "weaknesses": "下向きの頂点もあり、翼としては幅が短い"
+              },
+              {
+                "rank": 2,
+                "noun": "くちばし",
+                "owner": "鳥",
+                "basis": "単独",
+                "confidence": "低",
+                "evidence": "水平な上辺の右端が鋭く尖って右へ突き出す",
+                "weaknesses": "頭らしい P4 とは P3 をはさんで離れている"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "terraIndependent": {
+            "id": "P2",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "くちばし",
+                "owner": "鳥",
+                "basis": "両方",
+                "confidence": "低",
+                "evidence": "上部の接点から右へ三角形が伸びる。",
+                "weaknesses": "上下の分かれ目はない。"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "consensusCandidates": [
+            {
+              "rank": 1,
+              "noun": "くちばし",
+              "owner": "鳥",
+              "basis": "両方",
+              "confidence": "低",
+              "evidence": "Opus: 水平な上辺の右端が鋭く尖って右へ突き出す／Terra: 上部の接点から右へ三角形が伸びる。",
+              "weaknesses": "Opus: 頭らしい P4 とは P3 をはさんで離れている／Terra: 上下の分かれ目はない。"
+            },
+            {
+              "rank": 2,
+              "noun": "翼",
+              "owner": "鳥",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "Opus: 頭のように見える上部の下で右へ張り出し、反対側の P5 と対になる／Terra（第2段階 Q10 で支持）: 上方の接点から右へ大きく広がる三角形である。",
+              "weaknesses": "Opus: 下向きの頂点もあり、翼としては幅が短い"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": "",
+          "agreementStatus": "合意",
+          "discussion": "Opus の「翼」（低）は Q10 で Terra が支持（低: 上方の接点から右へ大きく広がる三角形である。）したため採用し、確信度は低。 「くちばし」は第1段階で両者が独立に挙げた一致（Opus 低・Terra 低）で採用し、確信度は低い方の低。 片方だけに残った候補はない。"
+        },
+        {
+          "id": "P3",
+          "opusIndependent": {
+            "id": "P3",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "くちばし",
+                "owner": "鳥",
+                "basis": "両方",
+                "confidence": "低",
+                "evidence": "最上部の正方形 P4 の右に付き、右下へ尖る小三角形",
+                "weaknesses": "先端が P2 の上辺に接して外へ突き出さない"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "terraIndependent": {
+            "id": "P3",
+            "candidates": [],
+            "noCandidate": true,
+            "noCandidateReason": "輪郭と接続だけでは、具体的な部分を十分に絞り込めない。"
+          },
+          "consensusCandidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "第2段階の検討で双方の候補がすべて取り下げられ、両者とも見立てなしで一致。Terra は第1段階で見立てなし（輪郭と接続だけでは、具体的な部分を十分に絞り込めない。）",
+          "agreementStatus": "合意",
+          "discussion": "Opus の「くちばし」は Q11 で Terra がいったん支持（上左の四角から右へ小さく先細りに伸びる。）したが、Opus が根拠の弱い具体名として取り下げを提案し（右の尖りは P2 の上辺に沿って終わり、輪郭から外へ突き出さない）、F2 で Terra も支持を撤回（右の先は隣接領域の上辺と重なり、外へ突出するくちばしの根拠が弱い。）したため不採用。"
+        },
+        {
+          "id": "P4",
+          "opusIndependent": {
+            "id": "P4",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "頭",
+                "owner": "人",
+                "basis": "全体との関係",
+                "confidence": "低",
+                "evidence": "図形の最上端に載る正方形で、下の本体とは細いつながりで分かれる",
+                "weaknesses": "正方形で頭らしい丸みや向きの手がかりがない"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "terraIndependent": {
+            "id": "P4",
+            "candidates": [],
+            "noCandidate": true,
+            "noCandidateReason": "輪郭と接続だけでは、具体的な部分を十分に絞り込めない。"
+          },
+          "consensusCandidates": [
+            {
+              "rank": 1,
+              "noun": "頭",
+              "owner": "人",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "Opus: 図形の最上端に載る正方形で、下の本体とは細いつながりで分かれる／Terra（第2段階 Q12 で支持）: 上左にまとまって位置し右の小三角形と接している。",
+              "weaknesses": "Opus: 正方形で頭らしい丸みや向きの手がかりがない"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": "",
+          "agreementStatus": "合意",
+          "discussion": "Opus の「頭」（低）は Q12 で Terra が支持（低: 上左にまとまって位置し右の小三角形と接している。）したため採用し、確信度は低。 片方だけに残った候補はない。"
+        },
+        {
+          "id": "P5",
+          "opusIndependent": {
+            "id": "P5",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "翼",
+                "owner": "鳥",
+                "basis": "全体との関係",
+                "confidence": "低",
+                "evidence": "上部の左脇に張り出し、右側の P2 と対になる",
+                "weaknesses": "小さく、付け根が本体の側面だけ"
+              },
+              {
+                "rank": 2,
+                "noun": "くちばし",
+                "owner": "鳥",
+                "basis": "単独",
+                "confidence": "低",
+                "evidence": "左へ鋭く尖る小三角形が側面から突き出す",
+                "weaknesses": "頭らしい P4 と接しておらず、その下に離れて付く"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "terraIndependent": {
+            "id": "P5",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "くちばし",
+                "owner": "鳥",
+                "basis": "両方",
+                "confidence": "低",
+                "evidence": "上部の接点から左へ小三角形が尖る。",
+                "weaknesses": "幅広く上下の分かれ目はない。"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "consensusCandidates": [
+            {
+              "rank": 1,
+              "noun": "くちばし",
+              "owner": "鳥",
+              "basis": "両方",
+              "confidence": "低",
+              "evidence": "Opus: 左へ鋭く尖る小三角形が側面から突き出す／Terra: 上部の接点から左へ小三角形が尖る。",
+              "weaknesses": "Opus: 頭らしい P4 と接しておらず、その下に離れて付く／Terra: 幅広く上下の分かれ目はない。"
+            },
+            {
+              "rank": 2,
+              "noun": "翼",
+              "owner": "鳥",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "Opus: 上部の左脇に張り出し、右側の P2 と対になる／Terra（第2段階 Q13 で支持）: 大きな下部領域の上側から左へ三角形に張り出す。",
+              "weaknesses": "Opus: 小さく、付け根が本体の側面だけ"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": "",
+          "agreementStatus": "合意",
+          "discussion": "Opus の「翼」（低）は Q13 で Terra が支持（低: 大きな下部領域の上側から左へ三角形に張り出す。）したため採用し、確信度は低。 「くちばし」は第1段階で両者が独立に挙げた一致（Opus 低・Terra 低）で採用し、確信度は低い方の低。 片方だけに残った候補はない。"
+        }
+      ]
+    },
+    {
+      "item": "item-04",
+      "regions": [
+        {
+          "id": "P1",
+          "opusIndependent": {
+            "id": "P1",
+            "candidates": [],
+            "noCandidate": true,
+            "noCandidateReason": "全体の半分を占める下向きの大きな三角形で、特定の部分としての手がかりが乏しい"
+          },
+          "terraIndependent": {
+            "id": "P1",
+            "candidates": [],
+            "noCandidate": true,
+            "noCandidateReason": "広い中心領域で、具体的な部分の形を特定しにくい。"
+          },
+          "consensusCandidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "両者とも第1段階で見立てなし（Opus: 全体の半分を占める下向きの大きな三角形で、特定の部分としての手がかりが乏しい／Terra: 広い中心領域で、具体的な部分の形を特定しにくい。）",
+          "agreementStatus": "合意",
+          "discussion": "第1段階で両者とも見立てなしのため、第2段階の問いは置かず合意の見立てなしとした。"
+        },
+        {
+          "id": "P2",
+          "opusIndependent": {
+            "id": "P2",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "屋根",
+                "owner": "家",
+                "basis": "単独",
+                "confidence": "中",
+                "evidence": "下辺が長く上辺が短い台形で、両端が斜めに張り出して図形の上に載る",
+                "weaknesses": "下の P3 は家の壁としては小さく、右は大きな P1 に続く"
+              },
+              {
+                "rank": 2,
+                "noun": "かさ",
+                "owner": "きのこ",
+                "basis": "全体との関係",
+                "confidence": "低",
+                "evidence": "台形が下の正方形 P3 の上に広がって傘のように載る",
+                "weaknesses": "P3 は台形の中心ではなく左寄りに付く"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "terraIndependent": {
+            "id": "P2",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "屋根",
+                "owner": "建物",
+                "basis": "単独",
+                "confidence": "中",
+                "evidence": "平らな頂辺から左右に斜めに広がる。",
+                "weaknesses": "屋根材などの細部はない。"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "consensusCandidates": [
+            {
+              "rank": 1,
+              "noun": "屋根",
+              "owner": "家・建物",
+              "basis": "単独",
+              "confidence": "中",
+              "evidence": "Opus: 下辺が長く上辺が短い台形で、両端が斜めに張り出して図形の上に載る／Terra: 平らな頂辺から左右に斜めに広がる。",
+              "weaknesses": "Opus: 下の P3 は家の壁としては小さく、右は大きな P1 に続く／Terra: 屋根材などの細部はない。"
+            },
+            {
+              "rank": 2,
+              "noun": "かさ",
+              "owner": "きのこ",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "Opus: 台形が下の正方形 P3 の上に広がって傘のように載る／Terra（第2段階 Q14 で支持）: 平らな上から両側へ広がり下に短い柄状領域がある。",
+              "weaknesses": "Opus: P3 は台形の中心ではなく左寄りに付く"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": "",
+          "agreementStatus": "合意",
+          "discussion": "「屋根」は第1段階で両者が独立に挙げた一致（Opus 中・Terra 中）で採用し、確信度は低い方の中。 Opus の「かさ」（低）は Q14 で Terra が支持（低: 平らな上から両側へ広がり下に短い柄状領域がある。）したため採用し、確信度は低。 片方だけに残った候補はない。"
+        },
+        {
+          "id": "P3",
+          "opusIndependent": {
+            "id": "P3",
+            "candidates": [],
+            "noCandidate": true,
+            "noCandidateReason": "P2 の左寄りの下に垂れる正方形で、形の手がかりが乏しく特定の部分に絞れない"
+          },
+          "terraIndependent": {
+            "id": "P3",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "柱",
+                "owner": "建物",
+                "basis": "全体との関係",
+                "confidence": "低",
+                "evidence": "水平に広がる領域の下に垂直に付く。",
+                "weaknesses": "高さと幅が同じで柱としては短い。"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "consensusCandidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "第2段階の検討で双方の候補がすべて取り下げられ、両者とも見立てなしで一致。Opus は第1段階で見立てなし（P2 の左寄りの下に垂れる正方形で、形の手がかりが乏しく特定の部分に絞れない）",
+          "agreementStatus": "合意",
+          "discussion": "Terra の「柱」（低）は Opus が不支持（高さと幅が同じで柱らしい縦長さがなく、屋根状の P2 の下でも右側は P1 が占めて柱の並びにならない）とし、Q15 で Terra が取り下げた（幅と高さが同じ短い正方形で柱としての縦長さに欠ける。）ため不採用。"
+        }
+      ]
+    },
+    {
+      "item": "item-05",
+      "regions": [
+        {
+          "id": "P1",
+          "opusIndependent": {
+            "id": "P1",
+            "candidates": [],
+            "noCandidate": true,
+            "noCandidateReason": "全体の半分を占める中心の台形で、領域全体として一つの部分に当たらない"
+          },
+          "terraIndependent": {
+            "id": "P1",
+            "candidates": [],
+            "noCandidate": true,
+            "noCandidateReason": "広い中心領域で、具体的な部分の形を特定しにくい。"
+          },
+          "consensusCandidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "両者とも第1段階で見立てなし（Opus: 全体の半分を占める中心の台形で、領域全体として一つの部分に当たらない／Terra: 広い中心領域で、具体的な部分の形を特定しにくい。）",
+          "agreementStatus": "合意",
+          "discussion": "第1段階で両者とも見立てなしのため、第2段階の問いは置かず合意の見立てなしとした。"
+        },
+        {
+          "id": "P2",
+          "opusIndependent": {
+            "id": "P2",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "くちばし",
+                "owner": "鳥",
+                "basis": "両方",
+                "confidence": "中",
+                "evidence": "図形の左端で左へ鋭く尖る三角形が本体の左上から突き出す",
+                "weaknesses": "全体の4分の1と大きく、上にも尖りがある"
+              },
+              {
+                "rank": 2,
+                "noun": "耳",
+                "owner": "",
+                "basis": "単独",
+                "confidence": "低",
+                "evidence": "垂直な右辺の上端が図形の最上端で上へ鋭く尖る",
+                "weaknesses": "左への尖りの方が目立ち、領域が耳にしては大きい"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "terraIndependent": {
+            "id": "P2",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "帆",
+                "owner": "帆船",
+                "basis": "単独",
+                "confidence": "中",
+                "evidence": "水平な底辺と垂直な辺のある三角形である。",
+                "weaknesses": "帆柱や布の曲がりは見えない。"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "consensusCandidates": [
+            {
+              "rank": 1,
+              "noun": "くちばし",
+              "owner": "鳥",
+              "basis": "両方",
+              "confidence": "低",
+              "evidence": "Opus: 図形の左端で左へ鋭く尖る三角形が本体の左上から突き出す／Terra（第2段階 Q16 で支持）: 上左端から左へ鋭く尖った三角形である。",
+              "weaknesses": "Opus: 全体の4分の1と大きく、上にも尖りがある"
+            },
+            {
+              "rank": 2,
+              "noun": "帆",
+              "owner": "帆船",
+              "basis": "単独",
+              "confidence": "低",
+              "evidence": "Terra: 水平な底辺と垂直な辺のある三角形である。／Opus（第2段階で支持）: item-02 P1（合意見込みの帆）と同じ向きの直角三角形で、形だけなら帆に見える。本体の横に付き下に船体がないので低",
+              "weaknesses": "Terra: 帆柱や布の曲がりは見えない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": "",
+          "agreementStatus": "合意",
+          "discussion": "Opus の「くちばし」（中）は Q16 で Terra が支持（低: 上左端から左へ鋭く尖った三角形である。）したため採用し、確信度は低。 Opus の「耳」（低）は Q17 で Terra が不支持（横へ広がる幅が大きく、上へ立つ耳としては短い。）。Opus もこの理由を受け入れて取り下げ、不採用。 Terra の「帆」（第1段階 中）は Opus が第2段階で支持（低: item-02 P1（合意見込みの帆）と同じ向きの直角三角形で、形だけなら帆に見える。本体の横に付き下に船体がないので低）、Q18 で Terra も維持（低: 垂直な一辺と水平な底辺を持つ直角三角形は帆として読める。）したため採用し、確信度は低。 片方だけに残った候補はない。"
+        },
+        {
+          "id": "P3",
+          "opusIndependent": {
+            "id": "P3",
+            "candidates": [],
+            "noCandidate": true,
+            "noCandidateReason": "P1 の右下に段状に付く正方形で、尖りや突出がなく部分に見えにくい"
+          },
+          "terraIndependent": {
+            "id": "P3",
+            "candidates": [],
+            "noCandidate": true,
+            "noCandidateReason": "輪郭と接続だけでは、具体的な部分を十分に絞り込めない。"
+          },
+          "consensusCandidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "両者とも第1段階で見立てなし（Opus: P1 の右下に段状に付く正方形で、尖りや突出がなく部分に見えにくい／Terra: 輪郭と接続だけでは、具体的な部分を十分に絞り込めない。）",
+          "agreementStatus": "合意",
+          "discussion": "第1段階で両者とも見立てなしのため、第2段階の問いは置かず合意の見立てなしとした。"
+        },
+        {
+          "id": "P4",
+          "opusIndependent": {
+            "id": "P4",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "尾",
+                "owner": "",
+                "basis": "両方",
+                "confidence": "中",
+                "evidence": "図形の右下端で斜め下へ細長く伸びる帯で、本体の後端から垂れる",
+                "weaknesses": "先端が垂直に切れていて細くならない"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "terraIndependent": {
+            "id": "P4",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "尾羽",
+                "owner": "鳥",
+                "basis": "両方",
+                "confidence": "低",
+                "evidence": "右下端に細長く斜めに伸びる。",
+                "weaknesses": "先が平らで羽毛の細部はない。"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "consensusCandidates": [
+            {
+              "rank": 1,
+              "noun": "尾",
+              "owner": "鳥",
+              "basis": "両方",
+              "confidence": "低",
+              "evidence": "Opus（尾）: 図形の右下端で斜め下へ細長く伸びる帯で、本体の後端から垂れる／Terra（尾羽）: 右下端に細長く斜めに伸びる。",
+              "weaknesses": "Opus: 先端が垂直に切れていて細くならない／Terra: 先が平らで羽毛の細部はない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": "",
+          "agreementStatus": "合意",
+          "discussion": "Opus「尾」（中）と Terra「尾羽」（低）を同じ見立てとして照合し、Q19 で Terra が合意名詞「尾」に同意（右下端へ伸びる細長い形は尾と呼べ、尾羽は限定的な読みである。）したため「尾」で採用。確信度は Terra の回答どおり低。 片方だけに残った候補はない。"
+        }
+      ]
+    },
+    {
+      "item": "item-06",
+      "regions": [
+        {
+          "id": "P1",
+          "opusIndependent": {
+            "id": "P1",
+            "candidates": [],
+            "noCandidate": true,
+            "noCandidateReason": "全体の半分を占める中心の三角形で、領域全体として一つの部分に当たらない"
+          },
+          "terraIndependent": {
+            "id": "P1",
+            "candidates": [],
+            "noCandidate": true,
+            "noCandidateReason": "広い中心領域で、具体的な部分の形を特定しにくい。"
+          },
+          "consensusCandidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "両者とも第1段階で見立てなし（Opus: 全体の半分を占める中心の三角形で、領域全体として一つの部分に当たらない／Terra: 広い中心領域で、具体的な部分の形を特定しにくい。）",
+          "agreementStatus": "合意",
+          "discussion": "第1段階で両者とも見立てなしのため、第2段階の問いは置かず合意の見立てなしとした。"
+        },
+        {
+          "id": "P2",
+          "opusIndependent": {
+            "id": "P2",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "脚",
+                "owner": "",
+                "basis": "全体との関係",
+                "confidence": "低",
+                "evidence": "P1 の左下の角と並んで下端にもう一つの尖りを作り、W 字の底の片側になる",
+                "weaknesses": "横向きの三角形で、脚にしては太く短い"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "terraIndependent": {
+            "id": "P2",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "脚",
+                "owner": "動物",
+                "basis": "全体との関係",
+                "confidence": "低",
+                "evidence": "中央の右下から下へ尖って伸びる。",
+                "weaknesses": "足先や関節が分かれない。"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "consensusCandidates": [
+            {
+              "rank": 1,
+              "noun": "脚",
+              "owner": "動物",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "Opus: P1 の左下の角と並んで下端にもう一つの尖りを作り、W 字の底の片側になる／Terra: 中央の右下から下へ尖って伸びる。",
+              "weaknesses": "Opus: 横向きの三角形で、脚にしては太く短い／Terra: 足先や関節が分かれない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": "",
+          "agreementStatus": "合意",
+          "discussion": "「脚」は第1段階で両者が独立に挙げた一致（Opus 低・Terra 低）で採用し、確信度は低い方の低。 片方だけに残った候補はない。"
+        },
+        {
+          "id": "P3",
+          "opusIndependent": {
+            "id": "P3",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "くちばし",
+                "owner": "鳥",
+                "basis": "単独",
+                "confidence": "低",
+                "evidence": "上辺が水平で右端が鋭く尖る三角形が、本体の右上から右へ張り出す",
+                "weaknesses": "くちばしにしては大きく、下向きの頂点もある"
+              },
+              {
+                "rank": 2,
+                "noun": "頭",
+                "owner": "",
+                "basis": "全体との関係",
+                "confidence": "低",
+                "evidence": "本体の右上端に付いて右へ突き出し、図形の前端に見える",
+                "weaknesses": "三角形で頭らしい丸みがない"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "terraIndependent": {
+            "id": "P3",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "翼",
+                "owner": "鳥",
+                "basis": "両方",
+                "confidence": "低",
+                "evidence": "右上側に広がり下へ尖る三角形である。",
+                "weaknesses": "羽毛や湾曲は見えない。"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "consensusCandidates": [
+            {
+              "rank": 1,
+              "noun": "くちばし",
+              "owner": "鳥",
+              "basis": "単独",
+              "confidence": "低",
+              "evidence": "Opus: 上辺が水平で右端が鋭く尖る三角形が、本体の右上から右へ張り出す／Terra（第2段階 Q20 で支持）: 上右側で右へ鋭い先が突き出している。",
+              "weaknesses": "Opus: くちばしにしては大きく、下向きの頂点もある"
+            },
+            {
+              "rank": 2,
+              "noun": "翼",
+              "owner": "鳥",
+              "basis": "両方",
+              "confidence": "低",
+              "evidence": "Terra: 右上側に広がり下へ尖る三角形である。／Opus（第2段階で支持）: 水平な上辺が本体の外へ張り出し、先が尖る形は翼としても読める",
+              "weaknesses": "Terra: 羽毛や湾曲は見えない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": "",
+          "agreementStatus": "合意",
+          "discussion": "Opus の「くちばし」（低）は Q20 で Terra が支持（低: 上右側で右へ鋭い先が突き出している。）したため採用し、確信度は低。 Opus の「頭」（低）は Q21 で Terra が不支持（細く尖った三角形だけでは頭部のまとまりが弱い。）。Opus もこの理由を受け入れて取り下げ、不採用。 Terra の「翼」（第1段階 低）は Opus が第2段階で支持（低: 水平な上辺が本体の外へ張り出し、先が尖る形は翼としても読める）、Q22 で Terra も維持（低: 上部側面から右へ広がる三角形として読める。）したため採用し、確信度は低。 片方だけに残った候補はない。"
+        },
+        {
+          "id": "P4",
+          "opusIndependent": {
+            "id": "P4",
+            "candidates": [],
+            "noCandidate": true,
+            "noCandidateReason": "P5 と P1 をつなぐ正方形で、単独でも位置からも特定の部分に見えにくい"
+          },
+          "terraIndependent": {
+            "id": "P4",
+            "candidates": [],
+            "noCandidate": true,
+            "noCandidateReason": "輪郭と接続だけでは、具体的な部分を十分に絞り込めない。"
+          },
+          "consensusCandidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "両者とも第1段階で見立てなし（Opus: P5 と P1 をつなぐ正方形で、単独でも位置からも特定の部分に見えにくい／Terra: 輪郭と接続だけでは、具体的な部分を十分に絞り込めない。）",
+          "agreementStatus": "合意",
+          "discussion": "第1段階で両者とも見立てなしのため、第2段階の問いは置かず合意の見立てなしとした。"
+        },
+        {
+          "id": "P5",
+          "opusIndependent": {
+            "id": "P5",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "尾",
+                "owner": "",
+                "basis": "両方",
+                "confidence": "中",
+                "evidence": "左上端へ斜めに跳ね上がる細長い帯で、本体の後方から立ち上がる",
+                "weaknesses": "先端が水平に切れて細くならない"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "terraIndependent": {
+            "id": "P5",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "尾羽",
+                "owner": "鳥",
+                "basis": "両方",
+                "confidence": "低",
+                "evidence": "左上へ斜めに細長く伸びる。",
+                "weaknesses": "両端が平らで羽毛は見えない。"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "consensusCandidates": [
+            {
+              "rank": 1,
+              "noun": "尾",
+              "owner": "鳥",
+              "basis": "両方",
+              "confidence": "低",
+              "evidence": "Opus（尾）: 左上端へ斜めに跳ね上がる細長い帯で、本体の後方から立ち上がる／Terra（尾羽）: 左上へ斜めに細長く伸びる。",
+              "weaknesses": "Opus: 先端が水平に切れて細くならない／Terra: 両端が平らで羽毛は見えない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": "",
+          "agreementStatus": "合意",
+          "discussion": "Opus「尾」（中）と Terra「尾羽」（低）を同じ見立てとして照合し、Q23 で Terra が合意名詞「尾」に同意（左上端の細長い突出を尾と呼ぶことに同意し、尾羽は限定的な読みとする。）したため「尾」で採用。確信度は Terra の回答どおり低。 片方だけに残った候補はない。"
+        }
+      ]
+    },
+    {
+      "item": "item-07",
+      "regions": [
+        {
+          "id": "P1",
+          "opusIndependent": {
+            "id": "P1",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "砲身",
+                "owner": "大砲",
+                "basis": "単独",
+                "confidence": "低",
+                "evidence": "右上へ斜めに長く伸びる太い帯で、先端が帯の向きに直角に切れている",
+                "weaknesses": "全体の6割を占めて太く、下端が水平に切れて筒らしさが弱い"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "terraIndependent": {
+            "id": "P1",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "刃",
+                "owner": "刃物",
+                "basis": "単独",
+                "confidence": "低",
+                "evidence": "斜めに長く伸びて一端が尖る。",
+                "weaknesses": "刃の縁や柄は示されない。"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "consensusCandidates": [
+            {
+              "rank": 1,
+              "noun": "刃",
+              "owner": "刃物",
+              "basis": "単独",
+              "confidence": "低",
+              "evidence": "Terra: 斜めに長く伸びて一端が尖る。／Opus（第2段階で支持）: 長い帯の左下端が鋭く尖り、反対の端が直角に切れる形は刃物の刃としても読める",
+              "weaknesses": "Terra: 刃の縁や柄は示されない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": "",
+          "agreementStatus": "合意",
+          "discussion": "Opus の「砲身」（低）は Q24 で Terra が不支持（一端が鋭く尖り、砲口のある筒の形は見えない。）。Opus もこの理由を受け入れて取り下げ、不採用。 Terra の「刃」（第1段階 低）は Opus が第2段階で支持（低: 長い帯の左下端が鋭く尖り、反対の端が直角に切れる形は刃物の刃としても読める）、Q25 で Terra も維持（低: 斜めの長い領域が左下へ鋭く尖っている。）したため採用し、確信度は低。 片方だけに残った候補はない。"
+        },
+        {
+          "id": "P2",
+          "opusIndependent": {
+            "id": "P2",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "脚",
+                "owner": "",
+                "basis": "全体との関係",
+                "confidence": "低",
+                "evidence": "P1 の下で P4 と逆 V 字に開き、下端の床に届く",
+                "weaknesses": "三角形で、脚にしては短く太い"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "terraIndependent": {
+            "id": "P2",
+            "candidates": [],
+            "noCandidate": true,
+            "noCandidateReason": "輪郭と接続だけでは、具体的な部分を十分に絞り込めない。"
+          },
+          "consensusCandidates": [
+            {
+              "rank": 1,
+              "noun": "脚",
+              "owner": "",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "Opus: P1 の下で P4 と逆 V 字に開き、下端の床に届く／Terra（第2段階 Q26 で支持）: 中央の下から右下の四角い末端へつながる。",
+              "weaknesses": "Opus: 三角形で、脚にしては短く太い"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": "",
+          "agreementStatus": "合意",
+          "discussion": "Opus の「脚」（低）は Q26 で Terra が支持（低: 中央の下から右下の四角い末端へつながる。）したため採用し、確信度は低。 片方だけに残った候補はない。"
+        },
+        {
+          "id": "P3",
+          "opusIndependent": {
+            "id": "P3",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "足",
+                "owner": "",
+                "basis": "全体との関係",
+                "confidence": "低",
+                "evidence": "右下の床面で P2 の下端から右へ張り出し、足先のように見える",
+                "weaknesses": "正方形で尖りがなく、足らしさは位置だけによる"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "terraIndependent": {
+            "id": "P3",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "足",
+                "owner": "動物",
+                "basis": "全体との関係",
+                "confidence": "低",
+                "evidence": "右下端に位置する四角い領域である。",
+                "weaknesses": "足首やつま先は区別できない。"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "consensusCandidates": [
+            {
+              "rank": 1,
+              "noun": "足",
+              "owner": "動物",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "Opus: 右下の床面で P2 の下端から右へ張り出し、足先のように見える／Terra: 右下端に位置する四角い領域である。",
+              "weaknesses": "Opus: 正方形で尖りがなく、足らしさは位置だけによる／Terra: 足首やつま先は区別できない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": "",
+          "agreementStatus": "合意",
+          "discussion": "「足」は第1段階で両者が独立に挙げた一致（Opus 低・Terra 低）で採用し、確信度は低い方の低。 片方だけに残った候補はない。"
+        },
+        {
+          "id": "P4",
+          "opusIndependent": {
+            "id": "P4",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "脚",
+                "owner": "",
+                "basis": "全体との関係",
+                "confidence": "低",
+                "evidence": "P1 の下端から左下へ斜めに伸びて床に届き、P2 と逆 V 字をつくる",
+                "weaknesses": "先端が水平に切れており、細長さが弱い"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "terraIndependent": {
+            "id": "P4",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "脚",
+                "owner": "動物",
+                "basis": "全体との関係",
+                "confidence": "低",
+                "evidence": "中央から左下へ斜めに細長く伸びる。",
+                "weaknesses": "関節や足先が見えない。"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "consensusCandidates": [
+            {
+              "rank": 1,
+              "noun": "脚",
+              "owner": "動物",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "Opus: P1 の下端から左下へ斜めに伸びて床に届き、P2 と逆 V 字をつくる／Terra: 中央から左下へ斜めに細長く伸びる。",
+              "weaknesses": "Opus: 先端が水平に切れており、細長さが弱い／Terra: 関節や足先が見えない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": "",
+          "agreementStatus": "合意",
+          "discussion": "「脚」は第1段階で両者が独立に挙げた一致（Opus 低・Terra 低）で採用し、確信度は低い方の低。 片方だけに残った候補はない。"
+        }
+      ]
+    },
+    {
+      "item": "item-08",
+      "regions": [
+        {
+          "id": "P1",
+          "opusIndependent": {
+            "id": "P1",
+            "candidates": [],
+            "noCandidate": true,
+            "noCandidateReason": "全体の8割を占める縦長の家形の本体で、一つの部分に当たらない"
+          },
+          "terraIndependent": {
+            "id": "P1",
+            "candidates": [],
+            "noCandidate": true,
+            "noCandidateReason": "広い中心領域で、具体的な部分の形を特定しにくい。"
+          },
+          "consensusCandidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "両者とも第1段階で見立てなし（Opus: 全体の8割を占める縦長の家形の本体で、一つの部分に当たらない／Terra: 広い中心領域で、具体的な部分の形を特定しにくい。）",
+          "agreementStatus": "合意",
+          "discussion": "第1段階で両者とも見立てなしのため、第2段階の問いは置かず合意の見立てなしとした。"
+        },
+        {
+          "id": "P2",
+          "opusIndependent": {
+            "id": "P2",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "くちばし",
+                "owner": "鳥",
+                "basis": "両方",
+                "confidence": "中",
+                "evidence": "本体の右側面から水平に突き出し、先端の上側が鋭く尖る",
+                "weaknesses": "下辺は短く平らで、尖りが上側だけ"
+              },
+              {
+                "rank": 2,
+                "noun": "ひさし",
+                "owner": "建物",
+                "basis": "単独",
+                "confidence": "低",
+                "evidence": "垂直な壁面から水平に張り出す板状の形",
+                "weaknesses": "壁の中ほどより下に付き、ひさしとしては厚い"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "terraIndependent": {
+            "id": "P2",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "翼",
+                "owner": "鳥",
+                "basis": "両方",
+                "confidence": "低",
+                "evidence": "右側へ張り出し先へ斜めに細くなる。",
+                "weaknesses": "先が平らで羽毛は見えない。"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "consensusCandidates": [
+            {
+              "rank": 1,
+              "noun": "くちばし",
+              "owner": "鳥",
+              "basis": "両方",
+              "confidence": "低",
+              "evidence": "Opus: 本体の右側面から水平に突き出し、先端の上側が鋭く尖る／Terra（第2段階 Q27 で支持）: 右側に横へ突出し、右端が鋭く細まる。",
+              "weaknesses": "Opus: 下辺は短く平らで、尖りが上側だけ"
+            },
+            {
+              "rank": 2,
+              "noun": "翼",
+              "owner": "鳥",
+              "basis": "両方",
+              "confidence": "低",
+              "evidence": "Terra: 右側へ張り出し先へ斜めに細くなる。／Opus（第2段階で支持）: 縦長の本体の側面から水平に張り出して先へ細くなる形は翼としても読める",
+              "weaknesses": "Terra: 先が平らで羽毛は見えない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": "",
+          "agreementStatus": "合意",
+          "discussion": "Opus の「くちばし」（中）は Q27 で Terra が支持（低: 右側に横へ突出し、右端が鋭く細まる。）したため採用し、確信度は低。 Opus の「ひさし」（低）は Q28 で Terra が不支持（水平な突出はあるが、厚みが大きく建物上部の軒という位置も明確でない。）。Opus もこの理由を受け入れて取り下げ、不採用。 Terra の「翼」（第1段階 低）は Opus が第2段階で支持（低: 縦長の本体の側面から水平に張り出して先へ細くなる形は翼としても読める）、Q29 で Terra も維持（低: 縦長の領域の側面から右へ広がり先が細まる。）したため採用し、確信度は低。 片方だけに残った候補はない。"
+        }
+      ]
+    },
+    {
+      "item": "item-09",
+      "regions": [
+        {
+          "id": "P1",
+          "opusIndependent": {
+            "id": "P1",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "船体",
+                "owner": "船",
+                "basis": "単独",
+                "confidence": "低",
+                "evidence": "上辺が長く下辺が短い逆台形で、船の胴のように左右へ張り出す",
+                "weaknesses": "下辺の中央から P3 が垂れ、船底としては形が乱れる"
+              },
+              {
+                "rank": 2,
+                "noun": "翼",
+                "owner": "鳥",
+                "basis": "単独",
+                "confidence": "低",
+                "evidence": "図形の最上部で左右いっぱいに広がり、両端が鋭く尖る",
+                "weaknesses": "左右が一続きの一枚で、翼の切れ目や胴の区別がない"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "terraIndependent": {
+            "id": "P1",
+            "candidates": [],
+            "noCandidate": true,
+            "noCandidateReason": "広い中心領域で、具体的な部分の形を特定しにくい。"
+          },
+          "consensusCandidates": [
+            {
+              "rank": 1,
+              "noun": "船体",
+              "owner": "船",
+              "basis": "単独",
+              "confidence": "低",
+              "evidence": "Opus: 上辺が長く下辺が短い逆台形で、船の胴のように左右へ張り出す／Terra（第2段階 Q30 で支持）: 下辺は一点ではなく短い水平辺であり、item-14 P1 と同様に船体として読める。",
+              "weaknesses": "Opus: 下辺の中央から P3 が垂れ、船底としては形が乱れる"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": "",
+          "agreementStatus": "合意",
+          "discussion": "Opus の「船体」（低）は Q30 で Terra が支持（低: 下辺は一点ではなく短い水平辺であり、item-14 P1 と同様に船体として読める。）（当初は不支持: 下端が一点の深い三角形で、船体の底に相当する幅がない。F1 で Opus が形の事実を示し、Terra が根拠を訂正して支持に変更）したため採用し、確信度は低。 Opus の「翼」（低）は Q31 で Terra が不支持（中央の大部分を占め、左右に広がる翼の付け根が定まらない。）。Opus もこの理由を受け入れて取り下げ、不採用。 片方だけに残った候補はない。"
+        },
+        {
+          "id": "P2",
+          "opusIndependent": {
+            "id": "P2",
+            "candidates": [],
+            "noCandidate": true,
+            "noCandidateReason": "P1 の右下に付く三角形で、尖りが内側を向き外への突出が弱い"
+          },
+          "terraIndependent": {
+            "id": "P2",
+            "candidates": [],
+            "noCandidate": true,
+            "noCandidateReason": "輪郭と接続だけでは、具体的な部分を十分に絞り込めない。"
+          },
+          "consensusCandidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "両者とも第1段階で見立てなし（Opus: P1 の右下に付く三角形で、尖りが内側を向き外への突出が弱い／Terra: 輪郭と接続だけでは、具体的な部分を十分に絞り込めない。）",
+          "agreementStatus": "合意",
+          "discussion": "第1段階で両者とも見立てなしのため、第2段階の問いは置かず合意の見立てなしとした。"
+        },
+        {
+          "id": "P3",
+          "opusIndependent": {
+            "id": "P3",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "柄",
+                "owner": "",
+                "basis": "全体との関係",
+                "confidence": "低",
+                "evidence": "広い P1 の細くなった下端から真下へ伸びる正方形で、支えの軸のように見える",
+                "weaknesses": "正方形で短く、柄にしては細長さがない"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "terraIndependent": {
+            "id": "P3",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "足",
+                "owner": "動物",
+                "basis": "全体との関係",
+                "confidence": "低",
+                "evidence": "中央の領域の下に四角く垂れる。",
+                "weaknesses": "足首や指は区別できない。"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "consensusCandidates": [
+            {
+              "rank": 1,
+              "noun": "足",
+              "owner": "動物",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "Terra: 中央の領域の下に四角く垂れる。／Opus（第2段階で支持）: 広い上部の下の中央に一つ垂れる四角で、足としても読める",
+              "weaknesses": "Terra: 足首や指は区別できない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": "",
+          "agreementStatus": "合意",
+          "discussion": "Opus の「柄」は Q32 で Terra がいったん支持（大きく広がる上部領域の中央下に短い四角として付く。）したが、Opus が根拠の弱い具体名として取り下げを提案し（正方形で柄の細長さがなく、何の柄かも定まらない）、F3 で Terra も支持を撤回（正方形には柄の細長さがなく、形だけでは柄と定めにくい。）したため不採用。 Terra の「足」（第1段階 低）は Opus が第2段階で支持（低: 広い上部の下の中央に一つ垂れる四角で、足としても読める）、Q33 で Terra も維持（低: 大きな上部の下端から四角く垂れ下がる。）したため採用し、確信度は低。 片方だけに残った候補はない。"
+        }
+      ]
+    },
+    {
+      "item": "item-10",
+      "regions": [
+        {
+          "id": "P1",
+          "opusIndependent": {
+            "id": "P1",
+            "candidates": [],
+            "noCandidate": true,
+            "noCandidateReason": "全体の半分を占める底辺の広い三角形で、特定の部分に見えにくい"
+          },
+          "terraIndependent": {
+            "id": "P1",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "スカート",
+                "owner": "人",
+                "basis": "単独",
+                "confidence": "中",
+                "evidence": "上の一点から左右の裾へ三角形に広がる。",
+                "weaknesses": "布のひだや腰回りは見えない。"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "consensusCandidates": [
+            {
+              "rank": 1,
+              "noun": "スカート",
+              "owner": "人",
+              "basis": "単独",
+              "confidence": "低",
+              "evidence": "Terra: 上の一点から左右の裾へ三角形に広がる。／Opus（第2段階で支持）: 頂から裾へ広がる三角形はドレスのスカート部分として読める。頂の上に載る領域が中央に揃わないので低",
+              "weaknesses": "Terra: 布のひだや腰回りは見えない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": "",
+          "agreementStatus": "合意",
+          "discussion": "Terra の「スカート」（第1段階 中）は Opus が第2段階で支持（低: 頂から裾へ広がる三角形はドレスのスカート部分として読める。頂の上に載る領域が中央に揃わないので低）、Q34 で Terra も維持（低: 上端の一点から水平な裾へ左右に広がる。）したため採用し、確信度は低。 片方だけに残った候補はない。"
+        },
+        {
+          "id": "P2",
+          "opusIndependent": {
+            "id": "P2",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "耳",
+                "owner": "",
+                "basis": "両方",
+                "confidence": "低",
+                "evidence": "垂直な右辺の上端が上へ鋭く尖り、図形の最上端になる",
+                "weaknesses": "全体の4割近くを占め、耳にしては大きすぎる"
+              },
+              {
+                "rank": 2,
+                "noun": "頭",
+                "owner": "",
+                "basis": "全体との関係",
+                "confidence": "低",
+                "evidence": "下の大きな三角形の上に載り、右に P3 が付く",
+                "weaknesses": "上と左に尖りがあり、頭らしい丸みがない"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "terraIndependent": {
+            "id": "P2",
+            "candidates": [],
+            "noCandidate": true,
+            "noCandidateReason": "輪郭と接続だけでは、具体的な部分を十分に絞り込めない。"
+          },
+          "consensusCandidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "第2段階の検討で双方の候補がすべて取り下げられ、両者とも見立てなしで一致。Terra は第1段階で見立てなし（輪郭と接続だけでは、具体的な部分を十分に絞り込めない。）",
+          "agreementStatus": "合意",
+          "discussion": "Opus の「耳」（低）は Q35 で Terra が不支持（太い多角形で、頭から立ち上がる細い耳とは見えにくい。）。Opus もこの理由を受け入れて取り下げ、不採用。 Opus の「頭」（低）は Q36 で Terra が不支持（上部の広い斜めの領域で、独立した頭の輪郭を特定しにくい。）。Opus もこの理由を受け入れて取り下げ、不採用。"
+        },
+        {
+          "id": "P3",
+          "opusIndependent": {
+            "id": "P3",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "鼻",
+                "owner": "",
+                "basis": "全体との関係",
+                "confidence": "低",
+                "evidence": "上端の尖りの下で、垂直な辺から右へ四角く突き出す",
+                "weaknesses": "正方形で先が尖らず、顔の向きは位置からの推測による"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "terraIndependent": {
+            "id": "P3",
+            "candidates": [],
+            "noCandidate": true,
+            "noCandidateReason": "輪郭と接続だけでは、具体的な部分を十分に絞り込めない。"
+          },
+          "consensusCandidates": [
+            {
+              "rank": 1,
+              "noun": "鼻",
+              "owner": "",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "Opus: 上端の尖りの下で、垂直な辺から右へ四角く突き出す／Terra（第2段階 Q37 で支持）: 上方の領域の右側から四角く突出している。",
+              "weaknesses": "Opus: 正方形で先が尖らず、顔の向きは位置からの推測による"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": "",
+          "agreementStatus": "合意",
+          "discussion": "Opus の「鼻」（低）は Q37 で Terra が支持（低: 上方の領域の右側から四角く突出している。）したため採用し、確信度は低。 片方だけに残った候補はない。"
+        }
+      ]
+    },
+    {
+      "item": "item-11",
+      "regions": [
+        {
+          "id": "P1",
+          "opusIndependent": {
+            "id": "P1",
+            "candidates": [],
+            "noCandidate": true,
+            "noCandidateReason": "全体の6割を占める右向きの家形五角形の本体で、領域全体として一つの部分に当たらない"
+          },
+          "terraIndependent": {
+            "id": "P1",
+            "candidates": [],
+            "noCandidate": true,
+            "noCandidateReason": "広い中心領域で、具体的な部分の形を特定しにくい。"
+          },
+          "consensusCandidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "両者とも第1段階で見立てなし（Opus: 全体の6割を占める右向きの家形五角形の本体で、領域全体として一つの部分に当たらない／Terra: 広い中心領域で、具体的な部分の形を特定しにくい。）",
+          "agreementStatus": "合意",
+          "discussion": "第1段階で両者とも見立てなしのため、第2段階の問いは置かず合意の見立てなしとした。"
+        },
+        {
+          "id": "P2",
+          "opusIndependent": {
+            "id": "P2",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "足",
+                "owner": "",
+                "basis": "全体との関係",
+                "confidence": "低",
+                "evidence": "本体の右寄りの下に垂れる正方形で、床に接する脚のように見える",
+                "weaknesses": "正方形で短く、一本だけ"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "terraIndependent": {
+            "id": "P2",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "足",
+                "owner": "動物",
+                "basis": "全体との関係",
+                "confidence": "低",
+                "evidence": "中央領域の下端から四角く垂れる。",
+                "weaknesses": "指や足首は見えない。"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "consensusCandidates": [
+            {
+              "rank": 1,
+              "noun": "足",
+              "owner": "動物",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "Opus: 本体の右寄りの下に垂れる正方形で、床に接する脚のように見える／Terra: 中央領域の下端から四角く垂れる。",
+              "weaknesses": "Opus: 正方形で短く、一本だけ／Terra: 指や足首は見えない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": "",
+          "agreementStatus": "合意",
+          "discussion": "「足」は第1段階で両者が独立に挙げた一致（Opus 低・Terra 低）で採用し、確信度は低い方の低。 片方だけに残った候補はない。"
+        },
+        {
+          "id": "P3",
+          "opusIndependent": {
+            "id": "P3",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "頭",
+                "owner": "ウサギ",
+                "basis": "全体との関係",
+                "confidence": "低",
+                "evidence": "本体の左上に付く正方形で、上に耳のような P4 が立つ",
+                "weaknesses": "正方形で頭らしい丸みがない"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "terraIndependent": {
+            "id": "P3",
+            "candidates": [],
+            "noCandidate": true,
+            "noCandidateReason": "輪郭と接続だけでは、具体的な部分を十分に絞り込めない。"
+          },
+          "consensusCandidates": [
+            {
+              "rank": 1,
+              "noun": "頭",
+              "owner": "ウサギ",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "Opus: 本体の左上に付く正方形で、上に耳のような P4 が立つ／Terra（第2段階 Q38 で支持）: 左端にまとまって付き、その上から細長い領域が伸びる。",
+              "weaknesses": "Opus: 正方形で頭らしい丸みがない"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": "",
+          "agreementStatus": "合意",
+          "discussion": "Opus の「頭」（低）は Q38 で Terra が支持（低: 左端にまとまって付き、その上から細長い領域が伸びる。）したため採用し、確信度は低。 片方だけに残った候補はない。"
+        },
+        {
+          "id": "P4",
+          "opusIndependent": {
+            "id": "P4",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "耳",
+                "owner": "ウサギ",
+                "basis": "両方",
+                "confidence": "中",
+                "evidence": "小さな正方形 P3 の上から右上へ斜めに長く立ち上がる細い帯",
+                "weaknesses": "先端が水平に切れて尖らない"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "terraIndependent": {
+            "id": "P4",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "耳",
+                "owner": "ウサギ",
+                "basis": "全体との関係",
+                "confidence": "低",
+                "evidence": "上端から斜め右上へ細長く伸びる。",
+                "weaknesses": "先端は尖らず平らである。"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "consensusCandidates": [
+            {
+              "rank": 1,
+              "noun": "耳",
+              "owner": "ウサギ",
+              "basis": "両方",
+              "confidence": "低",
+              "evidence": "Opus: 小さな正方形 P3 の上から右上へ斜めに長く立ち上がる細い帯／Terra: 上端から斜め右上へ細長く伸びる。",
+              "weaknesses": "Opus: 先端が水平に切れて尖らない／Terra: 先端は尖らず平らである。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": "",
+          "agreementStatus": "合意",
+          "discussion": "「耳」は第1段階で両者が独立に挙げた一致（Opus 中・Terra 低）で採用し、確信度は低い方の低。 片方だけに残った候補はない。"
+        }
+      ]
+    },
+    {
+      "item": "item-12",
+      "regions": [
+        {
+          "id": "P1",
+          "opusIndependent": {
+            "id": "P1",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "刃",
+                "owner": "斧",
+                "basis": "全体との関係",
+                "confidence": "低",
+                "evidence": "柄のような P2 の反対側に大きく広がり、右端が尖る",
+                "weaknesses": "全体の8割を占め、上辺と左辺がまっすぐで刃らしい縁は右側だけ"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "terraIndependent": {
+            "id": "P1",
+            "candidates": [],
+            "noCandidate": true,
+            "noCandidateReason": "広い中心領域で、具体的な部分の形を特定しにくい。"
+          },
+          "consensusCandidates": [
+            {
+              "rank": 1,
+              "noun": "刃",
+              "owner": "斧",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "Opus: 柄のような P2 の反対側に大きく広がり、右端が尖る／Terra（第2段階 Q39 で支持）: 細い柄状領域の先に広い尖った形で接している。",
+              "weaknesses": "Opus: 全体の8割を占め、上辺と左辺がまっすぐで刃らしい縁は右側だけ"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": "",
+          "agreementStatus": "合意",
+          "discussion": "Opus の「刃」（低）は Q39 で Terra が支持（低: 細い柄状領域の先に広い尖った形で接している。）したため採用し、確信度は低。 片方だけに残った候補はない。"
+        },
+        {
+          "id": "P2",
+          "opusIndependent": {
+            "id": "P2",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "柄",
+                "owner": "斧",
+                "basis": "両方",
+                "confidence": "中",
+                "evidence": "大きな P1 の左下から斜め左下へ細く伸びる帯で、握りのように見える",
+                "weaknesses": "先端が水平に切れ、P1 の左辺の下端だけに付く"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "terraIndependent": {
+            "id": "P2",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "柄",
+                "owner": "道具",
+                "basis": "両方",
+                "confidence": "中",
+                "evidence": "大きな領域の左下に付き細長く斜めに伸びる。",
+                "weaknesses": "握りの丸みや細部はない。"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "consensusCandidates": [
+            {
+              "rank": 1,
+              "noun": "柄",
+              "owner": "斧・道具",
+              "basis": "両方",
+              "confidence": "中",
+              "evidence": "Opus: 大きな P1 の左下から斜め左下へ細く伸びる帯で、握りのように見える／Terra: 大きな領域の左下に付き細長く斜めに伸びる。",
+              "weaknesses": "Opus: 先端が水平に切れ、P1 の左辺の下端だけに付く／Terra: 握りの丸みや細部はない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": "",
+          "agreementStatus": "合意",
+          "discussion": "「柄」は第1段階で両者が独立に挙げた一致（Opus 中・Terra 中）で採用し、確信度は低い方の中。 片方だけに残った候補はない。"
+        }
+      ]
+    },
+    {
+      "item": "item-13",
+      "regions": [
+        {
+          "id": "P1",
+          "opusIndependent": {
+            "id": "P1",
+            "candidates": [],
+            "noCandidate": true,
+            "noCandidateReason": "全体の半分を占める中心の三角形で、領域全体として一つの部分に当たらない"
+          },
+          "terraIndependent": {
+            "id": "P1",
+            "candidates": [],
+            "noCandidate": true,
+            "noCandidateReason": "広い中心領域で、具体的な部分の形を特定しにくい。"
+          },
+          "consensusCandidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "両者とも第1段階で見立てなし（Opus: 全体の半分を占める中心の三角形で、領域全体として一つの部分に当たらない／Terra: 広い中心領域で、具体的な部分の形を特定しにくい。）",
+          "agreementStatus": "合意",
+          "discussion": "第1段階で両者とも見立てなしのため、第2段階の問いは置かず合意の見立てなしとした。"
+        },
+        {
+          "id": "P2",
+          "opusIndependent": {
+            "id": "P2",
+            "candidates": [],
+            "noCandidate": true,
+            "noCandidateReason": "本体の右側面に付く台形で、上の P3 との間に切れ込みはあるが単独では特定の部分に見えにくい"
+          },
+          "terraIndependent": {
+            "id": "P2",
+            "candidates": [],
+            "noCandidate": true,
+            "noCandidateReason": "輪郭と接続だけでは、具体的な部分を十分に絞り込めない。"
+          },
+          "consensusCandidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "両者とも第1段階で見立てなし（Opus: 本体の右側面に付く台形で、上の P3 との間に切れ込みはあるが単独では特定の部分に見えにくい／Terra: 輪郭と接続だけでは、具体的な部分を十分に絞り込めない。）",
+          "agreementStatus": "合意",
+          "discussion": "第1段階で両者とも見立てなしのため、第2段階の問いは置かず合意の見立てなしとした。"
+        },
+        {
+          "id": "P3",
+          "opusIndependent": {
+            "id": "P3",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "尾",
+                "owner": "鳥",
+                "basis": "両方",
+                "confidence": "中",
+                "evidence": "本体の背の斜線の延長で右上へ細長く立ち上がる帯で、図形の最上端になる",
+                "weaknesses": "先端が垂直に切れて細くならない"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "terraIndependent": {
+            "id": "P3",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "刃",
+                "owner": "刃物",
+                "basis": "両方",
+                "confidence": "低",
+                "evidence": "右上へ細長く伸び一端が尖る。",
+                "weaknesses": "刃の縁や柄との明確な区別はない。"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "consensusCandidates": [
+            {
+              "rank": 1,
+              "noun": "尾",
+              "owner": "鳥",
+              "basis": "両方",
+              "confidence": "低",
+              "evidence": "Opus: 本体の背の斜線の延長で右上へ細長く立ち上がる帯で、図形の最上端になる／Terra（第2段階 Q40 で支持）: 大きな中央部の上端から右上へ細長く延びている。",
+              "weaknesses": "Opus: 先端が垂直に切れて細くならない"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": "",
+          "agreementStatus": "合意",
+          "discussion": "Opus の「尾」（中）は Q40 で Terra が支持（低: 大きな中央部の上端から右上へ細長く延びている。）したため採用し、確信度は低。 Terra の「刃」（低）は Opus が不支持（本体の背の斜線をそのまま延ばす帯として付き、刃として独立した形に見えにくい）とし、Q41 で Terra が取り下げた（中央領域の斜辺の延長に重なり、独立した刃の手がかりが乏しい。）ため不採用。 片方だけに残った候補はない。"
+        },
+        {
+          "id": "P4",
+          "opusIndependent": {
+            "id": "P4",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "脚",
+                "owner": "",
+                "basis": "全体との関係",
+                "confidence": "低",
+                "evidence": "下端に尖りをつくり、P1 の下の角と並んで二本の脚のように見える",
+                "weaknesses": "三角形で太く短い"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "terraIndependent": {
+            "id": "P4",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "脚",
+                "owner": "動物",
+                "basis": "全体との関係",
+                "confidence": "低",
+                "evidence": "下側に付き下へ尖って伸びる。",
+                "weaknesses": "関節や足先は見えない。"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "consensusCandidates": [
+            {
+              "rank": 1,
+              "noun": "脚",
+              "owner": "動物",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "Opus: 下端に尖りをつくり、P1 の下の角と並んで二本の脚のように見える／Terra: 下側に付き下へ尖って伸びる。",
+              "weaknesses": "Opus: 三角形で太く短い／Terra: 関節や足先は見えない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": "",
+          "agreementStatus": "合意",
+          "discussion": "「脚」は第1段階で両者が独立に挙げた一致（Opus 低・Terra 低）で採用し、確信度は低い方の低。 片方だけに残った候補はない。"
+        },
+        {
+          "id": "P5",
+          "opusIndependent": {
+            "id": "P5",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "くちばし",
+                "owner": "鳥",
+                "basis": "両方",
+                "confidence": "中",
+                "evidence": "図形の左端で、水平な上辺のまま左へ鋭く尖る小三角形",
+                "weaknesses": "頭らしい領域が別になく、本体に直接付く"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "terraIndependent": {
+            "id": "P5",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "ひれ",
+                "owner": "魚",
+                "basis": "両方",
+                "confidence": "低",
+                "evidence": "左側に付き外へ尖る小三角形である。",
+                "weaknesses": "ひれの曲線や筋はない。"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "consensusCandidates": [
+            {
+              "rank": 1,
+              "noun": "くちばし",
+              "owner": "鳥",
+              "basis": "両方",
+              "confidence": "低",
+              "evidence": "Opus: 図形の左端で、水平な上辺のまま左へ鋭く尖る小三角形／Terra（第2段階 Q42 で支持）: 左端にある小さな三角形が外側へ鋭く尖る。",
+              "weaknesses": "Opus: 頭らしい領域が別になく、本体に直接付く"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": "",
+          "agreementStatus": "合意",
+          "discussion": "Opus の「くちばし」（中）は Q42 で Terra が支持（低: 左端にある小さな三角形が外側へ鋭く尖る。）したため採用し、確信度は低。 Terra の「ひれ」（低）は Opus が不支持（図形の左端の尖りで、ひれなら背・胸・尾のどれか位置から決まらない）とし、Q43 で Terra が取り下げた（左端の小さな突出だけではどのひれかを位置から判断できない。）ため不採用。 片方だけに残った候補はない。"
+        }
+      ]
+    },
+    {
+      "item": "item-14",
+      "regions": [
+        {
+          "id": "P1",
+          "opusIndependent": {
+            "id": "P1",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "船体",
+                "owner": "船",
+                "basis": "単独",
+                "confidence": "中",
+                "evidence": "上辺が長く下辺が短い逆台形で、船の胴のように左右へ張り出し左端が尖る",
+                "weaknesses": "全体の4分の3を占め、下に P2 が垂れる"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "terraIndependent": {
+            "id": "P1",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "船底",
+                "owner": "船",
+                "basis": "単独",
+                "confidence": "中",
+                "evidence": "水平に長い上辺から斜めに狭まり下辺が短い。",
+                "weaknesses": "船首や曲線は明確でない。"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "consensusCandidates": [
+            {
+              "rank": 1,
+              "noun": "船体",
+              "owner": "船",
+              "basis": "単独",
+              "confidence": "低",
+              "evidence": "Opus（船体）: 上辺が長く下辺が短い逆台形で、船の胴のように左右へ張り出し左端が尖る／Terra（船底）: 水平に長い上辺から斜めに狭まり下辺が短い。",
+              "weaknesses": "Opus: 全体の4分の3を占め、下に P2 が垂れる／Terra: 船首や曲線は明確でない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": "",
+          "agreementStatus": "合意",
+          "discussion": "Opus「船体」（中）と Terra「船底」（中）を同じ見立てとして照合し、Q44 で Terra が合意名詞「船体」に同意（水平な上辺から下辺までの広い領域なので船体と呼ぶことに同意する。）したため「船体」で採用。確信度は Terra の回答どおり低。 片方だけに残った候補はない。"
+        },
+        {
+          "id": "P2",
+          "opusIndependent": {
+            "id": "P2",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "舵",
+                "owner": "船",
+                "basis": "全体との関係",
+                "confidence": "低",
+                "evidence": "船体のような P1 の右端の下に垂れる三角形",
+                "weaknesses": "尖りが左を向き、舵にしては船底より下へ大きく出る"
+              },
+              {
+                "rank": 2,
+                "noun": "脚",
+                "owner": "",
+                "basis": "全体との関係",
+                "confidence": "低",
+                "evidence": "本体の右下から下へ垂れ、図形の最下端になる",
+                "weaknesses": "一本だけで、三角形の向きが横向き"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "terraIndependent": {
+            "id": "P2",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "ひれ",
+                "owner": "魚",
+                "basis": "両方",
+                "confidence": "低",
+                "evidence": "右下側から下へ三角形に尖る。",
+                "weaknesses": "ひれの筋や曲線はない。"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "consensusCandidates": [
+            {
+              "rank": 1,
+              "noun": "舵",
+              "owner": "船",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "Opus: 船体のような P1 の右端の下に垂れる三角形／Terra（第2段階 Q45 で支持）: 船体状の領域の右下端から下へ垂れ、舵の位置に付く。",
+              "weaknesses": "Opus: 尖りが左を向き、舵にしては船底より下へ大きく出る"
+            },
+            {
+              "rank": 2,
+              "noun": "脚",
+              "owner": "",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "Opus: 本体の右下から下へ垂れ、図形の最下端になる／Terra（第2段階 Q46 で支持）: 右下の領域から下方へ三角形に垂れている。",
+              "weaknesses": "Opus: 一本だけで、三角形の向きが横向き"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": "",
+          "agreementStatus": "合意",
+          "discussion": "Opus の「舵」（低）は Q45 で Terra が支持（低: 船体状の領域の右下端から下へ垂れ、舵の位置に付く。）したため採用し、確信度は低。 Opus の「脚」（低）は Q46 で Terra が支持（低: 右下の領域から下方へ三角形に垂れている。）したため採用し、確信度は低。 Terra の「ひれ」（低）は Opus が不支持（下へ垂れる三角形で、ひれなら腹・しりのどれに当たるか本体側の手がかりが乏しい）とし、Q47 で Terra が取り下げた（下向きの突出だけでは腹びれなどを特定する手がかりが乏しい。）ため不採用。 片方だけに残った候補はない。"
+        },
+        {
+          "id": "P3",
+          "opusIndependent": {
+            "id": "P3",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "頭",
+                "owner": "カモ",
+                "basis": "全体との関係",
+                "confidence": "低",
+                "evidence": "平らな上辺の右端から上へ四角く突き出し、図形の最上端になる",
+                "weaknesses": "正方形で頭らしい丸みや向きの手がかりがない"
+              },
+              {
+                "rank": 2,
+                "noun": "船室",
+                "owner": "船",
+                "basis": "全体との関係",
+                "confidence": "低",
+                "evidence": "船体のような P1 の甲板の端に載る四角",
+                "weaknesses": "甲板の端に寄りすぎ、小さい"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "terraIndependent": {
+            "id": "P3",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "煙突",
+                "owner": "建物",
+                "basis": "全体との関係",
+                "confidence": "低",
+                "evidence": "右上端で水平な領域から四角く立ち上がる。",
+                "weaknesses": "高さが幅と同じで短い。"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "consensusCandidates": [
+            {
+              "rank": 1,
+              "noun": "煙突",
+              "owner": "建物・船",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "Terra: 右上端で水平な領域から四角く立ち上がる。／Opus（第2段階で支持）: 船体のような P1 の上辺（甲板）に四角く立つ形は船の煙突として読める（owner は船を提案）",
+              "weaknesses": "Terra: 高さが幅と同じで短い。"
+            },
+            {
+              "rank": 2,
+              "noun": "船室",
+              "owner": "船",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "Opus: 船体のような P1 の甲板の端に載る四角／Terra（第2段階 Q49 で支持）: 船体状の領域の上辺に四角く載っている。",
+              "weaknesses": "Opus: 甲板の端に寄りすぎ、小さい"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": "",
+          "agreementStatus": "合意",
+          "discussion": "Opus の「頭」（低）は Q48 で Terra が不支持（上端の正方形だけでは頭と見分ける形の手がかりが乏しい。）。Opus もこの理由を受け入れて取り下げ、不採用。 Opus の「船室」（低）は Q49 で Terra が支持（低: 船体状の領域の上辺に四角く載っている。）したため採用し、確信度は低。 Terra の「煙突」（第1段階 低）は Opus が第2段階で支持（低: 船体のような P1 の上辺（甲板）に四角く立つ形は船の煙突として読める（owner は船を提案））、Q50 で Terra も維持（低: 水平な上辺から短く四角に立ち上がる。）したため採用し、確信度は低。 片方だけに残った候補はない。"
+        }
+      ]
+    },
+    {
+      "item": "item-15",
+      "regions": [
+        {
+          "id": "P1",
+          "opusIndependent": {
+            "id": "P1",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "くちばし",
+                "owner": "鳥",
+                "basis": "両方",
+                "confidence": "低",
+                "evidence": "図形の最上部で右へ尖り、下の P2 の尖りとの間に開いた口のような切れ込みをつくる",
+                "weaknesses": "水平な上辺が広く、くちばしにしては幅がある"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "terraIndependent": {
+            "id": "P1",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "歯",
+                "owner": "のこぎり",
+                "basis": "両方",
+                "confidence": "低",
+                "evidence": "上部の横長の縁から下へ三角形に尖る。",
+                "weaknesses": "単独の歯で連続する歯列はない。"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "consensusCandidates": [
+            {
+              "rank": 1,
+              "noun": "歯",
+              "owner": "のこぎり",
+              "basis": "両方",
+              "confidence": "低",
+              "evidence": "Terra: 上部の横長の縁から下へ三角形に尖る。／Opus（第2段階で支持）: 右辺の尖りの並び（P1 の右角と P2 の右端）がのこぎりの歯の列に見え、P1 はその一つとして読める",
+              "weaknesses": "Terra: 単独の歯で連続する歯列はない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": "",
+          "agreementStatus": "合意",
+          "discussion": "Opus の「くちばし」（低）は Q51 で Terra が不支持（三角形の下向き頂点が他領域に接し、独立したくちばしの先に見えにくい。）。Opus もこの理由を受け入れて取り下げ、不採用。 Terra の「歯」（第1段階 低）は Opus が第2段階で支持（低: 右辺の尖りの並び（P1 の右角と P2 の右端）がのこぎりの歯の列に見え、P1 はその一つとして読める）、Q52 で Terra も維持（低: 右側の外縁に並ぶ尖りの一つとして読める。）したため採用し、確信度は低。 片方だけに残った候補はない。"
+        },
+        {
+          "id": "P2",
+          "opusIndependent": {
+            "id": "P2",
+            "candidates": [],
+            "noCandidate": true,
+            "noCandidateReason": "全体の半分を占める大三角形で、右の尖りはあるが領域全体として一つの部分に当たらない"
+          },
+          "terraIndependent": {
+            "id": "P2",
+            "candidates": [],
+            "noCandidate": true,
+            "noCandidateReason": "広い中心領域で、具体的な部分の形を特定しにくい。"
+          },
+          "consensusCandidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "両者とも第1段階で見立てなし（Opus: 全体の半分を占める大三角形で、右の尖りはあるが領域全体として一つの部分に当たらない／Terra: 広い中心領域で、具体的な部分の形を特定しにくい。）",
+          "agreementStatus": "合意",
+          "discussion": "第1段階で両者とも見立てなしのため、第2段階の問いは置かず合意の見立てなしとした。"
+        },
+        {
+          "id": "P3",
+          "opusIndependent": {
+            "id": "P3",
+            "candidates": [],
+            "noCandidate": true,
+            "noCandidateReason": "P2 と P4 の間を埋める小三角形で、外へ突き出す尖りがない"
+          },
+          "terraIndependent": {
+            "id": "P3",
+            "candidates": [],
+            "noCandidate": true,
+            "noCandidateReason": "輪郭と接続だけでは、具体的な部分を十分に絞り込めない。"
+          },
+          "consensusCandidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "両者とも第1段階で見立てなし（Opus: P2 と P4 の間を埋める小三角形で、外へ突き出す尖りがない／Terra: 輪郭と接続だけでは、具体的な部分を十分に絞り込めない。）",
+          "agreementStatus": "合意",
+          "discussion": "第1段階で両者とも見立てなしのため、第2段階の問いは置かず合意の見立てなしとした。"
+        },
+        {
+          "id": "P4",
+          "opusIndependent": {
+            "id": "P4",
+            "candidates": [],
+            "noCandidate": true,
+            "noCandidateReason": "下部の直角三角形で、斜辺が右下へ下るが単独でも位置からも特定の部分に見えにくい"
+          },
+          "terraIndependent": {
+            "id": "P4",
+            "candidates": [],
+            "noCandidate": true,
+            "noCandidateReason": "輪郭と接続だけでは、具体的な部分を十分に絞り込めない。"
+          },
+          "consensusCandidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "両者とも第1段階で見立てなし（Opus: 下部の直角三角形で、斜辺が右下へ下るが単独でも位置からも特定の部分に見えにくい／Terra: 輪郭と接続だけでは、具体的な部分を十分に絞り込めない。）",
+          "agreementStatus": "合意",
+          "discussion": "第1段階で両者とも見立てなしのため、第2段階の問いは置かず合意の見立てなしとした。"
+        },
+        {
+          "id": "P5",
+          "opusIndependent": {
+            "id": "P5",
+            "candidates": [],
+            "noCandidate": true,
+            "noCandidateReason": "右下端で下へ尖る小三角形だが、先端の部分として何に当たるか絞れない"
+          },
+          "terraIndependent": {
+            "id": "P5",
+            "candidates": [],
+            "noCandidate": true,
+            "noCandidateReason": "輪郭と接続だけでは、具体的な部分を十分に絞り込めない。"
+          },
+          "consensusCandidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "両者とも第1段階で見立てなし（Opus: 右下端で下へ尖る小三角形だが、先端の部分として何に当たるか絞れない／Terra: 輪郭と接続だけでは、具体的な部分を十分に絞り込めない。）",
+          "agreementStatus": "合意",
+          "discussion": "第1段階で両者とも見立てなしのため、第2段階の問いは置かず合意の見立てなしとした。"
+        }
+      ]
+    },
+    {
+      "item": "item-16",
+      "regions": [
+        {
+          "id": "P1",
+          "opusIndependent": {
+            "id": "P1",
+            "candidates": [],
+            "noCandidate": true,
+            "noCandidateReason": "全体の6割を占める右向きの家形五角形の本体で、領域全体として一つの部分に当たらない"
+          },
+          "terraIndependent": {
+            "id": "P1",
+            "candidates": [],
+            "noCandidate": true,
+            "noCandidateReason": "広い中心領域で、具体的な部分の形を特定しにくい。"
+          },
+          "consensusCandidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "両者とも第1段階で見立てなし（Opus: 全体の6割を占める右向きの家形五角形の本体で、領域全体として一つの部分に当たらない／Terra: 広い中心領域で、具体的な部分の形を特定しにくい。）",
+          "agreementStatus": "合意",
+          "discussion": "第1段階で両者とも見立てなしのため、第2段階の問いは置かず合意の見立てなしとした。"
+        },
+        {
+          "id": "P2",
+          "opusIndependent": {
+            "id": "P2",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "足",
+                "owner": "",
+                "basis": "全体との関係",
+                "confidence": "低",
+                "evidence": "本体の右寄りの下に垂れる正方形で、床に接する脚のように見える",
+                "weaknesses": "正方形で短く、一本だけ"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "terraIndependent": {
+            "id": "P2",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "足",
+                "owner": "動物",
+                "basis": "全体との関係",
+                "confidence": "低",
+                "evidence": "中央領域から下へ四角く垂れる。",
+                "weaknesses": "指や足首は見えない。"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "consensusCandidates": [
+            {
+              "rank": 1,
+              "noun": "足",
+              "owner": "動物",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "Opus: 本体の右寄りの下に垂れる正方形で、床に接する脚のように見える／Terra: 中央領域から下へ四角く垂れる。",
+              "weaknesses": "Opus: 正方形で短く、一本だけ／Terra: 指や足首は見えない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": "",
+          "agreementStatus": "合意",
+          "discussion": "「足」は第1段階で両者が独立に挙げた一致（Opus 低・Terra 低）で採用し、確信度は低い方の低。 片方だけに残った候補はない。"
+        },
+        {
+          "id": "P3",
+          "opusIndependent": {
+            "id": "P3",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "尾",
+                "owner": "",
+                "basis": "全体との関係",
+                "confidence": "低",
+                "evidence": "右へ尖る本体の反対側の左端から四角く突き出す",
+                "weaknesses": "正方形で短く、尾らしい細長さがない"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "terraIndependent": {
+            "id": "P3",
+            "candidates": [],
+            "noCandidate": true,
+            "noCandidateReason": "輪郭と接続だけでは、具体的な部分を十分に絞り込めない。"
+          },
+          "consensusCandidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "第2段階の検討で双方の候補がすべて取り下げられ、両者とも見立てなしで一致。Terra は第1段階で見立てなし（輪郭と接続だけでは、具体的な部分を十分に絞り込めない。）",
+          "agreementStatus": "合意",
+          "discussion": "Opus の「尾」（低）は Q53 で Terra が不支持（左端に付くが正方形で、細く延びる尾の手がかりがない。）。Opus もこの理由を受け入れて取り下げ、不採用。"
+        },
+        {
+          "id": "P4",
+          "opusIndependent": {
+            "id": "P4",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "耳",
+                "owner": "",
+                "basis": "両方",
+                "confidence": "低",
+                "evidence": "本体の上辺から右上へ斜めに細長く立ち上がる帯",
+                "weaknesses": "頭らしい領域が別になく、帯が前（右）へ傾く"
+              },
+              {
+                "rank": 2,
+                "noun": "翼",
+                "owner": "鳥",
+                "basis": "全体との関係",
+                "confidence": "低",
+                "evidence": "本体の背から斜め上へ持ち上がる板状の形",
+                "weaknesses": "細長い帯で、翼らしい広がりがない"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "terraIndependent": {
+            "id": "P4",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "羽",
+                "owner": "鳥",
+                "basis": "両方",
+                "confidence": "低",
+                "evidence": "上端から右上へ斜めに細長く伸びる。",
+                "weaknesses": "先端は平らで羽毛の細部はない。"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "consensusCandidates": [
+            {
+              "rank": 1,
+              "noun": "翼",
+              "owner": "鳥",
+              "basis": "両方",
+              "confidence": "低",
+              "evidence": "Opus（翼）: 本体の背から斜め上へ持ち上がる板状の形／Terra（羽）: 上端から右上へ斜めに細長く伸びる。",
+              "weaknesses": "Opus: 細長い帯で、翼らしい広がりがない／Terra: 先端は平らで羽毛の細部はない。"
+            },
+            {
+              "rank": 2,
+              "noun": "耳",
+              "owner": "",
+              "basis": "両方",
+              "confidence": "低",
+              "evidence": "Opus: 本体の上辺から右上へ斜めに細長く立ち上がる帯／Terra（第2段階 Q55 で支持）: 上端から右上へ細長く立ち上がる。",
+              "weaknesses": "Opus: 頭らしい領域が別になく、帯が前（右）へ傾く"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": "",
+          "agreementStatus": "合意",
+          "discussion": "Opus の「耳」（低）は Q55 で Terra が支持（低: 上端から右上へ細長く立ち上がる。）したため採用し、確信度は低。 Opus「翼」（低）と Terra「羽」（低）を同じ見立てとして照合し、Q54 で Terra が合意名詞「翼」に同意（上方へ上げた翼と読め、羽より翼の方が範囲を明示できる。）したため「翼」で採用。確信度は Terra の回答どおり低。 片方だけに残った候補はない。"
+        }
+      ]
+    },
+    {
+      "item": "item-17",
+      "regions": [
+        {
+          "id": "P1",
+          "opusIndependent": {
+            "id": "P1",
+            "candidates": [],
+            "noCandidate": true,
+            "noCandidateReason": "全体の半分を占める中心の三角形で、上端の尖りはあるが領域全体として一つの部分に当たらない"
+          },
+          "terraIndependent": {
+            "id": "P1",
+            "candidates": [],
+            "noCandidate": true,
+            "noCandidateReason": "広い中心領域で、具体的な部分の形を特定しにくい。"
+          },
+          "consensusCandidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "両者とも第1段階で見立てなし（Opus: 全体の半分を占める中心の三角形で、上端の尖りはあるが領域全体として一つの部分に当たらない／Terra: 広い中心領域で、具体的な部分の形を特定しにくい。）",
+          "agreementStatus": "合意",
+          "discussion": "第1段階で両者とも見立てなしのため、第2段階の問いは置かず合意の見立てなしとした。"
+        },
+        {
+          "id": "P2",
+          "opusIndependent": {
+            "id": "P2",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "鼻",
+                "owner": "",
+                "basis": "全体との関係",
+                "confidence": "低",
+                "evidence": "本体の右上で、上端の尖りの下から右へ四角く突き出す",
+                "weaknesses": "正方形で先が尖らず、顔の向きは位置からの推測による"
+              },
+              {
+                "rank": 2,
+                "noun": "頭",
+                "owner": "",
+                "basis": "全体との関係",
+                "confidence": "低",
+                "evidence": "本体の右上端から前へ突き出す四角",
+                "weaknesses": "本体に比べて小さく、丸みがない"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "terraIndependent": {
+            "id": "P2",
+            "candidates": [],
+            "noCandidate": true,
+            "noCandidateReason": "輪郭と接続だけでは、具体的な部分を十分に絞り込めない。"
+          },
+          "consensusCandidates": [
+            {
+              "rank": 1,
+              "noun": "鼻",
+              "owner": "",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "Opus: 本体の右上で、上端の尖りの下から右へ四角く突き出す／Terra（第2段階 Q56 で支持）: 上寄りの右側に小さな四角として突出する。",
+              "weaknesses": "Opus: 正方形で先が尖らず、顔の向きは位置からの推測による"
+            },
+            {
+              "rank": 2,
+              "noun": "頭",
+              "owner": "",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "Opus: 本体の右上端から前へ突き出す四角／Terra（第2段階 Q57 で支持）: 上寄りの側面にまとまって張り出すが、四角形だけなので確信は低い。",
+              "weaknesses": "Opus: 本体に比べて小さく、丸みがない"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": "",
+          "agreementStatus": "合意",
+          "discussion": "Opus の「鼻」（低）は Q56 で Terra が支持（低: 上寄りの右側に小さな四角として突出する。）したため採用し、確信度は低。 Opus の「頭」（低）は Q57 で Terra が支持（低: 上寄りの側面にまとまって張り出すが、四角形だけなので確信は低い。）したため採用し、確信度は低。 片方だけに残った候補はない。"
+        },
+        {
+          "id": "P3",
+          "opusIndependent": {
+            "id": "P3",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "足",
+                "owner": "",
+                "basis": "全体との関係",
+                "confidence": "低",
+                "evidence": "本体の右下で、床近くから右へ尖って張り出す",
+                "weaknesses": "小さく、足先らしい厚みがない"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "terraIndependent": {
+            "id": "P3",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "ひれ",
+                "owner": "魚",
+                "basis": "両方",
+                "confidence": "低",
+                "evidence": "右下側から右へ三角形に張り出す。",
+                "weaknesses": "ひれの筋や曲線は見えない。"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "consensusCandidates": [
+            {
+              "rank": 1,
+              "noun": "足",
+              "owner": "",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "Opus: 本体の右下で、床近くから右へ尖って張り出す／Terra（第2段階 Q58 で支持）: 下端にあり右へ張り出す小三角形である。",
+              "weaknesses": "Opus: 小さく、足先らしい厚みがない"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": "",
+          "agreementStatus": "合意",
+          "discussion": "Opus の「足」（低）は Q58 で Terra が支持（低: 下端にあり右へ張り出す小三角形である。）したため採用し、確信度は低。 Terra の「ひれ」（低）は Opus が不支持（床近くで右へ張り出す小三角形で、ひれとしては本体側の手がかりが乏しい）とし、Q59 で Terra が取り下げた（最下端の突出にひれの種類を示す位置の手がかりがない。）ため不採用。 片方だけに残った候補はない。"
+        },
+        {
+          "id": "P4",
+          "opusIndependent": {
+            "id": "P4",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "脚",
+                "owner": "",
+                "basis": "全体との関係",
+                "confidence": "低",
+                "evidence": "下端に尖りをつくり、P1 の下の角と並んで脚のように見える",
+                "weaknesses": "三角形で太く短い"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "terraIndependent": {
+            "id": "P4",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "脚",
+                "owner": "動物",
+                "basis": "全体との関係",
+                "confidence": "低",
+                "evidence": "中央の左下に付き下へ尖って伸びる。",
+                "weaknesses": "足先や関節は見えない。"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "consensusCandidates": [
+            {
+              "rank": 1,
+              "noun": "脚",
+              "owner": "動物",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "Opus: 下端に尖りをつくり、P1 の下の角と並んで脚のように見える／Terra: 中央の左下に付き下へ尖って伸びる。",
+              "weaknesses": "Opus: 三角形で太く短い／Terra: 足先や関節は見えない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": "",
+          "agreementStatus": "合意",
+          "discussion": "「脚」は第1段階で両者が独立に挙げた一致（Opus 低・Terra 低）で採用し、確信度は低い方の低。 片方だけに残った候補はない。"
+        },
+        {
+          "id": "P5",
+          "opusIndependent": {
+            "id": "P5",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "尾",
+                "owner": "",
+                "basis": "両方",
+                "confidence": "中",
+                "evidence": "本体の背の斜線をそのまま左下へ延ばす帯で、床まで垂れる",
+                "weaknesses": "下辺が床に沿って平らで、先が細くならない"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "terraIndependent": {
+            "id": "P5",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "脚",
+                "owner": "動物",
+                "basis": "全体との関係",
+                "confidence": "低",
+                "evidence": "左下へ細長く伸び下端に達する。",
+                "weaknesses": "関節や足先は区別できない。"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "consensusCandidates": [
+            {
+              "rank": 1,
+              "noun": "尾",
+              "owner": "",
+              "basis": "両方",
+              "confidence": "低",
+              "evidence": "Opus: 本体の背の斜線をそのまま左下へ延ばす帯で、床まで垂れる／Terra（第2段階 Q60 で支持）: 左端から斜め左下へ長く伸びる。",
+              "weaknesses": "Opus: 下辺が床に沿って平らで、先が細くならない"
+            },
+            {
+              "rank": 2,
+              "noun": "脚",
+              "owner": "動物",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "Terra: 左下へ細長く伸び下端に達する。／Opus（第2段階で支持）: 左下へ伸びて床（図形の下端）に届く帯で、後ろへ伸ばした脚としても読める",
+              "weaknesses": "Terra: 関節や足先は区別できない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": "",
+          "agreementStatus": "合意",
+          "discussion": "Opus の「尾」（中）は Q60 で Terra が支持（低: 左端から斜め左下へ長く伸びる。）したため採用し、確信度は低。 Terra の「脚」（第1段階 低）は Opus が第2段階で支持（低: 左下へ伸びて床（図形の下端）に届く帯で、後ろへ伸ばした脚としても読める）、Q61 で Terra も維持（低: 左下へ伸び、図形の下端まで届いている。）したため採用し、確信度は低。 片方だけに残った候補はない。"
+        }
+      ]
+    },
+    {
+      "item": "item-18",
+      "regions": [
+        {
+          "id": "P1",
+          "opusIndependent": {
+            "id": "P1",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "煙突",
+                "owner": "家",
+                "basis": "両方",
+                "confidence": "中",
+                "evidence": "縦に立つ四角い形の下辺が斜めに切れ、斜めに下る P2 の上辺に載って上へ突き出す",
+                "weaknesses": "P2 の上辺の端に寄って立つ"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "terraIndependent": {
+            "id": "P1",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "煙突",
+                "owner": "建物",
+                "basis": "全体との関係",
+                "confidence": "低",
+                "evidence": "上端に細長く立ち上がる。",
+                "weaknesses": "下端が斜めに尖り不規則である。"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "consensusCandidates": [
+            {
+              "rank": 1,
+              "noun": "煙突",
+              "owner": "家・建物",
+              "basis": "両方",
+              "confidence": "低",
+              "evidence": "Opus: 縦に立つ四角い形の下辺が斜めに切れ、斜めに下る P2 の上辺に載って上へ突き出す／Terra: 上端に細長く立ち上がる。",
+              "weaknesses": "Opus: P2 の上辺の端に寄って立つ／Terra: 下端が斜めに尖り不規則である。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": "",
+          "agreementStatus": "合意",
+          "discussion": "「煙突」は第1段階で両者が独立に挙げた一致（Opus 中・Terra 低）で採用し、確信度は低い方の低。 片方だけに残った候補はない。"
+        },
+        {
+          "id": "P2",
+          "opusIndependent": {
+            "id": "P2",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "屋根",
+                "owner": "家",
+                "basis": "全体との関係",
+                "confidence": "低",
+                "evidence": "上に煙突のような P1 を載せて斜めに下る広い面",
+                "weaknesses": "全体の6割を占めて厚く、下側にも斜めの辺があって屋根の下の壁がない"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "terraIndependent": {
+            "id": "P2",
+            "candidates": [],
+            "noCandidate": true,
+            "noCandidateReason": "広い中心領域で、具体的な部分の形を特定しにくい。"
+          },
+          "consensusCandidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "第2段階の検討で双方の候補がすべて取り下げられ、両者とも見立てなしで一致。Terra は第1段階で見立てなし（広い中心領域で、具体的な部分の形を特定しにくい。）",
+          "agreementStatus": "合意",
+          "discussion": "Opus の「屋根」（低）は Q62 で Terra が不支持（大きく斜めに伸びる領域で、左右へ覆う屋根の形が明瞭でない。）。Opus もこの理由を受け入れて取り下げ、不採用。"
+        },
+        {
+          "id": "P3",
+          "opusIndependent": {
+            "id": "P3",
+            "candidates": [],
+            "noCandidate": true,
+            "noCandidateReason": "P2 と P4 の間を埋める小三角形で、外へ尖りを出さない"
+          },
+          "terraIndependent": {
+            "id": "P3",
+            "candidates": [],
+            "noCandidate": true,
+            "noCandidateReason": "輪郭と接続だけでは、具体的な部分を十分に絞り込めない。"
+          },
+          "consensusCandidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "両者とも第1段階で見立てなし（Opus: P2 と P4 の間を埋める小三角形で、外へ尖りを出さない／Terra: 輪郭と接続だけでは、具体的な部分を十分に絞り込めない。）",
+          "agreementStatus": "合意",
+          "discussion": "第1段階で両者とも見立てなしのため、第2段階の問いは置かず合意の見立てなしとした。"
+        },
+        {
+          "id": "P4",
+          "opusIndependent": {
+            "id": "P4",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "脚",
+                "owner": "",
+                "basis": "全体との関係",
+                "confidence": "低",
+                "evidence": "P2 の下端と逆 V 字に開いて左下へ伸びる帯",
+                "weaknesses": "先端が水平に切れ、P2 と太さが大きく違う"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "terraIndependent": {
+            "id": "P4",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "脚",
+                "owner": "動物",
+                "basis": "全体との関係",
+                "confidence": "低",
+                "evidence": "左下へ細長く斜めに伸びる。",
+                "weaknesses": "関節と足先は見えない。"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "consensusCandidates": [
+            {
+              "rank": 1,
+              "noun": "脚",
+              "owner": "動物",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "Opus: P2 の下端と逆 V 字に開いて左下へ伸びる帯／Terra: 左下へ細長く斜めに伸びる。",
+              "weaknesses": "Opus: 先端が水平に切れ、P2 と太さが大きく違う／Terra: 関節と足先は見えない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": "",
+          "agreementStatus": "合意",
+          "discussion": "「脚」は第1段階で両者が独立に挙げた一致（Opus 低・Terra 低）で採用し、確信度は低い方の低。 片方だけに残った候補はない。"
+        }
+      ]
+    },
+    {
+      "item": "item-19",
+      "regions": [
+        {
+          "id": "P1",
+          "opusIndependent": {
+            "id": "P1",
+            "candidates": [],
+            "noCandidate": true,
+            "noCandidateReason": "全体の半分を占める中心の三角形で、上端の尖りはあるが領域全体として一つの部分に当たらない"
+          },
+          "terraIndependent": {
+            "id": "P1",
+            "candidates": [],
+            "noCandidate": true,
+            "noCandidateReason": "広い中心領域で、具体的な部分の形を特定しにくい。"
+          },
+          "consensusCandidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "両者とも第1段階で見立てなし（Opus: 全体の半分を占める中心の三角形で、上端の尖りはあるが領域全体として一つの部分に当たらない／Terra: 広い中心領域で、具体的な部分の形を特定しにくい。）",
+          "agreementStatus": "合意",
+          "discussion": "第1段階で両者とも見立てなしのため、第2段階の問いは置かず合意の見立てなしとした。"
+        },
+        {
+          "id": "P2",
+          "opusIndependent": {
+            "id": "P2",
+            "candidates": [],
+            "noCandidate": true,
+            "noCandidateReason": "P1 と P4 の間の段を埋める小三角形で、外へ尖りを出さない"
+          },
+          "terraIndependent": {
+            "id": "P2",
+            "candidates": [],
+            "noCandidate": true,
+            "noCandidateReason": "輪郭と接続だけでは、具体的な部分を十分に絞り込めない。"
+          },
+          "consensusCandidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "両者とも第1段階で見立てなし（Opus: P1 と P4 の間の段を埋める小三角形で、外へ尖りを出さない／Terra: 輪郭と接続だけでは、具体的な部分を十分に絞り込めない。）",
+          "agreementStatus": "合意",
+          "discussion": "第1段階で両者とも見立てなしのため、第2段階の問いは置かず合意の見立てなしとした。"
+        },
+        {
+          "id": "P3",
+          "opusIndependent": {
+            "id": "P3",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "鼻",
+                "owner": "",
+                "basis": "全体との関係",
+                "confidence": "低",
+                "evidence": "本体の右側に付き、右へ細くなって平らな先端で終わる",
+                "weaknesses": "先が尖らず、幅が広い"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "terraIndependent": {
+            "id": "P3",
+            "candidates": [],
+            "noCandidate": true,
+            "noCandidateReason": "輪郭と接続だけでは、具体的な部分を十分に絞り込めない。"
+          },
+          "consensusCandidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "第2段階の検討で双方の候補がすべて取り下げられ、両者とも見立てなしで一致。Terra は第1段階で見立てなし（輪郭と接続だけでは、具体的な部分を十分に絞り込めない。）",
+          "agreementStatus": "合意",
+          "discussion": "Opus の「鼻」（低）は Q63 で Terra が不支持（右辺を広く占める大きな領域で鼻先としては大きすぎる。）。Opus もこの理由を受け入れて取り下げ、不採用。"
+        },
+        {
+          "id": "P4",
+          "opusIndependent": {
+            "id": "P4",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "首",
+                "owner": "",
+                "basis": "全体との関係",
+                "confidence": "低",
+                "evidence": "大きな本体の左下から左へ水平に伸びる帯",
+                "weaknesses": "短く太く、先に何も付かない"
+              },
+              {
+                "rank": 2,
+                "noun": "尾",
+                "owner": "",
+                "basis": "全体との関係",
+                "confidence": "低",
+                "evidence": "本体の後ろ（左）へ突き出す",
+                "weaknesses": "四角く太く、尾らしい細さがない"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "terraIndependent": {
+            "id": "P4",
+            "candidates": [],
+            "noCandidate": true,
+            "noCandidateReason": "輪郭と接続だけでは、具体的な部分を十分に絞り込めない。"
+          },
+          "consensusCandidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "第2段階の検討で双方の候補がすべて取り下げられ、両者とも見立てなしで一致。Terra は第1段階で見立てなし（輪郭と接続だけでは、具体的な部分を十分に絞り込めない。）",
+          "agreementStatus": "合意",
+          "discussion": "Opus の「首」（低）は Q64 で Terra が不支持（左端で途切れており、先の頭につながる首とは判断しにくい。）。Opus もこの理由を受け入れて取り下げ、不採用。 Opus の「尾」（低）は Q65 で Terra が不支持（左端にあるが幅広い台形で、尾が延びる形は弱い。）。Opus もこの理由を受け入れて取り下げ、不採用。"
+        }
+      ]
+    },
+    {
+      "item": "item-20",
+      "regions": [
+        {
+          "id": "P1",
+          "opusIndependent": {
+            "id": "P1",
+            "candidates": [],
+            "noCandidate": true,
+            "noCandidateReason": "図形の9割近くを占める丸みのある本体で、領域全体を一つの部分として見立てにくい"
+          },
+          "terraIndependent": {
+            "id": "P1",
+            "candidates": [],
+            "noCandidate": true,
+            "noCandidateReason": "広い中心領域で、具体的な部分の形を特定しにくい。"
+          },
+          "consensusCandidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "両者とも第1段階で見立てなし（Opus: 図形の9割近くを占める丸みのある本体で、領域全体を一つの部分として見立てにくい／Terra: 広い中心領域で、具体的な部分の形を特定しにくい。）",
+          "agreementStatus": "合意",
+          "discussion": "第1段階で両者とも見立てなしのため、第2段階の問いは置かず合意の見立てなしとした。"
+        },
+        {
+          "id": "P2",
+          "opusIndependent": {
+            "id": "P2",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "尾",
+                "owner": "",
+                "basis": "全体との関係",
+                "confidence": "低",
+                "evidence": "丸みのある本体の左下から左へ尖って突き出す",
+                "weaknesses": "小さく、本体の下端に付くので尾としては低い位置"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "terraIndependent": {
+            "id": "P2",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "ひれ",
+                "owner": "魚",
+                "basis": "両方",
+                "confidence": "低",
+                "evidence": "左下側から左へ三角形に尖る。",
+                "weaknesses": "ひれの筋や曲線はない。"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "consensusCandidates": [
+            {
+              "rank": 1,
+              "noun": "尾",
+              "owner": "",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "Opus: 丸みのある本体の左下から左へ尖って突き出す／Terra（第2段階 Q66 で支持）: 大きな領域の左下端から左へ小さく尖っている。",
+              "weaknesses": "Opus: 小さく、本体の下端に付くので尾としては低い位置"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": "",
+          "agreementStatus": "合意",
+          "discussion": "Opus の「尾」（低）は Q66 で Terra が支持（低: 大きな領域の左下端から左へ小さく尖っている。）したため採用し、確信度は低。 Terra の「ひれ」（低）は Opus が不支持（丸い本体の左下の小さな尖りで、ひれなら胸・尾のどれか決まらない）とし、Q67 で Terra が取り下げた（左下端という位置だけでは、ひれの種類を決める根拠がない。）ため不採用。 片方だけに残った候補はない。"
+        },
+        {
+          "id": "P3",
+          "opusIndependent": {
+            "id": "P3",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "足",
+                "owner": "",
+                "basis": "全体との関係",
+                "confidence": "低",
+                "evidence": "本体の下から真下へ尖って垂れる",
+                "weaknesses": "一本だけで、足にしては尖りすぎる"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "terraIndependent": {
+            "id": "P3",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "ひれ",
+                "owner": "魚",
+                "basis": "両方",
+                "confidence": "低",
+                "evidence": "下端から下へ小さく尖る。",
+                "weaknesses": "直線的な三角形で筋はない。"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "consensusCandidates": [
+            {
+              "rank": 1,
+              "noun": "足",
+              "owner": "",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "Opus: 本体の下から真下へ尖って垂れる／Terra（第2段階 Q68 で支持）: 大きな領域の下端から下へ小さく垂れている。",
+              "weaknesses": "Opus: 一本だけで、足にしては尖りすぎる"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": "",
+          "agreementStatus": "合意",
+          "discussion": "Opus の「足」（低）は Q68 で Terra が支持（低: 大きな領域の下端から下へ小さく垂れている。）したため採用し、確信度は低。 Terra の「ひれ」（低）は Opus が不支持（本体の下から下へ尖る小三角形で、ひれ（腹びれ）とも足とも読めるが、ひれの手がかりは弱い）とし、Q69 で Terra が取り下げた（真下への小さな突出に腹びれだと特定する手がかりが乏しい。）ため不採用。 片方だけに残った候補はない。"
+        }
+      ]
+    },
+    {
+      "item": "item-21",
+      "regions": [
+        {
+          "id": "P1",
+          "opusIndependent": {
+            "id": "P1",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "帆",
+                "owner": "帆船",
+                "basis": "単独",
+                "confidence": "中",
+                "evidence": "垂直な左辺と右下へ下る長い斜辺をもつ大きな直角三角形で、上端が鋭く尖る",
+                "weaknesses": "下に船体らしい領域がない"
+              },
+              {
+                "rank": 2,
+                "noun": "背びれ",
+                "owner": "サメ",
+                "basis": "単独",
+                "confidence": "低",
+                "evidence": "垂直な辺と斜めの辺で上へ尖る輪郭が背びれに似る",
+                "weaknesses": "全体の半分以上を占め、ひれにしては大きすぎる"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "terraIndependent": {
+            "id": "P1",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "帆",
+                "owner": "帆船",
+                "basis": "単独",
+                "confidence": "中",
+                "evidence": "垂直な辺と水平な底辺を持つ三角形である。",
+                "weaknesses": "帆柱や布の曲がりは見えない。"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "consensusCandidates": [
+            {
+              "rank": 1,
+              "noun": "帆",
+              "owner": "帆船",
+              "basis": "単独",
+              "confidence": "中",
+              "evidence": "Opus: 垂直な左辺と右下へ下る長い斜辺をもつ大きな直角三角形で、上端が鋭く尖る／Terra: 垂直な辺と水平な底辺を持つ三角形である。",
+              "weaknesses": "Opus: 下に船体らしい領域がない／Terra: 帆柱や布の曲がりは見えない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": "",
+          "agreementStatus": "合意",
+          "discussion": "「帆」は第1段階で両者が独立に挙げた一致（Opus 中・Terra 中）で採用し、確信度は低い方の中。 Opus の「背びれ」（低）は Q70 で Terra が不支持（中央の大半を占めており、背に付くひれと呼ぶには大きい。）。Opus もこの理由を受け入れて取り下げ、不採用。 片方だけに残った候補はない。"
+        },
+        {
+          "id": "P2",
+          "opusIndependent": {
+            "id": "P2",
+            "candidates": [],
+            "noCandidate": true,
+            "noCandidateReason": "P1 の右端と P3 をつなぐ小三角形で、外へ尖りを出さない"
+          },
+          "terraIndependent": {
+            "id": "P2",
+            "candidates": [],
+            "noCandidate": true,
+            "noCandidateReason": "輪郭と接続だけでは、具体的な部分を十分に絞り込めない。"
+          },
+          "consensusCandidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "両者とも第1段階で見立てなし（Opus: P1 の右端と P3 をつなぐ小三角形で、外へ尖りを出さない／Terra: 輪郭と接続だけでは、具体的な部分を十分に絞り込めない。）",
+          "agreementStatus": "合意",
+          "discussion": "第1段階で両者とも見立てなしのため、第2段階の問いは置かず合意の見立てなしとした。"
+        },
+        {
+          "id": "P3",
+          "opusIndependent": {
+            "id": "P3",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "尾",
+                "owner": "",
+                "basis": "全体との関係",
+                "confidence": "低",
+                "evidence": "図形の右下で本体の後端から右へ四角く突き出す",
+                "weaknesses": "正方形で短く、尾らしい細長さがない"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "terraIndependent": {
+            "id": "P3",
+            "candidates": [],
+            "noCandidate": true,
+            "noCandidateReason": "輪郭と接続だけでは、具体的な部分を十分に絞り込めない。"
+          },
+          "consensusCandidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "第2段階の検討で双方の候補がすべて取り下げられ、両者とも見立てなしで一致。Terra は第1段階で見立てなし（輪郭と接続だけでは、具体的な部分を十分に絞り込めない。）",
+          "agreementStatus": "合意",
+          "discussion": "Opus の「尾」（低）は Q71 で Terra が不支持（右端の正方形に尾として細長く延びる形がない。）。Opus もこの理由を受け入れて取り下げ、不採用。"
+        },
+        {
+          "id": "P4",
+          "opusIndependent": {
+            "id": "P4",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "脚",
+                "owner": "",
+                "basis": "全体との関係",
+                "confidence": "低",
+                "evidence": "大きな三角形の底辺から左下へ斜めに垂れ、図形の最下端に届く",
+                "weaknesses": "先端が垂直に切れている"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "terraIndependent": {
+            "id": "P4",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "脚",
+                "owner": "動物",
+                "basis": "全体との関係",
+                "confidence": "低",
+                "evidence": "中央から左下へ斜めに細長く伸びる。",
+                "weaknesses": "関節や足先は見えない。"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "consensusCandidates": [
+            {
+              "rank": 1,
+              "noun": "脚",
+              "owner": "動物",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "Opus: 大きな三角形の底辺から左下へ斜めに垂れ、図形の最下端に届く／Terra: 中央から左下へ斜めに細長く伸びる。",
+              "weaknesses": "Opus: 先端が垂直に切れている／Terra: 関節や足先は見えない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": "",
+          "agreementStatus": "合意",
+          "discussion": "「脚」は第1段階で両者が独立に挙げた一致（Opus 低・Terra 低）で採用し、確信度は低い方の低。 片方だけに残った候補はない。"
+        },
+        {
+          "id": "P5",
+          "opusIndependent": {
+            "id": "P5",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "くちばし",
+                "owner": "鳥",
+                "basis": "両方",
+                "confidence": "低",
+                "evidence": "本体の垂直な左辺の下部から左へ鋭く尖って突き出す小三角形",
+                "weaknesses": "頭らしい領域がなく、図形の上端から遠い"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "terraIndependent": {
+            "id": "P5",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "ひれ",
+                "owner": "魚",
+                "basis": "両方",
+                "confidence": "低",
+                "evidence": "左側に付き左へ三角形に尖る。",
+                "weaknesses": "ひれの筋や曲線はない。"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "consensusCandidates": [
+            {
+              "rank": 1,
+              "noun": "くちばし",
+              "owner": "鳥",
+              "basis": "両方",
+              "confidence": "低",
+              "evidence": "Opus: 本体の垂直な左辺の下部から左へ鋭く尖って突き出す小三角形／Terra（第2段階 Q72 で支持）: 左端で小さな三角形が左へ尖っている。",
+              "weaknesses": "Opus: 頭らしい領域がなく、図形の上端から遠い"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": "",
+          "agreementStatus": "合意",
+          "discussion": "Opus の「くちばし」（低）は Q72 で Terra が支持（低: 左端で小さな三角形が左へ尖っている。）したため採用し、確信度は低。 Terra の「ひれ」（低）は Opus が不支持（帆のような三角形の垂直な辺の下部から左へ尖る小三角形で、ひれとしての本体側の手がかりがない）とし、Q73 で Terra が取り下げた（側面の小三角形だけでは、ひれの位置関係を定めにくい。）ため不採用。 片方だけに残った候補はない。"
+        }
+      ]
+    },
+    {
+      "item": "item-22",
+      "regions": [
+        {
+          "id": "P1",
+          "opusIndependent": {
+            "id": "P1",
+            "candidates": [],
+            "noCandidate": true,
+            "noCandidateReason": "全体の半分以上を占める中心の三角形で、領域全体として一つの部分に当たらない"
+          },
+          "terraIndependent": {
+            "id": "P1",
+            "candidates": [],
+            "noCandidate": true,
+            "noCandidateReason": "広い中心領域で、具体的な部分の形を特定しにくい。"
+          },
+          "consensusCandidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "両者とも第1段階で見立てなし（Opus: 全体の半分以上を占める中心の三角形で、領域全体として一つの部分に当たらない／Terra: 広い中心領域で、具体的な部分の形を特定しにくい。）",
+          "agreementStatus": "合意",
+          "discussion": "第1段階で両者とも見立てなしのため、第2段階の問いは置かず合意の見立てなしとした。"
+        },
+        {
+          "id": "P2",
+          "opusIndependent": {
+            "id": "P2",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "膝",
+                "owner": "人",
+                "basis": "全体との関係",
+                "confidence": "低",
+                "evidence": "本体の右側面の下部から右へ尖って張り出し、下の P3 との間に切れ込みをつくる",
+                "weaknesses": "膝に見えるのは下の P3 を脚の先と見たときだけで、単独では手がかりが弱い"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "terraIndependent": {
+            "id": "P2",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "ひれ",
+                "owner": "魚",
+                "basis": "両方",
+                "confidence": "低",
+                "evidence": "右側に付き右へ鋭く尖る。",
+                "weaknesses": "ひれの筋や曲線はない。"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "consensusCandidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "第2段階の検討で双方の候補がすべて取り下げられ、両者とも見立てなしで一致",
+          "agreementStatus": "合意",
+          "discussion": "Opus の「膝」は Q74 で Terra がいったん支持（斜めに続く上部と下部の間で右へ角張って張り出す。）したが、Opus が根拠の弱い具体名として取り下げを提案し（膝と読むには P3 を下腿、全体を座った人と見る前提が要り、単独の形の手がかりが弱い）、F4 で Terra も支持を撤回（側面の三角形だけでは、上下の脚の関節として特定する手がかりが弱い。）したため不採用。 Terra の「ひれ」（低）は Opus が不支持（本体の右側面の下部から右へ尖る三角形で、ひれとしては位置の手がかりが乏しい）とし、Q75 で Terra が取り下げた（右側の突出だけでは、具体的なひれの位置を定められない。）ため不採用。"
+        },
+        {
+          "id": "P3",
+          "opusIndependent": {
+            "id": "P3",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "脚",
+                "owner": "",
+                "basis": "全体との関係",
+                "confidence": "低",
+                "evidence": "本体の下端から右下へ斜めに伸び、平らな下辺で床に接する",
+                "weaknesses": "太く短い"
+              },
+              {
+                "rank": 2,
+                "noun": "尾",
+                "owner": "",
+                "basis": "全体との関係",
+                "confidence": "低",
+                "evidence": "本体の後ろ下へ斜めに垂れる帯",
+                "weaknesses": "下辺が水平で床に沿う"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "terraIndependent": {
+            "id": "P3",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "脚",
+                "owner": "動物",
+                "basis": "全体との関係",
+                "confidence": "低",
+                "evidence": "下端から右下へ細長く伸びる。",
+                "weaknesses": "足先や関節ははっきりしない。"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "consensusCandidates": [
+            {
+              "rank": 1,
+              "noun": "脚",
+              "owner": "動物",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "Opus: 本体の下端から右下へ斜めに伸び、平らな下辺で床に接する／Terra: 下端から右下へ細長く伸びる。",
+              "weaknesses": "Opus: 太く短い／Terra: 足先や関節ははっきりしない。"
+            },
+            {
+              "rank": 2,
+              "noun": "尾",
+              "owner": "",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "Opus: 本体の後ろ下へ斜めに垂れる帯／Terra（第2段階 Q76 で支持）: 下部から右下へ細長く斜めに延びる。",
+              "weaknesses": "Opus: 下辺が水平で床に沿う"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": "",
+          "agreementStatus": "合意",
+          "discussion": "「脚」は第1段階で両者が独立に挙げた一致（Opus 低・Terra 低）で採用し、確信度は低い方の低。 Opus の「尾」（低）は Q76 で Terra が支持（低: 下部から右下へ細長く斜めに延びる。）したため採用し、確信度は低。 片方だけに残った候補はない。"
+        },
+        {
+          "id": "P4",
+          "opusIndependent": {
+            "id": "P4",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "頭",
+                "owner": "",
+                "basis": "全体との関係",
+                "confidence": "低",
+                "evidence": "図形の左上端に載る正方形",
+                "weaknesses": "正方形で頭らしい丸みや向きの手がかりがない"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "terraIndependent": {
+            "id": "P4",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "煙突",
+                "owner": "建物",
+                "basis": "全体との関係",
+                "confidence": "低",
+                "evidence": "左上端で下の領域から四角く立ち上がる。",
+                "weaknesses": "幅と高さが同じで短い。"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "consensusCandidates": [
+            {
+              "rank": 1,
+              "noun": "頭",
+              "owner": "",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "Opus: 図形の左上端に載る正方形／Terra（第2段階 Q77 で支持）: 上左端に小さくまとまって載っている。",
+              "weaknesses": "Opus: 正方形で頭らしい丸みや向きの手がかりがない"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": "",
+          "agreementStatus": "合意",
+          "discussion": "Opus の「頭」（低）は Q77 で Terra が支持（低: 上左端に小さくまとまって載っている。）したため採用し、確信度は低。 Terra の「煙突」（低）は Opus が不支持（大きな三角形の水平な上辺の左端に載る正方形で、屋根や甲板に当たる領域がなく煙突の手がかりが弱い）とし、Q78 で Terra が取り下げた（載っている下側の三角形に屋根や甲板の手がかりがない。）ため不採用。 片方だけに残った候補はない。"
+        }
+      ]
+    },
+    {
+      "item": "item-23",
+      "regions": [
+        {
+          "id": "P1",
+          "opusIndependent": {
+            "id": "P1",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "矢じり",
+                "owner": "矢",
+                "basis": "単独",
+                "confidence": "低",
+                "evidence": "垂直な辺で付いて右へ鋭く尖る大きな三角形",
+                "weaknesses": "全体の半分を占め、矢柄に当たる細い部分がない"
+              },
+              {
+                "rank": 2,
+                "noun": "くちばし",
+                "owner": "鳥",
+                "basis": "両方",
+                "confidence": "低",
+                "evidence": "図形の右端で右へ鋭く尖る",
+                "weaknesses": "くちばしにしては大きすぎる"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "terraIndependent": {
+            "id": "P1",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "ひれ",
+                "owner": "魚",
+                "basis": "両方",
+                "confidence": "低",
+                "evidence": "右側に付き右端へ大きな三角形として尖る。",
+                "weaknesses": "ひれとしては幅が広く筋もない。"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "consensusCandidates": [
+            {
+              "rank": 1,
+              "noun": "矢じり",
+              "owner": "矢",
+              "basis": "単独",
+              "confidence": "低",
+              "evidence": "Opus: 垂直な辺で付いて右へ鋭く尖る大きな三角形／Terra（第2段階 Q79 で支持）: 広い付け根から右の鋭い一点へ対称に狭まる。",
+              "weaknesses": "Opus: 全体の半分を占め、矢柄に当たる細い部分がない"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": "",
+          "agreementStatus": "合意",
+          "discussion": "Opus の「矢じり」（低）は Q79 で Terra が支持（低: 広い付け根から右の鋭い一点へ対称に狭まる。）したため採用し、確信度は低。 Opus の「くちばし」（低）は Q80 で Terra が不支持（領域が大きく広がり、頭から出る小さなくちばしとしては大きすぎる。）。Opus もこの理由を受け入れて取り下げ、不採用。 Terra の「ひれ」（低）は Opus が不支持（尾びれなら外へ扇形に広がるが、P1 は外へ向かって細くなる大きな三角形で、ほかのひれにしては大きすぎる）とし、Q81 で Terra が取り下げた（外側へ細く尖る大きな三角形で、尾びれや他のひれの位置を定めにくい。）ため不採用。 片方だけに残った候補はない。"
+        },
+        {
+          "id": "P2",
+          "opusIndependent": {
+            "id": "P2",
+            "candidates": [],
+            "noCandidate": true,
+            "noCandidateReason": "P1 と P3 の間をつなぐ縦長の台形で、単独でも位置からも特定の部分に見えにくい"
+          },
+          "terraIndependent": {
+            "id": "P2",
+            "candidates": [],
+            "noCandidate": true,
+            "noCandidateReason": "輪郭と接続だけでは、具体的な部分を十分に絞り込めない。"
+          },
+          "consensusCandidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "両者とも第1段階で見立てなし（Opus: P1 と P3 の間をつなぐ縦長の台形で、単独でも位置からも特定の部分に見えにくい／Terra: 輪郭と接続だけでは、具体的な部分を十分に絞り込めない。）",
+          "agreementStatus": "合意",
+          "discussion": "第1段階で両者とも見立てなしのため、第2段階の問いは置かず合意の見立てなしとした。"
+        },
+        {
+          "id": "P3",
+          "opusIndependent": {
+            "id": "P3",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "尾",
+                "owner": "",
+                "basis": "全体との関係",
+                "confidence": "低",
+                "evidence": "右へ尖る大きな三角形の反対側の左端から四角く突き出す",
+                "weaknesses": "正方形で短く、尾らしい細長さがない"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "terraIndependent": {
+            "id": "P3",
+            "candidates": [],
+            "noCandidate": true,
+            "noCandidateReason": "輪郭と接続だけでは、具体的な部分を十分に絞り込めない。"
+          },
+          "consensusCandidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "第2段階の検討で双方の候補がすべて取り下げられ、両者とも見立てなしで一致。Terra は第1段階で見立てなし（輪郭と接続だけでは、具体的な部分を十分に絞り込めない。）",
+          "agreementStatus": "合意",
+          "discussion": "Opus の「尾」（低）は Q82 で Terra が不支持（左端の正方形に細長い尾の特徴が見えない。）。Opus もこの理由を受け入れて取り下げ、不採用。"
+        }
+      ]
+    },
+    {
+      "item": "item-24",
+      "regions": [
+        {
+          "id": "P1",
+          "opusIndependent": {
+            "id": "P1",
+            "candidates": [],
+            "noCandidate": true,
+            "noCandidateReason": "全体の6割を占める中心の家形五角形で、領域全体として一つの部分に当たらない"
+          },
+          "terraIndependent": {
+            "id": "P1",
+            "candidates": [],
+            "noCandidate": true,
+            "noCandidateReason": "広い中心領域で、具体的な部分の形を特定しにくい。"
+          },
+          "consensusCandidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "両者とも第1段階で見立てなし（Opus: 全体の6割を占める中心の家形五角形で、領域全体として一つの部分に当たらない／Terra: 広い中心領域で、具体的な部分の形を特定しにくい。）",
+          "agreementStatus": "合意",
+          "discussion": "第1段階で両者とも見立てなしのため、第2段階の問いは置かず合意の見立てなしとした。"
+        },
+        {
+          "id": "P2",
+          "opusIndependent": {
+            "id": "P2",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "翼",
+                "owner": "鳥",
+                "basis": "全体との関係",
+                "confidence": "低",
+                "evidence": "反対側の P4 と同じ高さで右へ水平に張り出し、先が尖る",
+                "weaknesses": "上辺だけが長い台形で、翼としては厚い"
+              },
+              {
+                "rank": 2,
+                "noun": "くちばし",
+                "owner": "鳥",
+                "basis": "単独",
+                "confidence": "低",
+                "evidence": "本体の右側面から水平に突き出し、先端の上側が尖る",
+                "weaknesses": "本体の下寄りに付く"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "terraIndependent": {
+            "id": "P2",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "翼",
+                "owner": "鳥",
+                "basis": "両方",
+                "confidence": "低",
+                "evidence": "右側へ横長に張り出し先へ斜めに細くなる。",
+                "weaknesses": "先は平らで羽毛は見えない。"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "consensusCandidates": [
+            {
+              "rank": 1,
+              "noun": "翼",
+              "owner": "鳥",
+              "basis": "両方",
+              "confidence": "低",
+              "evidence": "Opus: 反対側の P4 と同じ高さで右へ水平に張り出し、先が尖る／Terra: 右側へ横長に張り出し先へ斜めに細くなる。",
+              "weaknesses": "Opus: 上辺だけが長い台形で、翼としては厚い／Terra: 先は平らで羽毛は見えない。"
+            },
+            {
+              "rank": 2,
+              "noun": "くちばし",
+              "owner": "鳥",
+              "basis": "単独",
+              "confidence": "低",
+              "evidence": "Opus: 本体の右側面から水平に突き出し、先端の上側が尖る／Terra（第2段階 Q83 で支持）: 右端へ水平に突出し、先が斜めに細まる。",
+              "weaknesses": "Opus: 本体の下寄りに付く"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": "",
+          "agreementStatus": "合意",
+          "discussion": "「翼」は第1段階で両者が独立に挙げた一致（Opus 低・Terra 低）で採用し、確信度は低い方の低。 Opus の「くちばし」（低）は Q83 で Terra が支持（低: 右端へ水平に突出し、先が斜めに細まる。）したため採用し、確信度は低。 片方だけに残った候補はない。"
+        },
+        {
+          "id": "P3",
+          "opusIndependent": {
+            "id": "P3",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "足",
+                "owner": "",
+                "basis": "全体との関係",
+                "confidence": "低",
+                "evidence": "本体の下から下へ尖って垂れる小三角形",
+                "weaknesses": "一本だけで、本体の中央からずれる"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "terraIndependent": {
+            "id": "P3",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "ひれ",
+                "owner": "魚",
+                "basis": "両方",
+                "confidence": "低",
+                "evidence": "下端から下へ三角形に尖る。",
+                "weaknesses": "ひれの曲線や筋はない。"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "consensusCandidates": [
+            {
+              "rank": 1,
+              "noun": "足",
+              "owner": "",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "Opus: 本体の下から下へ尖って垂れる小三角形／Terra（第2段階 Q84 で支持）: 下端から下向きに小さく突出する。",
+              "weaknesses": "Opus: 一本だけで、本体の中央からずれる"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": "",
+          "agreementStatus": "合意",
+          "discussion": "Opus の「足」（低）は Q84 で Terra が支持（低: 下端から下向きに小さく突出する。）したため採用し、確信度は低。 Terra の「ひれ」（低）は Opus が不支持（本体の下から下へ尖る小三角形で、ひれ（腹びれ）とも足とも読めるが、ひれの手がかりは弱い）とし、Q85 で Terra が取り下げた（下向きの小三角形だけでは腹びれと判断する手がかりが乏しい。）ため不採用。 片方だけに残った候補はない。"
+        },
+        {
+          "id": "P4",
+          "opusIndependent": {
+            "id": "P4",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "翼",
+                "owner": "鳥",
+                "basis": "全体との関係",
+                "confidence": "低",
+                "evidence": "反対側の P2 と同じ高さで左へ張り出し、対になる",
+                "weaknesses": "正方形で先が尖らず、短い"
+              },
+              {
+                "rank": 2,
+                "noun": "尾",
+                "owner": "",
+                "basis": "全体との関係",
+                "confidence": "低",
+                "evidence": "本体の左側面の下部から左へ四角く突き出す",
+                "weaknesses": "正方形で短く、尾らしい細長さがない"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "terraIndependent": {
+            "id": "P4",
+            "candidates": [],
+            "noCandidate": true,
+            "noCandidateReason": "輪郭と接続だけでは、具体的な部分を十分に絞り込めない。"
+          },
+          "consensusCandidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "第2段階の検討で双方の候補がすべて取り下げられ、両者とも見立てなしで一致。Terra は第1段階で見立てなし（輪郭と接続だけでは、具体的な部分を十分に絞り込めない。）",
+          "agreementStatus": "合意",
+          "discussion": "Opus の「翼」（低）は Q86 で Terra が不支持（側面に付く正方形だが翼らしい広がりや先細りが見えない。）。Opus もこの理由を受け入れて取り下げ、不採用。 Opus の「尾」（低）は Q87 で Terra が不支持（左端の正方形が短く、尾として伸びる形が見えない。）。Opus もこの理由を受け入れて取り下げ、不採用。"
+        }
+      ]
+    },
+    {
+      "item": "item-25",
+      "regions": [
+        {
+          "id": "P1",
+          "opusIndependent": {
+            "id": "P1",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "尾びれ",
+                "owner": "魚",
+                "basis": "両方",
+                "confidence": "低",
+                "evidence": "左の尖りで本体に付き、右へ扇形に広がる大きな三角形",
+                "weaknesses": "全体の半分を占め、尾びれにしては大きい"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "terraIndependent": {
+            "id": "P1",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "尾びれ",
+                "owner": "魚",
+                "basis": "両方",
+                "confidence": "低",
+                "evidence": "右端に広がり左の接点から上下に開く。",
+                "weaknesses": "外縁が直線で尾びれの切れ込みはない。"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "consensusCandidates": [
+            {
+              "rank": 1,
+              "noun": "尾びれ",
+              "owner": "魚",
+              "basis": "両方",
+              "confidence": "低",
+              "evidence": "Opus: 左の尖りで本体に付き、右へ扇形に広がる大きな三角形／Terra: 右端に広がり左の接点から上下に開く。",
+              "weaknesses": "Opus: 全体の半分を占め、尾びれにしては大きい／Terra: 外縁が直線で尾びれの切れ込みはない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": "",
+          "agreementStatus": "合意",
+          "discussion": "「尾びれ」は第1段階で両者が独立に挙げた一致（Opus 低・Terra 低）で採用し、確信度は低い方の低。 片方だけに残った候補はない。"
+        },
+        {
+          "id": "P2",
+          "opusIndependent": {
+            "id": "P2",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "煙突",
+                "owner": "家",
+                "basis": "単独",
+                "confidence": "低",
+                "evidence": "縦に立つ四角い形の下辺が斜めに切れ、P1 の斜辺に載って上へ突き出す",
+                "weaknesses": "屋根らしい面の上ではなく、二つの領域の継ぎ目に立つ"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "terraIndependent": {
+            "id": "P2",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "煙突",
+                "owner": "建物",
+                "basis": "全体との関係",
+                "confidence": "低",
+                "evidence": "上端から垂直に伸びる。",
+                "weaknesses": "下端が尖り不規則である。"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "consensusCandidates": [
+            {
+              "rank": 1,
+              "noun": "煙突",
+              "owner": "家・建物",
+              "basis": "両方",
+              "confidence": "低",
+              "evidence": "Opus: 縦に立つ四角い形の下辺が斜めに切れ、P1 の斜辺に載って上へ突き出す／Terra: 上端から垂直に伸びる。",
+              "weaknesses": "Opus: 屋根らしい面の上ではなく、二つの領域の継ぎ目に立つ／Terra: 下端が尖り不規則である。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": "",
+          "agreementStatus": "合意",
+          "discussion": "「煙突」は第1段階で両者が独立に挙げた一致（Opus 低・Terra 低）で採用し、確信度は低い方の低。 片方だけに残った候補はない。"
+        },
+        {
+          "id": "P3",
+          "opusIndependent": {
+            "id": "P3",
+            "candidates": [],
+            "noCandidate": true,
+            "noCandidateReason": "中央下の台形で、P4 と P2 をつなぐだけで特定の部分に見えにくい"
+          },
+          "terraIndependent": {
+            "id": "P3",
+            "candidates": [],
+            "noCandidate": true,
+            "noCandidateReason": "輪郭と接続だけでは、具体的な部分を十分に絞り込めない。"
+          },
+          "consensusCandidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "両者とも第1段階で見立てなし（Opus: 中央下の台形で、P4 と P2 をつなぐだけで特定の部分に見えにくい／Terra: 輪郭と接続だけでは、具体的な部分を十分に絞り込めない。）",
+          "agreementStatus": "合意",
+          "discussion": "第1段階で両者とも見立てなしのため、第2段階の問いは置かず合意の見立てなしとした。"
+        },
+        {
+          "id": "P4",
+          "opusIndependent": {
+            "id": "P4",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "尾",
+                "owner": "",
+                "basis": "両方",
+                "confidence": "低",
+                "evidence": "左下から左上へ斜めに跳ね上がる細長い帯",
+                "weaknesses": "先端が垂直に切れ、反対側にも尾びれのような大きな三角形がある"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "terraIndependent": {
+            "id": "P4",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "尾羽",
+                "owner": "鳥",
+                "basis": "両方",
+                "confidence": "低",
+                "evidence": "左端で斜め上に細長く伸びる。",
+                "weaknesses": "先端が平らで羽毛は見えない。"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "consensusCandidates": [
+            {
+              "rank": 1,
+              "noun": "尾",
+              "owner": "鳥",
+              "basis": "両方",
+              "confidence": "低",
+              "evidence": "Opus（尾）: 左下から左上へ斜めに跳ね上がる細長い帯／Terra（尾羽）: 左端で斜め上に細長く伸びる。",
+              "weaknesses": "Opus: 先端が垂直に切れ、反対側にも尾びれのような大きな三角形がある／Terra: 先端が平らで羽毛は見えない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": "",
+          "agreementStatus": "合意",
+          "discussion": "Opus「尾」（低）と Terra「尾羽」（低）を同じ見立てとして照合し、Q88 で Terra が合意名詞「尾」に同意（左上へ斜めに伸びる突出を尾と呼び、尾羽は限定的な読みとする。）したため「尾」で採用。確信度は Terra の回答どおり低。 片方だけに残った候補はない。"
+        }
+      ]
+    },
+    {
+      "item": "item-26",
+      "regions": [
+        {
+          "id": "P1",
+          "opusIndependent": {
+            "id": "P1",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "頭",
+                "owner": "猫",
+                "basis": "全体との関係",
+                "confidence": "中",
+                "evidence": "斜めの本体の右上端に載り、上へ尖る頂をもつ五角形",
+                "weaknesses": "一般的な語で、向きの手がかりは上の尖りだけ"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "terraIndependent": {
+            "id": "P1",
+            "candidates": [],
+            "noCandidate": true,
+            "noCandidateReason": "輪郭と接続だけでは、具体的な部分を十分に絞り込めない。"
+          },
+          "consensusCandidates": [
+            {
+              "rank": 1,
+              "noun": "頭",
+              "owner": "猫",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "Opus: 斜めの本体の右上端に載り、上へ尖る頂をもつ五角形／Terra（第2段階 Q89 で支持）: 右上にまとまった多角形として位置し、下側の大きな領域と接する。",
+              "weaknesses": "Opus: 一般的な語で、向きの手がかりは上の尖りだけ"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": "",
+          "agreementStatus": "合意",
+          "discussion": "Opus の「頭」（中）は Q89 で Terra が支持（低: 右上にまとまった多角形として位置し、下側の大きな領域と接する。）したため採用し、確信度は低。 片方だけに残った候補はない。"
+        },
+        {
+          "id": "P2",
+          "opusIndependent": {
+            "id": "P2",
+            "candidates": [],
+            "noCandidate": true,
+            "noCandidateReason": "全体の半分を占める斜めの平行四辺形の本体で、領域全体として一つの部分に当たらない"
+          },
+          "terraIndependent": {
+            "id": "P2",
+            "candidates": [],
+            "noCandidate": true,
+            "noCandidateReason": "広い中心領域で、具体的な部分の形を特定しにくい。"
+          },
+          "consensusCandidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "両者とも第1段階で見立てなし（Opus: 全体の半分を占める斜めの平行四辺形の本体で、領域全体として一つの部分に当たらない／Terra: 広い中心領域で、具体的な部分の形を特定しにくい。）",
+          "agreementStatus": "合意",
+          "discussion": "第1段階で両者とも見立てなしのため、第2段階の問いは置かず合意の見立てなしとした。"
+        },
+        {
+          "id": "P3",
+          "opusIndependent": {
+            "id": "P3",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "尾",
+                "owner": "猫",
+                "basis": "全体との関係",
+                "confidence": "低",
+                "evidence": "斜めの本体の左上端から上へ尖って立つ小三角形",
+                "weaknesses": "短く、垂直な辺で立つ"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "terraIndependent": {
+            "id": "P3",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "ひれ",
+                "owner": "魚",
+                "basis": "両方",
+                "confidence": "低",
+                "evidence": "左上端に小さく立ち上がる三角形である。",
+                "weaknesses": "ひれの曲線や筋はない。"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "consensusCandidates": [
+            {
+              "rank": 1,
+              "noun": "尾",
+              "owner": "猫",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "Opus: 斜めの本体の左上端から上へ尖って立つ小三角形／Terra（第2段階 Q90 で支持）: 左端で小さく上向きに立つ三角形である。",
+              "weaknesses": "Opus: 短く、垂直な辺で立つ"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": "",
+          "agreementStatus": "合意",
+          "discussion": "Opus の「尾」（低）は Q90 で Terra が支持（低: 左端で小さく上向きに立つ三角形である。）したため採用し、確信度は低。 Terra の「ひれ」（低）は Opus が不支持（斜めの本体の後端から上へ立つ小三角形で、背びれにしては本体の端に寄りすぎる）とし、Q91 で Terra が取り下げた（最左端に寄り、背の途中に付くひれとしての位置が弱い。）ため不採用。 片方だけに残った候補はない。"
+        },
+        {
+          "id": "P4",
+          "opusIndependent": {
+            "id": "P4",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "脚",
+                "owner": "",
+                "basis": "全体との関係",
+                "confidence": "低",
+                "evidence": "本体の右下端から左下へ斜めに伸びて図形の最下端に届く帯",
+                "weaknesses": "一本だけで、先端が水平に切れる"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "terraIndependent": {
+            "id": "P4",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "脚",
+                "owner": "動物",
+                "basis": "全体との関係",
+                "confidence": "低",
+                "evidence": "右下から左下へ細長く伸びる。",
+                "weaknesses": "足先や関節は区別できない。"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "consensusCandidates": [
+            {
+              "rank": 1,
+              "noun": "脚",
+              "owner": "動物",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "Opus: 本体の右下端から左下へ斜めに伸びて図形の最下端に届く帯／Terra: 右下から左下へ細長く伸びる。",
+              "weaknesses": "Opus: 一本だけで、先端が水平に切れる／Terra: 足先や関節は区別できない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": "",
+          "agreementStatus": "合意",
+          "discussion": "「脚」は第1段階で両者が独立に挙げた一致（Opus 低・Terra 低）で採用し、確信度は低い方の低。 片方だけに残った候補はない。"
+        }
+      ]
+    },
+    {
+      "item": "item-27",
+      "regions": [
+        {
+          "id": "P1",
+          "opusIndependent": {
+            "id": "P1",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "くちばし",
+                "owner": "鳥",
+                "basis": "両方",
+                "confidence": "低",
+                "evidence": "図形の最上部で右へ尖り、下の P2 の尖りとの間に開いた口のような切れ込みをつくる",
+                "weaknesses": "水平な上辺が広く、くちばしにしては幅がある"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "terraIndependent": {
+            "id": "P1",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "歯",
+                "owner": "のこぎり",
+                "basis": "両方",
+                "confidence": "低",
+                "evidence": "上端の幅広い辺から下へ三角形に尖る。",
+                "weaknesses": "単独の歯で歯列はない。"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "consensusCandidates": [
+            {
+              "rank": 1,
+              "noun": "歯",
+              "owner": "のこぎり",
+              "basis": "両方",
+              "confidence": "低",
+              "evidence": "Terra: 上端の幅広い辺から下へ三角形に尖る。／Opus（第2段階で支持）: 右辺の尖りの並び（P1 の右角と P2 の右端）がのこぎりの歯の列に見え、P1 はその一つとして読める",
+              "weaknesses": "Terra: 単独の歯で歯列はない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": "",
+          "agreementStatus": "合意",
+          "discussion": "Opus の「くちばし」（低）は Q92 で Terra が不支持（三角形の下向き頂点は他領域に接し、くちばしの独立した先には見えにくい。）。Opus もこの理由を受け入れて取り下げ、不採用。 Terra の「歯」（第1段階 低）は Opus が第2段階で支持（低: 右辺の尖りの並び（P1 の右角と P2 の右端）がのこぎりの歯の列に見え、P1 はその一つとして読める）、Q93 で Terra も維持（低: 右側に並ぶ鋭い外縁の一つとして読める。）したため採用し、確信度は低。 片方だけに残った候補はない。"
+        },
+        {
+          "id": "P2",
+          "opusIndependent": {
+            "id": "P2",
+            "candidates": [],
+            "noCandidate": true,
+            "noCandidateReason": "全体の半分を占める大三角形で、右の尖りはあるが領域全体として一つの部分に当たらない"
+          },
+          "terraIndependent": {
+            "id": "P2",
+            "candidates": [],
+            "noCandidate": true,
+            "noCandidateReason": "広い中心領域で、具体的な部分の形を特定しにくい。"
+          },
+          "consensusCandidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "両者とも第1段階で見立てなし（Opus: 全体の半分を占める大三角形で、右の尖りはあるが領域全体として一つの部分に当たらない／Terra: 広い中心領域で、具体的な部分の形を特定しにくい。）",
+          "agreementStatus": "合意",
+          "discussion": "第1段階で両者とも見立てなしのため、第2段階の問いは置かず合意の見立てなしとした。"
+        },
+        {
+          "id": "P3",
+          "opusIndependent": {
+            "id": "P3",
+            "candidates": [],
+            "noCandidate": true,
+            "noCandidateReason": "P2 の下に付く三角形で、上向きの頂は切れ込みの中にあり外へ突き出さない"
+          },
+          "terraIndependent": {
+            "id": "P3",
+            "candidates": [],
+            "noCandidate": true,
+            "noCandidateReason": "輪郭と接続だけでは、具体的な部分を十分に絞り込めない。"
+          },
+          "consensusCandidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "両者とも第1段階で見立てなし（Opus: P2 の下に付く三角形で、上向きの頂は切れ込みの中にあり外へ突き出さない／Terra: 輪郭と接続だけでは、具体的な部分を十分に絞り込めない。）",
+          "agreementStatus": "合意",
+          "discussion": "第1段階で両者とも見立てなしのため、第2段階の問いは置かず合意の見立てなしとした。"
+        },
+        {
+          "id": "P4",
+          "opusIndependent": {
+            "id": "P4",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "足",
+                "owner": "",
+                "basis": "全体との関係",
+                "confidence": "低",
+                "evidence": "図形の右下端で床に接する正方形",
+                "weaknesses": "正方形で尖りがなく、足らしさは位置だけによる"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "terraIndependent": {
+            "id": "P4",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "足",
+                "owner": "動物",
+                "basis": "全体との関係",
+                "confidence": "低",
+                "evidence": "右下端に四角く付く。",
+                "weaknesses": "指や足首は見えない。"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "consensusCandidates": [
+            {
+              "rank": 1,
+              "noun": "足",
+              "owner": "動物",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "Opus: 図形の右下端で床に接する正方形／Terra: 右下端に四角く付く。",
+              "weaknesses": "Opus: 正方形で尖りがなく、足らしさは位置だけによる／Terra: 指や足首は見えない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": "",
+          "agreementStatus": "合意",
+          "discussion": "「足」は第1段階で両者が独立に挙げた一致（Opus 低・Terra 低）で採用し、確信度は低い方の低。 片方だけに残った候補はない。"
+        },
+        {
+          "id": "P5",
+          "opusIndependent": {
+            "id": "P5",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "尾",
+                "owner": "鳥",
+                "basis": "全体との関係",
+                "confidence": "低",
+                "evidence": "本体の左側面から左下へ斜めに垂れる帯",
+                "weaknesses": "先端が垂直に切れ、尾にしては太い"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "terraIndependent": {
+            "id": "P5",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "脚",
+                "owner": "動物",
+                "basis": "全体との関係",
+                "confidence": "低",
+                "evidence": "左側から左下へ細長く伸びる。",
+                "weaknesses": "関節や足先は見えない。"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "consensusCandidates": [
+            {
+              "rank": 1,
+              "noun": "尾",
+              "owner": "鳥",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "Opus: 本体の左側面から左下へ斜めに垂れる帯／Terra（第2段階 Q94 で支持）: 中央左側から左下へ細長く垂れる。",
+              "weaknesses": "Opus: 先端が垂直に切れ、尾にしては太い"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": "",
+          "agreementStatus": "合意",
+          "discussion": "Opus の「尾」（低）は Q94 で Terra が支持（低: 中央左側から左下へ細長く垂れる。）したため採用し、確信度は低。 Terra の「脚」（低）は Opus が不支持（本体の側面の中ほどから左下へ垂れ、図形の下端（P4 の下辺）まで届かないため脚としては短い）とし、Q95 で Terra が取り下げた（本体の側面中ほどから伸び、図形の最下端には届かない。）ため不採用。 片方だけに残った候補はない。"
+        }
+      ]
+    },
+    {
+      "item": "item-28",
+      "regions": [
+        {
+          "id": "P1",
+          "opusIndependent": {
+            "id": "P1",
+            "candidates": [],
+            "noCandidate": true,
+            "noCandidateReason": "全体の7割を占める縦長の本体で、下端は尖るが領域全体として一つの部分に当たらない"
+          },
+          "terraIndependent": {
+            "id": "P1",
+            "candidates": [],
+            "noCandidate": true,
+            "noCandidateReason": "広い中心領域で、具体的な部分の形を特定しにくい。"
+          },
+          "consensusCandidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "両者とも第1段階で見立てなし（Opus: 全体の7割を占める縦長の本体で、下端は尖るが領域全体として一つの部分に当たらない／Terra: 広い中心領域で、具体的な部分の形を特定しにくい。）",
+          "agreementStatus": "合意",
+          "discussion": "第1段階で両者とも見立てなしのため、第2段階の問いは置かず合意の見立てなしとした。"
+        },
+        {
+          "id": "P2",
+          "opusIndependent": {
+            "id": "P2",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "尾",
+                "owner": "",
+                "basis": "全体との関係",
+                "confidence": "低",
+                "evidence": "本体の右側から右上へ斜めに立ち上がる帯で、本体との間に V 字の切れ込みをつくる",
+                "weaknesses": "先端が水平に切れ、帯が太い"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "terraIndependent": {
+            "id": "P2",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "羽",
+                "owner": "鳥",
+                "basis": "両方",
+                "confidence": "低",
+                "evidence": "右上へ細長く斜めに伸びる。",
+                "weaknesses": "先端が平らで羽毛の細部はない。"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "consensusCandidates": [
+            {
+              "rank": 1,
+              "noun": "尾",
+              "owner": "",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "Opus: 本体の右側から右上へ斜めに立ち上がる帯で、本体との間に V 字の切れ込みをつくる／Terra（第2段階 Q96 で支持）: 右上端から斜め上へ細長く延びている。",
+              "weaknesses": "Opus: 先端が水平に切れ、帯が太い"
+            },
+            {
+              "rank": 2,
+              "noun": "翼",
+              "owner": "鳥",
+              "basis": "両方",
+              "confidence": "低",
+              "evidence": "Terra: 右上へ細長く斜めに伸びる。／Opus（第2段階で支持）: 本体の右上から斜め上へ持ち上がる板状の帯で、上げた翼として読める",
+              "weaknesses": "Terra: 先端が平らで羽毛の細部はない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": "",
+          "agreementStatus": "合意",
+          "discussion": "Opus の「尾」（低）は Q96 で Terra が支持（低: 右上端から斜め上へ細長く延びている。）したため採用し、確信度は低。 Terra の「羽」（第1段階 低）は Opus が第2段階で支持（低: 本体の右上から斜め上へ持ち上がる板状の帯で、上げた翼として読める）、名詞は Opus の提案どおり「翼」に具体化（Q97 で Terra 同意: 右上へ持ち上がる帯状の形を翼と呼ぶことに同意する。）したため採用し、確信度は低。 片方だけに残った候補はない。"
+        },
+        {
+          "id": "P3",
+          "opusIndependent": {
+            "id": "P3",
+            "candidates": [],
+            "noCandidate": true,
+            "noCandidateReason": "本体の右側面から四角く突き出すが、上下の手がかりが乏しく特定の部分に絞れない"
+          },
+          "terraIndependent": {
+            "id": "P3",
+            "candidates": [],
+            "noCandidate": true,
+            "noCandidateReason": "輪郭と接続だけでは、具体的な部分を十分に絞り込めない。"
+          },
+          "consensusCandidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "両者とも第1段階で見立てなし（Opus: 本体の右側面から四角く突き出すが、上下の手がかりが乏しく特定の部分に絞れない／Terra: 輪郭と接続だけでは、具体的な部分を十分に絞り込めない。）",
+          "agreementStatus": "合意",
+          "discussion": "第1段階で両者とも見立てなしのため、第2段階の問いは置かず合意の見立てなしとした。"
+        }
+      ]
+    },
+    {
+      "item": "item-29",
+      "regions": [
+        {
+          "id": "P1",
+          "opusIndependent": {
+            "id": "P1",
+            "candidates": [],
+            "noCandidate": true,
+            "noCandidateReason": "全体の半分を占める斜めの平行四辺形の本体で、領域全体として一つの部分に当たらない"
+          },
+          "terraIndependent": {
+            "id": "P1",
+            "candidates": [],
+            "noCandidate": true,
+            "noCandidateReason": "広い中心領域で、具体的な部分の形を特定しにくい。"
+          },
+          "consensusCandidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "両者とも第1段階で見立てなし（Opus: 全体の半分を占める斜めの平行四辺形の本体で、領域全体として一つの部分に当たらない／Terra: 広い中心領域で、具体的な部分の形を特定しにくい。）",
+          "agreementStatus": "合意",
+          "discussion": "第1段階で両者とも見立てなしのため、第2段階の問いは置かず合意の見立てなしとした。"
+        },
+        {
+          "id": "P2",
+          "opusIndependent": {
+            "id": "P2",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "耳",
+                "owner": "猫",
+                "basis": "両方",
+                "confidence": "中",
+                "evidence": "図形の最上端で上へ鋭く尖る三角形で、右の P4 との間に U 字の切れ込みをつくる",
+                "weaknesses": "垂直な右辺で立ち、耳にしては大きい"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "terraIndependent": {
+            "id": "P2",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "ひれ",
+                "owner": "魚",
+                "basis": "両方",
+                "confidence": "低",
+                "evidence": "上端から上へ三角形に尖る。",
+                "weaknesses": "ひれの曲線や筋はない。"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "consensusCandidates": [
+            {
+              "rank": 1,
+              "noun": "耳",
+              "owner": "猫",
+              "basis": "両方",
+              "confidence": "低",
+              "evidence": "Opus: 図形の最上端で上へ鋭く尖る三角形で、右の P4 との間に U 字の切れ込みをつくる／Terra（第2段階 Q98 で支持）: 上部に付く三角形が上へ鋭く立ち上がる。",
+              "weaknesses": "Opus: 垂直な右辺で立ち、耳にしては大きい"
+            },
+            {
+              "rank": 2,
+              "noun": "背びれ",
+              "owner": "魚",
+              "basis": "両方",
+              "confidence": "低",
+              "evidence": "Terra: 上端から上へ三角形に尖る。／Opus（第2段階で支持）: 垂直な右辺で上へ尖る直角三角形は背びれの形に合う",
+              "weaknesses": "Terra: ひれの曲線や筋はない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": "",
+          "agreementStatus": "合意",
+          "discussion": "Opus の「耳」（中）は Q98 で Terra が支持（低: 上部に付く三角形が上へ鋭く立ち上がる。）したため採用し、確信度は低。 Terra の「ひれ」（第1段階 低）は Opus が第2段階で支持（低: 垂直な右辺で上へ尖る直角三角形は背びれの形に合う）、名詞は Opus の提案どおり「背びれ」に具体化（Q99 で Terra 同意: 上端に立つ三角形であり、ひれを背びれと具体化できる。）したため採用し、確信度は低。 片方だけに残った候補はない。"
+        },
+        {
+          "id": "P3",
+          "opusIndependent": {
+            "id": "P3",
+            "candidates": [],
+            "noCandidate": true,
+            "noCandidateReason": "耳のような P2 と P4 の間の下に付く逆三角形だが、頭部の一部にとどまり単独の部分に絞れない"
+          },
+          "terraIndependent": {
+            "id": "P3",
+            "candidates": [],
+            "noCandidate": true,
+            "noCandidateReason": "輪郭と接続だけでは、具体的な部分を十分に絞り込めない。"
+          },
+          "consensusCandidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "両者とも第1段階で見立てなし（Opus: 耳のような P2 と P4 の間の下に付く逆三角形だが、頭部の一部にとどまり単独の部分に絞れない／Terra: 輪郭と接続だけでは、具体的な部分を十分に絞り込めない。）",
+          "agreementStatus": "合意",
+          "discussion": "第1段階で両者とも見立てなしのため、第2段階の問いは置かず合意の見立てなしとした。"
+        },
+        {
+          "id": "P4",
+          "opusIndependent": {
+            "id": "P4",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "耳",
+                "owner": "猫",
+                "basis": "全体との関係",
+                "confidence": "低",
+                "evidence": "左の P2 と並んで上へ突き出し、間に U 字の切れ込みをつくる",
+                "weaknesses": "正方形で先が尖らない"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "terraIndependent": {
+            "id": "P4",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "煙突",
+                "owner": "建物",
+                "basis": "全体との関係",
+                "confidence": "低",
+                "evidence": "右上端から四角く立ち上がる。",
+                "weaknesses": "幅と高さが同じで短い。"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "consensusCandidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "第2段階の検討で双方の候補がすべて取り下げられ、両者とも見立てなしで一致",
+          "agreementStatus": "合意",
+          "discussion": "Opus の「耳」（低）は Q100 で Terra が不支持（上に位置するが正方形で、耳の細長さや尖りが見えない。）。Opus もこの理由を受け入れて取り下げ、不採用。 Terra の「煙突」（低）は Opus が不支持（P3 の水平な上辺に載る正方形だが、屋根に当たる領域がなく、左の P2 と対になって上へ突き出す形の方が目立つ）とし、Q101 で Terra が取り下げた（四角が載る下の領域に屋根や甲板の手がかりが乏しい。）ため不採用。"
+        },
+        {
+          "id": "P5",
+          "opusIndependent": {
+            "id": "P5",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "尾",
+                "owner": "",
+                "basis": "全体との関係",
+                "confidence": "低",
+                "evidence": "本体の左側面から左下へ斜めに垂れる帯",
+                "weaknesses": "先端が垂直に切れ、尾にしては太い"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "terraIndependent": {
+            "id": "P5",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "脚",
+                "owner": "動物",
+                "basis": "全体との関係",
+                "confidence": "低",
+                "evidence": "左側から左下へ細長く伸びる。",
+                "weaknesses": "関節や足先は見えない。"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "consensusCandidates": [
+            {
+              "rank": 1,
+              "noun": "尾",
+              "owner": "",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "Opus: 本体の左側面から左下へ斜めに垂れる帯／Terra（第2段階 Q102 で支持）: 左側から左下へ細長く伸びている。",
+              "weaknesses": "Opus: 先端が垂直に切れ、尾にしては太い"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": "",
+          "agreementStatus": "合意",
+          "discussion": "Opus の「尾」（低）は Q102 で Terra が支持（低: 左側から左下へ細長く伸びている。）したため採用し、確信度は低。 Terra の「脚」（低）は Opus が不支持（本体の側面の中ほどから左下へ垂れ、図形の下端まで届かないため脚としては短い）とし、Q103 で Terra が取り下げた（中央の側面から伸びるが図形の最下端まで届かない。）ため不採用。 片方だけに残った候補はない。"
+        }
+      ]
+    },
+    {
+      "item": "item-30",
+      "regions": [
+        {
+          "id": "P1",
+          "opusIndependent": {
+            "id": "P1",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "鼻",
+                "owner": "",
+                "basis": "全体との関係",
+                "confidence": "低",
+                "evidence": "大きな三角形の右下に付き、右へ細くなって平らな先端で終わる",
+                "weaknesses": "先が尖らず、本体より下へはみ出す"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "terraIndependent": {
+            "id": "P1",
+            "candidates": [],
+            "noCandidate": true,
+            "noCandidateReason": "輪郭と接続だけでは、具体的な部分を十分に絞り込めない。"
+          },
+          "consensusCandidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "第2段階の検討で双方の候補がすべて取り下げられ、両者とも見立てなしで一致。Terra は第1段階で見立てなし（輪郭と接続だけでは、具体的な部分を十分に絞り込めない。）",
+          "agreementStatus": "合意",
+          "discussion": "Opus の「鼻」（低）は Q104 で Terra が不支持（右下の細長い多角形は大きく、鼻先としての位置が定まりにくい。）。Opus もこの理由を受け入れて取り下げ、不採用。"
+        },
+        {
+          "id": "P2",
+          "opusIndependent": {
+            "id": "P2",
+            "candidates": [],
+            "noCandidate": true,
+            "noCandidateReason": "全体の半分を占める中心の三角形で、上端の尖りはあるが領域全体として一つの部分に当たらない"
+          },
+          "terraIndependent": {
+            "id": "P2",
+            "candidates": [],
+            "noCandidate": true,
+            "noCandidateReason": "広い中心領域で、具体的な部分の形を特定しにくい。"
+          },
+          "consensusCandidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "両者とも第1段階で見立てなし（Opus: 全体の半分を占める中心の三角形で、上端の尖りはあるが領域全体として一つの部分に当たらない／Terra: 広い中心領域で、具体的な部分の形を特定しにくい。）",
+          "agreementStatus": "合意",
+          "discussion": "第1段階で両者とも見立てなしのため、第2段階の問いは置かず合意の見立てなしとした。"
+        },
+        {
+          "id": "P3",
+          "opusIndependent": {
+            "id": "P3",
+            "candidates": [],
+            "noCandidate": true,
+            "noCandidateReason": "P2 と P4 の間の段を埋める小三角形で、外へ尖りを出さない"
+          },
+          "terraIndependent": {
+            "id": "P3",
+            "candidates": [],
+            "noCandidate": true,
+            "noCandidateReason": "輪郭と接続だけでは、具体的な部分を十分に絞り込めない。"
+          },
+          "consensusCandidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "両者とも第1段階で見立てなし（Opus: P2 と P4 の間の段を埋める小三角形で、外へ尖りを出さない／Terra: 輪郭と接続だけでは、具体的な部分を十分に絞り込めない。）",
+          "agreementStatus": "合意",
+          "discussion": "第1段階で両者とも見立てなしのため、第2段階の問いは置かず合意の見立てなしとした。"
+        },
+        {
+          "id": "P4",
+          "opusIndependent": {
+            "id": "P4",
+            "candidates": [
+              {
+                "rank": 1,
+                "noun": "首",
+                "owner": "",
+                "basis": "全体との関係",
+                "confidence": "低",
+                "evidence": "大きな本体の左から左へ水平に伸びる帯",
+                "weaknesses": "短く太く、先に何も付かない"
+              },
+              {
+                "rank": 2,
+                "noun": "尾",
+                "owner": "",
+                "basis": "全体との関係",
+                "confidence": "低",
+                "evidence": "本体の後ろ（左）へ突き出す",
+                "weaknesses": "四角く太く、尾らしい細さがない"
+              }
+            ],
+            "noCandidate": false,
+            "noCandidateReason": ""
+          },
+          "terraIndependent": {
+            "id": "P4",
+            "candidates": [],
+            "noCandidate": true,
+            "noCandidateReason": "輪郭と接続だけでは、具体的な部分を十分に絞り込めない。"
+          },
+          "consensusCandidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "第2段階の検討で双方の候補がすべて取り下げられ、両者とも見立てなしで一致。Terra は第1段階で見立てなし（輪郭と接続だけでは、具体的な部分を十分に絞り込めない。）",
+          "agreementStatus": "合意",
+          "discussion": "Opus の「首」（低）は Q105 で Terra が不支持（左端に伸びるがその先に頭に当たる領域がない。）。Opus もこの理由を受け入れて取り下げ、不採用。 Opus の「尾」（低）は Q106 で Terra が不支持（左端の幅広い台形は短く、尾が伸びる特徴に乏しい。）。Opus もこの理由を受け入れて取り下げ、不採用。"
+        }
+      ]
+    }
+  ]
+}

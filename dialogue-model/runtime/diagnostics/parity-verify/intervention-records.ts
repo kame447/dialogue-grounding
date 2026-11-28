@@ -40,6 +40,7 @@ import {NAMING_GUIDANCE,holdPublication,namingHold,namingInputMatches,namingMate
 import {draftTopicShiftMatches,TOPIC_SHIFT_CHOICES,TOPIC_SHIFT_RETRY_REASON} from './draft-topic-shift-records.ts';
 import {retainedClassificationMatches,retainedGenerationMatches,retainedReferenceHistory,RETAINED_REFERENCE_EXTRACTION} from './retained-reference-records.ts';
 import {v23OutputMatches,v23PlanMatches,v23PlanMessage} from './generation-prompt-v23-records.ts';
+import {rotationTurn,rotationJevMatches,rotationLunaMatches,rotationObserveMatches,rotationAiPrompt,rotationVersion,memoInLayer,EXTRACTION_ROTATION_USE} from './turned-view-records.ts';
 import {extractionEvidenceForJob,isIssueHandlingExecution,issueHandlingDecisionShape,issueHandlingExtraRequestsMatch,issueHandlingFailureStage,issueHandlingFeatureScope,
  issueHandlingBasisMatches,issueHandlingCloseMatches,issueHandlingLedger,issueHandlingPartsMatch,issueHandlingPublicationPath,
  issueHandlingRelation,issueHandlingReplayBoundary,issueHandlingRequestMatches,issueHandlingSourcesMatch,
@@ -1315,7 +1316,7 @@ function generatedRetryMessagesMatch(generations:any[],topics:ReadonlyMap<number
  return true;
 }
 function generatedReplayProof(tr:any,t:any,tape:any,result:any,pair:any,
-  referenceEvidence:ReturnType<typeof buildReferenceEvidence>|null,graph:any):'missing'|'invalid'|'ok' {
+  referenceEvidence:ReturnType<typeof buildReferenceEvidence>|null,graph:any,prompt:PromptVersion):'missing'|'invalid'|'ok' {
  if(!pair)return'missing';
  if(!equal(result.sides,[pair.left,pair.right])||tape.recorded.label!==tr.label)return'invalid';
  if(s4UsesIssueHandling(tape.generationRetryVersion)&&!equal(
@@ -1354,6 +1355,11 @@ function generatedReplayProof(tr:any,t:any,tape:any,result:any,pair:any,
  const humanRequestedMove=moveSource?.choices?.[MOVE_ON_SOURCE_QUESTION]==='human_request'&&
   validMoveOnSource(moveSource.choices[MOVE_ON_SOURCE_QUESTION],moveSource.scores?.[MOVE_ON_SOURCE_QUESTION]);
  const generationPlans=new Map<string,unknown>();
+ // The memo the turn starts with decides whether its requests carry the rotation memory (the independent table is in turned-view-records.ts).
+ // Only the registered rotation-memory version may carry it: the earlier versions' sources do not hold its texts.
+ const rot=rotationTurn(tape.state?.observationMemo,t.observationMemo);
+ if(!rot||rot.carried&&!rotationVersion(prompt.id))return'invalid';
+ const aiPrompt=(visualFeatures:boolean)=>rotationAiPrompt(rot,memoAiExtractionPrompt(SHAPE_TERMINOLOGY_GENERATION),memoAiExtractionPrompt(SHAPE_TERMINOLOGY_GENERATION,true),VISUAL_FEATURE_SOURCES_V19,visualFeatures);
  for(const [n,label] of ['repair-first','bypass-enabled'].entries()){
   const s=result.sides[n],m=s?.material,tail=tape.tails?.[label],p=s?.generatedPublication;
   if(!tail)return'missing';
@@ -1390,6 +1396,8 @@ function generatedReplayProof(tr:any,t:any,tape:any,result:any,pair:any,
   const topicActRecords:any[]=[];
   for(const req of s.requests){
    if(!['luna','jev'].includes(req.provider)||req.payloadDomain!=='canonical_http_json'||hash(req.payload)!==req.payloadSha256)return'invalid';
+   if(!(req.provider==='luna'?rotationLunaMatches(rot,req.phase,req.payload):rotationJevMatches(rot,req.payload,
+     {terminology:SHAPE_TERMINOLOGY,sharedAccept:SHARED_ACCEPT,sharedConfirm:SHARED_CONFIRM,repairQuality:Object.values(REPAIR_QUALITY_ACTION) as string[]})))return'invalid';
    const provider=req.provider as keyof typeof counters,answer=recorded[provider][counters[provider]++];
    if(!answer)return'missing';
    if(provider==='luna'){
@@ -1398,12 +1406,12 @@ function generatedReplayProof(tr:any,t:any,tape:any,result:any,pair:any,
      const promptIndex=req.phase==='generation'?1:['local_extraction','ai_extraction'].includes(req.phase)?0:-1;
      if(promptIndex>=0){
       const prompt=req.payload.messages?.[promptIndex];
-     const suffix='\n'+SHAPE_TERMINOLOGY+(v22&&req.phase==='local_extraction'&&localHistory.length?'\n'+RETAINED_REFERENCE_EXTRACTION:'');
+     const suffix='\n'+SHAPE_TERMINOLOGY+(rot.carried&&req.phase==='local_extraction'?'\n'+EXTRACTION_ROTATION_USE:'')+(v22&&req.phase==='local_extraction'&&localHistory.length?'\n'+RETAINED_REFERENCE_EXTRACTION:'');
      if(prompt?.role!=='system'||typeof prompt.content!=='string'||
          (visual&&req.phase==='ai_extraction'
-          ? ![memoAiExtractionPrompt(SHAPE_TERMINOLOGY_GENERATION),memoAiExtractionPrompt(SHAPE_TERMINOLOGY_GENERATION,true)].includes(prompt.content)
+          ? ![aiPrompt(false),aiPrompt(true)].includes(prompt.content)
           : !prompt.content.endsWith(suffix)))return'invalid';
-      if(checksOff&&req.phase==='ai_extraction'&&prompt.content!==memoAiExtractionPrompt(SHAPE_TERMINOLOGY_GENERATION))return'invalid';
+      if(checksOff&&req.phase==='ai_extraction'&&prompt.content!==aiPrompt(false))return'invalid';
       if((!visual||checksOff)&&req.phase==='ai_extraction'&&label===tr.label&&
          !equal(t.aiPublic?.prompts?.extraction,{version:2,sha256:s4Sha256(prompt.content)}))return'invalid';
      }
@@ -1527,6 +1535,7 @@ function generatedReplayProof(tr:any,t:any,tape:any,result:any,pair:any,
   }
   if(issueCtx&&[...actionMaterial].some(([decision,input])=>!decisionsWithExtras.has(decision)&&
      !issueHandlingExtraRequestsMatch(decision,input,issueCtx)))return'invalid';
+  if(!rotationObserveMatches(rot,t.decisions,history.find((e:any)=>e.speaker==='human'&&e.seq===t.turnIndex)?.text))return'invalid';
   if(counters.luna!==recorded.luna.length||counters.jev!==recorded.jev.length||originalActions!==t.decisions.length||recoveryActions!==(p.recovery?1:0)||
      ![1,2].includes(generations.length-priorDrafts)||typeof lastRaw!=='string')return'invalid';
   if((checksTopic||checksOff)&&!generatedRetryMessagesMatch(generations,inspectedTopics,tape.generationRetryVersion))return'invalid';
@@ -1569,9 +1578,9 @@ function generatedReplayProof(tr:any,t:any,tape:any,result:any,pair:any,
    const raw=JSON.parse(lastExtraction.answer.response?.text??lastExtraction.answer.text);
    const evidence=readVisualFeatureEvidence(raw.visualFeatures,t.observationMemo,ids,text);
    if(!exact(raw,['segments','visualFeatures'])||!Array.isArray(raw.segments)||!evidence||!sameVisualFeatureSources(draft.sources,evidence)||
-      !equal(p.visualFeatures,evidence)||!equal(request.observations,t.observationMemo)||
+      !equal(p.visualFeatures,evidence)||!equal(request.observations,memoInLayer(t.observationMemo,'nouns'))||
       request.candidateText!==(move===null?text:text+'\n'+move)||Object.hasOwn(request,'observationFeatures')||
-      payload[0].content!==memoAiExtractionPrompt(SHAPE_TERMINOLOGY_GENERATION,true)||
+      payload[0].content!==aiPrompt(true)||
       label===tr.label&&!equal(t.aiPublic?.prompts?.extraction,{version:3,sha256:s4Sha256(payload[0].content)}))return'invalid';
    if(issueCtx){
     extraction=extractionEvidenceForJob(raw.segments,request.candidateText,issueCtx.slots,t.turnIndex,request.publicTurns)??undefined;
@@ -1599,7 +1608,7 @@ function generatedReplayProof(tr:any,t:any,tape:any,result:any,pair:any,
       ...(label===tr.label?{graphRevision:graph?.revision}:{})}))return'invalid';
    if(!issueHandlingPartsMatch(p,ex,speech,draftParts))return'invalid';
    const messages=generations.at(-1).payload.messages;
-   if(v23?!v23OutputMatches(messages,!!draftParts,structuredVisual,combined,checksOff):
+   if(v23?!v23OutputMatches(messages,!!draftParts,structuredVisual,combined,checksOff,rot.carried):
       !issueHandlingGenerationScope(messages,ex,finals,visualDetail,combined,v22,tr.profile?.judgmentMaterialVersion===JEV_REPAIR_QUALITY_VERSION,
        t.namingReconfirm===true,tape.state.ledger))return'invalid';
    const start=messages.at(-1)?.content?.startsWith('公開発話を書き直してください。')?messages.slice(0,-1):messages;
@@ -1687,7 +1696,7 @@ function replayProof(records:any,tr:any,t:any,key:string):'missing'|'invalid'|'o
   const scope=tape.state.agreeNameScopeVersion;
   if((rechecksJevNamingAnswers(scope)||s4UsesV22GenerationRules(version))&&
      (committedState?.agreeNameScopeVersion!==scope||s4LocalReverify(tape,t,tr.profile.dialoguePolicy,committed)!=='ok'))return'invalid';
-  return generatedReplayProof(tr,t,tape,result,pair,referenceEvidence,committed);
+  return generatedReplayProof(tr,t,tape,result,pair,referenceEvidence,committed,v);
  }
   const policy=tr.profile?.dialoguePolicy??null;
   const p5=p5At(layout,policy,version),p5Overclaim=p5OverclaimAt(layout,policy,version);
@@ -3475,6 +3484,35 @@ const PROMPT_VERSIONS:readonly PromptVersion[]=[
   'v2/issue-publication.ts':'55c17c514d0257803276ee451eaf4279b00fde0bdced13dd09ae91c1f03259a9',
   'decision/human-led-move-on.ts':'7c5dc7ff16877f1d9ff5cb6a777895c91aeb28fa6e31af1e7ab3d4ad5ed8d048',
   'v2/generation-prompt-v23.ts':'2493816a3a3acf689c02a92df09966a39f7501a716df9e3fc6abca696049b9f5',
+ }},fixed:FIXED_I172,native:NATIVE_I172},
+ // Rotation memory (new pin): the v24 instruction text for every earlier mode plus the rotation-memory texts carried only by a request whose memo has a rotation memory.
+ {id:'p5_pilot012_rotation_memory_v1',i172:true,fourFigures:true,threeFigures:true,styleMode:'research_split',sources:{scheme:'complete_instruction_source_sha256',files:{
+  'v2/dialogue-v2.mjs':'16885924a3466586d39d704f0979329f1e4ac71b765941a095d716ea4180c42e',
+  'v2/jev-turn.ts':'0e3f6a1508d07fbd28a38abc2d0e713a5df67f06f3b0f02caa346262c58b3623',
+  'v2/generation-guard.ts':'51359cb086b5a78f023a4dd5b801f31e13e60177efdd83cbf529bb6933a03b00',
+  'judgment/instructions.mjs':'eeb20c812729d04e52437a064b31fcd8af60ee2da8b1f6e73d99c4eb8dc8a785',
+  'observation/observe.ts':'c8f624c73ee69123092219153b9352f4bfe57168a266b5873f921e391dadb9ab',
+  'observation/parts.ts':'3f69275305aa81a3d7135022e639a7d58ec4b0ffe7293a787189e5b431dc8ea9',
+  'observation/part-consumers.ts':'f48c05b8b8cce2b077702d65fac541f87465d5226e867a2d4c669ab39da33ef1',
+  'stimuli/primary-regions.ts':'5257332eb539836ad33cc50ca926dc05bb08cf093a42fd044542e00b4246a07b',
+  'stimuli/primary-regions-data.ts':'04dc40bf52e3adbe709767283a4998ac9f4eaeaa295d64ebaf583fa4c12db314',
+  'stimuli/part-geometry.ts':'7581f27cb9849dd5c01aa2dcbac39e696a3ecd89f833b5eb3a3d5e86358d1692',
+  'stimuli/rotation-memory-shape.ts':'acb02a7d3e821f99838178ace2a7591351ad12b6130a83da071108cdcccea8f3',
+  'stimuli/rotation-memory.ts':'8527df56df9746f8de1a867607c153945c55ed4458c6c172b6d9f19d66d96b72',
+  'stimuli/rotation-memory-data.ts':'46240f8edc222b2c22d18e618af59e1e81769c3f28b86655fdd5645c12e02797',
+  'observation/rotation-memo.ts':'a6a3c18ee9e6ac502de22f46f3ae80be9c4259f24cda8d55d38bb672f6eb3fc7',
+  'decision/rotation-memory-guidance.ts':'27c181a5e8f45694c421d79ebcef84a44ec32dae7c6b1713fb712f61c6e7a84f',
+  'local-grounding/extract.ts':'f71f0b21d1e1a2b5cf6595689d40fc80d7d60d7f0040b31f744d23d677d027d2',
+  'local-grounding/jev-local-test.ts':'64084d50c6d5855cbe64665ad156c6af5d9d3bf061d5e2de372904e45e88df01',
+  'decision/jev-decision.ts':'b43280f143f826ca54ddefc6acaca07d61a4ed3cd86a3de187d54219d3b076b5',
+  'local-grounding/extract-ai.ts':'cc924258d41aa26bf70378f96c1de6e938f416a39a00a2f88b465de116868949',
+  'local-grounding/jev-ai-public.ts':'6d3e05a7fb12778754a6cd8ba9c7b00e7045fa55daeded213a46a5a10375f1c7',
+  'shape-terminology.ts':'80fddf9e0947ae4e8dad85f3cf5e27700a070f0897225a565967623012ac3cf9',
+  'v2/visual-feature-evidence.ts':'6f03c678fd3856c80e9613ad79874a4b601dbbef691ff47063d065ca5a6a21ba',
+  'v2/deferred-ai-extraction.ts':'10f7c9aa53242a55c75b6696be8dc193736b4b695b6016d768737ce0683efa08',
+  'v2/issue-publication.ts':'55c17c514d0257803276ee451eaf4279b00fde0bdced13dd09ae91c1f03259a9',
+  'decision/human-led-move-on.ts':'7c5dc7ff16877f1d9ff5cb6a777895c91aeb28fa6e31af1e7ab3d4ad5ed8d048',
+  'v2/generation-prompt-v23.ts':'dbf4b80871418393211280f4b26e6a8046d73714aa81c5e097122e1fe21d6111',
  }},fixed:FIXED_I172,native:NATIVE_I172},
  ...HISTORICAL_MAIN_PROMPT_SOURCES.map(({id, files}) => ({
   id, i172: false, styleMode: 'legacy' as const, sources: {scheme: 'complete_instruction_source_sha256', files: {...HISTORICAL_MAIN_SHARED_SOURCES, ...files}},

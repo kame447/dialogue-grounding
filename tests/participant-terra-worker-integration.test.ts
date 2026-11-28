@@ -34,6 +34,9 @@ import { configuredParticipantPin, participantChoices, participantUsageChoices }
 import { INITIAL_OBSERVATION_STRUCTURED_V1, INITIAL_OBSERVATION_STRUCTURED_V2,
   type InitialObservationGeneration } from '../dialogue-model/runtime/observation/initial-observation-generation.ts';
 import { buildObservationMessages } from '../dialogue-model/runtime/observation/observe.ts';
+import { rotationMemoryPin } from '../dialogue-model/runtime/stimuli/rotation-memory.ts';
+import { ROTATION_PRIVATE_TEXTS } from '../dialogue-model/runtime/decision/rotation-memory-guidance.ts';
+import { overrideRotationMemorySource } from '../workers/tangram-experiment/src/rotation-memory-source.ts';
 import { SHAPE_TERMINOLOGY, SHAPE_TERMINOLOGY_GENERATION } from '../dialogue-model/runtime/shape-terminology.ts';
 
 registerHooks({ resolve(name, context, next) {
@@ -149,9 +152,15 @@ afterEach(() => {
   disposeHarnesses.clear();
 });
 
+// The deploy's rotation-memory bundle. Cases that use the real approval RPC to exercise prepared Terra memos are about earlier
+// receptions (a deploy without a bundle); `bundle` keeps the bundle so a new reception freezes it and claims no stock.
+const deployedBundle = overrideRotationMemorySource(undefined);
+overrideRotationMemorySource(deployedBundle);
+
 function harness(enabled = true, selectedProtocol: typeof protocol & {
   figureSelection?: { mode: string; setId?: string; selectionSeed?: number; figureIds?: string[] }; figureSetPolicy?: string;
-} = protocol, preobserve = false) {
+} = protocol, preobserve = false, bundle = false) {
+  overrideRotationMemorySource(preobserve && !bundle ? undefined : deployedBundle);
   const canonical = selectedProtocol.schemaVersion === 'reception_protocol_v3'
     ? canonicalReceptionProtocolV3(selectedProtocol) : canonicalReceptionProtocolV2(selectedProtocol);
   const sha256 = receptionProtocolSha256(canonical);
@@ -1734,7 +1743,10 @@ function v12Transport(t: TestContext, h: ReturnType<typeof harness>) {
       }
     } else if (first === memoExtractionPrompt(true, false) || first === memoExtractionPrompt(true, true) ||
         first === memoExtractionPrompt(true, false, SHAPE_TERMINOLOGY_GENERATION) ||
-        first === memoExtractionPrompt(true, true, SHAPE_TERMINOLOGY_GENERATION)) {
+        first === memoExtractionPrompt(true, true, SHAPE_TERMINOLOGY_GENERATION) ||
+        // A memo that carries a rotation memory adds one sentence of its own to the extraction prompts (withRotation).
+        first === memoExtractionPrompt(true, false, SHAPE_TERMINOLOGY_GENERATION, false, true) ||
+        first === memoExtractionPrompt(true, true, SHAPE_TERMINOLOGY_GENERATION, false, true)) {
       phase = 'dialogue';
       const state = JSON.parse(body.messages.slice(1).map((m: { content: string }) => m.content.split('\n').at(-1)).join(''));
       const latest = state.publicTurns.at(-1);
@@ -1742,7 +1754,7 @@ function v12Transport(t: TestContext, h: ReturnType<typeof harness>) {
       response = JSON.stringify(options.sharedReading
         ? latest.text === p5Support ? [segment(p5Support, 'construal', [decisionSlot], latest.turn - 1)] : []
         : latest.text === v12Answer ? [segment(v12Answer, 'contour', [], latest.turn - 1)] : []);
-    } else if (first === memoAiExtractionPrompt(SHAPE_TERMINOLOGY_GENERATION, true)) {
+    } else if (first === memoAiExtractionPrompt(SHAPE_TERMINOLOGY_GENERATION, true) || first === memoAiExtractionPrompt(SHAPE_TERMINOLOGY_GENERATION, true, false, true)) {
       phase = 'ai_extraction';
       if (options.failVisualExtraction) {
         options.failVisualExtraction = false;
@@ -1754,7 +1766,8 @@ function v12Transport(t: TestContext, h: ReturnType<typeof harness>) {
         segment('そちらの形にも半円の切り込みがありますか？', 'question', [decisionSlot])] : [], visualFeatures: { sources: [
         { source: visualSource(), quote: 'そちらの形にも半円の切り込みがありますか？' },
       ] } });
-    } else if (first === MEMO_AI_PUBLIC_EXTRACTION_INSTRUCTIONS || first === memoAiExtractionPrompt(SHAPE_TERMINOLOGY_GENERATION)) {
+    } else if (first === MEMO_AI_PUBLIC_EXTRACTION_INSTRUCTIONS || first === memoAiExtractionPrompt(SHAPE_TERMINOLOGY_GENERATION) ||
+        first === memoAiExtractionPrompt(SHAPE_TERMINOLOGY_GENERATION, false, false, true)) {
       phase = 'ai_extraction';
       if (options.sharedReading) {
         const { candidateText } = JSON.parse(body.messages[1].content);
@@ -1790,6 +1803,8 @@ function v12Transport(t: TestContext, h: ReturnType<typeof harness>) {
     return Response.json(chatResponse(options.wrongPhase === phase ? pin.lunaModelId : pin.terraModelId, response));
   });
   return { lookup, options, textPhases, prompts,
+    // A trial that reads its memo without an observation request never shows the mock the figure IDs of the final submission.
+    setSlots(ids: string[]) { slots = ids; },
     observationPolicy: (generation?: InitialObservationGeneration) => proxy.participantInitialObservationPolicy(generation) };
 }
 
@@ -3581,7 +3596,15 @@ const NEW_MODE_SEED = (() => {
     if (turns.join() === '90,180,270') return seed;
   }
 })();
-async function threeFigureStockFlow(t: TestContext, rotationMode: string, seed?: number) {
+const allStrings = (value: unknown): string[] => typeof value === 'string' ? [value] : Array.isArray(value) ? value.flatMap(allStrings)
+  : value && typeof value === 'object' ? Object.values(value).flatMap(allStrings) : [];
+/**
+ * A reception approved with prepared stock by a deploy that has no rotation-memory bundle (an earlier reception), through both conditions.
+ * `deploy` adds the bundle in the middle: right after the approval (both trials then start after the deploy), or right after the first trial
+ * started (that trial is running at the deploy and takes its turns after it, the second one starts after it). The plan has no pin, so the
+ * deploy changes nothing: the record, the first memo and every request stay on the earlier path.
+ */
+async function threeFigureStockFlow(t: TestContext, rotationMode: string, seed?: number, deploy?: 'afterApprove' | 'afterFirstStart') {
   const figureIds = ['F2', 'F17', 'F30'];
   const selected = { ...figureBankProtocol, rotationMode, revision: figureBankProtocol.revision + 1,
     figureSelection: { mode: 'custom', figureIds: [...figureIds].reverse() } };
@@ -3598,6 +3621,16 @@ async function threeFigureStockFlow(t: TestContext, rotationMode: string, seed?:
   assert.match(transport.prompts[0].system.join('\n'), /全3図形/);
   await h.receive();
   const approved = await h.approve();
+  assert.equal(Object.hasOwn(approved.plan, 'rotationMemory'), false, 'the plan of an earlier reception has no pin');
+  // The deploy that adds the bundle: the earlier one had none (harness() above), the new one has it, and the Durable Object restarts on it.
+  const deployBundle = () => {
+    assert.ok(deployedBundle, 'the new deploy has a bundle');
+    const earlier = overrideRotationMemorySource(deployedBundle);
+    assert.equal(earlier, undefined, 'the earlier deploy had none');
+    t.after(() => { overrideRotationMemorySource(earlier); });
+    h.evict();
+  };
+  if (deploy === 'afterApprove') deployBundle();
   assert.equal(approved.plan.protocolId, selected.protocolId);
   assert.equal(approved.plan.protocolRevision, selected.revision);
   assert.equal(approved.plan.protocolSha256, receptionProtocolSha256(canonicalReceptionProtocolV3(selected)));
@@ -3624,6 +3657,11 @@ async function threeFigureStockFlow(t: TestContext, rotationMode: string, seed?:
     assert.equal(trial.scene.shapes.length, 3);
     assert.doesNotMatch(JSON.stringify(trial), /figureSelection|figureIds|observationMemo|ownAnchors|participantModelPin/u);
     const opening = await h.storage.get(key);
+    if (deploy === 'afterFirstStart' && strategy === 'bypass-enabled') deployBundle();
+    // The earlier path: no pin in the record or its copy of the plan, and no rotation memory in the first memo.
+    assert.equal(Object.hasOwn(opening.options, 'rotationMemory'), false);
+    assert.equal(Object.hasOwn(opening.assignment.source.plan, 'rotationMemory'), false);
+    assert.ok(opening.queueState.privateState.observationMemo.figures.every((figure: any) => !Object.hasOwn(figure, 'rotation')));
     assert.equal(opening.strategy, strategy);
     assert.deepEqual(opening.stimulus.figureIds, figureIds);
     assert.equal(opening.options.rotationMode, rotationMode);
@@ -3635,6 +3673,13 @@ async function threeFigureStockFlow(t: TestContext, rotationMode: string, seed?:
     const requestStart = h.calls.length, promptStart = transport.prompts.length;
     await jsonOk(await h.request('message', { expectedRecordId: id, text: '形を一つ確認したいです。', clientId: 'three-figure-turn' }));
     await h.idle();
+    // Nothing of the rotation memory reaches a request of an earlier reception, whether or not the deploy has the bundle by now.
+    const sent = allStrings([h.calls.slice(requestStart), transport.prompts.slice(promptStart)]).join('\n');
+    assert.equal(sent.includes('rotationLegend'), false);
+    for (const text of ROTATION_PRIVATE_TEXTS) assert.equal(sent.includes(text), false, text.slice(0, 24));
+    const afterTurn = await h.storage.get(key);
+    assert.equal(Object.hasOwn(afterTurn.options, 'rotationMemory'), false);
+    assert.ok(afterTurn.queueState.privateState.observationMemo.figures.every((figure: any) => !Object.hasOwn(figure, 'rotation')));
     const action = h.calls.slice(requestStart).find(call => call.kind === 'choices' && Object.hasOwn(call.body.questions, 'action'));
     assert.ok(action);
     assert.equal(JSON.parse(action.body.state).ownSlots.length, 3);
@@ -3682,6 +3727,13 @@ test('three-figure Worker uses prepared stock across protocol revisions through 
   t => threeFigureStockFlow(t, 'relative_pm90'));
 test('relative_90_180_270 three-figure Worker prepares, approves and starts with no observation request, then scores both conditions and cold-restores them',
   t => threeFigureStockFlow(t, 'relative_90_180_270', NEW_MODE_SEED));
+// A deploy that adds the rotation-memory bundle after such a reception was approved: it keeps its prepared stock and the earlier path in both conditions.
+for (const [mode, seed] of [['relative_pm90', undefined], ['relative_90_180_270', NEW_MODE_SEED]] as const) {
+  test(`${mode}: a reception approved before the deploy that adds the rotation-memory bundle starts and runs both conditions on the earlier path`,
+    t => threeFigureStockFlow(t, mode, seed, 'afterApprove'));
+  test(`${mode}: a trial running at the deploy that adds the rotation-memory bundle keeps the earlier path, and the next one starts on it`,
+    t => threeFigureStockFlow(t, mode, seed, 'afterFirstStart'));
+}
 
 test('a missing prepared cache refuses start before consuming admission, while a saved trial restores from its own memo', async () => {
   const h = harness(true, protocol, true);
@@ -3844,4 +3896,91 @@ test('v23 recovers generated opening and final submission without another partic
   assert.ok(done.aiSubmission && done.scoring?.result);
   assert.equal(transport.textPhases.filter(phase => phase === 'final_submission').length, 2);
   assert.equal(await h.storage.getAlarm(), null);
+});
+
+// ---- A new reception freezes the rotation-memory bundle and reads it at the start (no prepared stock, no observation request) ----
+const threeFigureProtocol = { ...protocol, schemaVersion: 'reception_protocol_v3', allowedOrders: [['bypass-enabled', 'repair-first']],
+  figureSelection: { mode: 'custom', figureIds: ['F1', 'F2', 'F8'] }, figureSetPolicy: 'shared' };
+const rotationOf = (record: any) => record.queueState.privateState.observationMemo.figures.map((figure: any) => figure.rotation);
+const bundleHarness = (t: TestContext) => {
+  const h = harness(true, threeFigureProtocol, true, true);
+  const transport = v12Transport(t, h);
+  transport.options.sharedReading = true;
+  h.controlled.selectedAction = 'accept';
+  h.env.PARTICIPANT_DIALOGUE_PROFILE = PILOT012_V24_PARTICIPANT_PROFILE;
+  h.env.PARTICIPANT_AI_PROXY.participantInitialObservationPolicy = transport.observationPolicy;
+  return { h, transport };
+};
+
+test('a new three-figure reception approves, starts and cold-restores with no prepared memo and no observation request', async t => {
+  const { h, transport } = bundleHarness(t);
+  const bundlePin = rotationMemoryPin();
+  await h.receive(); // nothing was prepared: a claim of stock would fail here
+  const { plan } = await h.approve();
+  assert.deepEqual(plan.rotationMemory, bundlePin);
+  assert.equal(Object.hasOwn(plan, 'preparedObservations'), false);
+  assert.equal(plan.postGenerationCheck, 'off');
+  h.evict();
+  const { trial } = await jsonOk(await h.start());
+  const id = trial.sessionId, key = 'record:' + id;
+  const started = await h.storage.get(key);
+  assert.deepEqual(started.options.rotationMemory, { pin: bundlePin, used: bundlePin });
+  assert.deepEqual(started.assignment.source.plan.rotationMemory, bundlePin);
+  const memo = started.queueState.privateState.observationMemo;
+  assert.equal(memo.figures.length, 3);
+  assert.ok(memo.figures.every((figure: any) => figure.rotation && figure.holistic.length === 0));
+  transport.setSlots(memo.figures.map((figure: any) => figure.id));
+  assert.equal(transport.textPhases.filter(phase => phase === 'initial_observation' || phase === 'reobservation').length, 0);
+  const initial = started.jevLedger.phases.terra.initial_observation;
+  assert.deepEqual([initial.posts, initial.cacheHits], [0, 0], 'no Terra post and no cache read for the first memo');
+  assert.doesNotMatch(JSON.stringify(trial), /rotationMemory|dataSha256|catalogRevision|turned|wholeAnywhere|shapeName/u, 'nothing of the memory reaches the participant');
+  // The record is bound to the plan's pin like every other pin: a missing or different one is refused.
+  const missing = structuredClone(started), forged = structuredClone(started), tampered = structuredClone(started);
+  delete missing.options.rotationMemory;
+  forged.options.rotationMemory = { pin: { ...bundlePin, dataSha256: '1'.repeat(64) }, used: bundlePin };
+  tampered.queueState.privateState.observationMemo.figures[0].rotation.regions[0].shapeName = '改ざん';
+  for (const bad of [missing, forged, tampered]) assert.throws(() => validateBoundBaseRecord(bad, started.assignment));
+  // A turn runs on the saved memo, and a cold restore reads exactly what was saved.
+  await jsonOk(await h.request('message', { expectedRecordId: id, text: p5Question }));
+  await h.idle();
+  const record = await h.storage.get(key);
+  assert.equal(record.queueState.errorCode, null);
+  assert.equal(record.jevTraces.at(-1).status, 'committed');
+  assert.deepEqual(rotationOf(record), rotationOf(started));
+  h.evict();
+  assert.equal((await jsonOk(await h.request('state'))).trial.sessionId, id);
+  assert.deepEqual(rotationOf(await h.adminRecord(id)), rotationOf(started));
+  // The second condition of the reception reads the same bundle at its own start and gets the same memory for the same board.
+  await h.complete(id, (await jsonOk(await h.request('state'))).trial);
+  await h.idle();
+  await h.settleBackground();
+  const second = await jsonOk(await h.start(id));
+  const secondRecord = await h.storage.get('record:' + second.trial.sessionId);
+  assert.notEqual(secondRecord.strategy, started.strategy);
+  assert.deepEqual(secondRecord.options.rotationMemory, { pin: bundlePin, used: bundlePin });
+  assert.deepEqual(rotationOf(secondRecord), rotationOf(started), 'both conditions see the same perception');
+  assert.equal(transport.textPhases.filter(phase => phase === 'initial_observation' || phase === 'reobservation').length, 0);
+});
+
+test('a deploy that changes the bundle after approval stops nothing: the start records the bundle it used and a restore reads only what was saved', async t => {
+  const { h } = bundleHarness(t);
+  await h.receive();
+  const { plan } = await h.approve();
+  const changed = { ...plan.rotationMemory, dataSha256: '1'.repeat(64) };
+  overrideRotationMemorySource({ ...deployedBundle!, pin: () => changed });
+  const { trial } = await jsonOk(await h.start());
+  const key = 'record:' + trial.sessionId;
+  const started = await h.storage.get(key);
+  assert.deepEqual(started.options.rotationMemory, { pin: plan.rotationMemory, used: changed });
+  assert.ok(rotationOf(started).every(Boolean));
+  // The bundle is gone from the deploy altogether; the restore still reads the saved memo and keeps what was recorded.
+  overrideRotationMemorySource(undefined);
+  h.evict();
+  assert.equal((await jsonOk(await h.request('state'))).trial.sessionId, trial.sessionId);
+  const restored = await h.storage.get(key);
+  assert.deepEqual(restored.options.rotationMemory, { pin: plan.rotationMemory, used: changed });
+  assert.deepEqual(rotationOf(restored), rotationOf(started));
+  await jsonOk(await h.request('message', { expectedRecordId: trial.sessionId, text: p5Question }));
+  await h.idle();
+  assert.equal((await h.storage.get(key)).queueState.errorCode, null);
 });

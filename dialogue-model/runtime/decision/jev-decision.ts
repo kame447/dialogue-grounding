@@ -1,5 +1,11 @@
 import { isSupportedFigureCount } from '../stimuli/figure-bank.ts';
 import { ROTATION_MODES } from '../stimuli/scatter-v2.mjs';
+import { modelPartGeometry, hasPartGeometry, PART_INDEX_INSTRUCTIONS } from '../observation/part-consumers.ts';
+import { ROTATION_MEMO_ABSENT, ROTATION_MEMO_COMPOSITION } from '../observation/rotation-memo.ts';
+import { hasRotationMemory, figureRotation, rotationMemoryLayer, rotationLegendEntry, rotationNameCandidates, rotationFeatureCandidates, ROTATION_LAYER_OF_CALL,
+  COMMON_DIFFERENT_CONSTRUAL, COMMON_DIFFERENT_CONSTRUAL_ROTATION, ROTATION_MATCH_USE, ROTATION_ACCEPT_ANSWER, ROTATION_ACCEPT_BACKCHANNEL,
+  ROTATION_REQUEST_OBSERVATION, ROTATION_CONFIRM, ROTATION_PROPOSE_NAME, ROTATION_OBSERVE_TOPICS } from "./rotation-memory-guidance.ts";
+import type { OwnRotationMemory } from "./rotation-memory-guidance.ts";
 import { ISSUE_HANDLING_MOVE_ON_CRITERIA, ISSUE_HANDLING_MOVE_ON_INSTRUCTIONS, MOVE_ON_SOURCE_QUESTION } from "./human-led-move-on.ts";
 import { COMMITMENT_STATES, ISSUE_HANDLING_VERSION, JEV_ACTIONS_V21, NON_BYPASS_ALTERNATIVES, SWITCH_FUNCTIONS, issueAlternativeTarget, issueHandlingMatchesSource, projectExtraHandling } from "./issue-handling.ts";
 import type { CarryDestination, ExecutedExtra, ExtraHandling, ExtraSelection, JevIssueRef } from "./issue-handling.ts";
@@ -97,9 +103,10 @@ const HOLISTIC_ACCEPT_V3 = "図形全体や見た目を初めて尋ねられた�
 const HOLISTIC_CONFIRM_V3 = "全体の見立てだけで対象が共有され命名に進めるとき、すでに肯定された特徴については選ばない。観察で答えられる細部の質問にはconfirmで聞き返さず、acceptで直接答える（分からない点は分からないと述べる）。聞き返すのは、対象や論点に具体的な未解決点があり、相手から情報を得る必要があるとき（相手が絞れない・相手との間で似た候補が残る・見立てが食い違うとき）に限り、区別に必要な特徴を一つ尋ねる。";
 const HOLISTIC_DEFER_V3 = "残りの数だけで保留を一律に禁止も許可もせず、その時点で有効な修復の手がかりと、後で再開できる見込みを考える。十分に共有できているのに話を延ばす目的では選ばない。";
 const HOLISTIC_REVISIT_V3 = "十分に共有できていて命名に進める場面で、話を延ばすためだけには選ばない。残りの数だけで決めず、その時点で有効な修復の手がかりと、再開できる見込みを考える。";
+const V3_ACCEPT_AFTER_RESOLUTION = "直前の図形で合意が成立したり問題が解決したりした後、相手が新しい図形へ進む場合の受け止めも含める。";
 const V3_ACTION_CRITERIA_LOOP: Readonly<Record<LegacyJevAction, string>> = Object.freeze({
   ...JEV_ACTION_CRITERIA,
-  accept: JEV_ACTION_CRITERIA.accept + "直前の図形で合意が成立したり問題が解決したりした後、相手が新しい図形へ進む場合の受け止めも含める。" + ACCEPT_DIRECT_ANSWER_V3 + ACCEPT_BACKCHANNEL_V3,
+  accept: JEV_ACTION_CRITERIA.accept + V3_ACCEPT_AFTER_RESOLUTION + ACCEPT_DIRECT_ANSWER_V3 + ACCEPT_BACKCHANNEL_V3,
   confirm: JEV_ACTION_CRITERIA.confirm + "相手が直前の確認特徴を明確に肯定し、矛盾なく呼び名を提案・確認した場合は、同じ特徴の確認を繰り返さず、公開の名称提案に基づくagreeなど次の段階へ進む。不確実な点が残る場合は別の弁別特徴を選ぶ。" + CONFIRM_UNRESOLVED_V3,
   propose_name: JEV_ACTION_CRITERIA.propose_name + PROPOSE_NAME_STAGE_V3,
   agree: JEV_ACTION_CRITERIA.agree + AGREE_PARTNER_NAME_V3,
@@ -115,15 +122,24 @@ const V3_ACTION_CRITERIA_HOLISTIC: Readonly<Record<LegacyJevAction, string>> = O
 });
 /** The criteria text of a two_stage_v3 request: the older text, or the holistic-first text for a trial created with dialoguePolicy holistic_v1. */
 const v3Criteria = (policy: DialoguePolicy | undefined) => isHolisticPolicy(policy) ? V3_ACTION_CRITERIA_HOLISTIC : V3_ACTION_CRITERIA_LOOP;
+const ISSUE_ACCEPT_BASE = "通常の受け止め・応答。相槌、問いへの直接の回答、全体の見立ての説明を含む。理解の成立や名称の採用は宣言しない。対象の同定、候補や呼び名の採否、理解の可否の表明が求められ、材料が足りなければ受け止めるだけで済ませない。確かめるならconfirmかrepair、判断を保留するならhold_openを選ぶ。未確認、言い方の違い、候補が複数あることだけでは確認や保留の理由にならない。" +
+  "合意や解決の後、相手が新しい図形へ進む場合の受け止めも含める。";
 const ISSUE_ACTION_CRITERIA: Readonly<Partial<Record<JevAction, string>>> = Object.freeze({
-  accept: "通常の受け止め・応答。相槌、問いへの直接の回答、全体の見立ての説明を含む。理解の成立や名称の採用は宣言しない。対象の同定、候補や呼び名の採否、理解の可否の表明が求められ、材料が足りなければ受け止めるだけで済ませない。確かめるならconfirmかrepair、判断を保留するならhold_openを選ぶ。未確認、言い方の違い、候補が複数あることだけでは確認や保留の理由にならない。" +
-    "合意や解決の後、相手が新しい図形へ進む場合の受け止めも含める。" + ACCEPT_DIRECT_ANSWER_V3 + ACCEPT_BACKCHANNEL_V3 + HOLISTIC_ACCEPT_V3,
+  accept: ISSUE_ACCEPT_BASE + ACCEPT_DIRECT_ANSWER_V3 + ACCEPT_BACKCHANNEL_V3 + HOLISTIC_ACCEPT_V3,
   hold_open: "相手の今回の提示が、対象の同定、候補や呼び名の採否、理解の可否について応答を求める位置にあり、自分の観察メモと公開対話だけでは材料が足りず、受け入れも、食い違いの指摘も、確認の依頼も確定できないときに選ぶ。提示に暫定的に反応して同じ問題の判断を保留し、相手が自分から補足できる状態を保つ。説明の途中の相槌、問いへの直接の回答、採用の表明、直接の聞き返しとは区別する。自分の観察と明確に食い違うとき、自分の画像を見直せば解けるとき、十分に共有できているときは選ばない。同じ問題で保留を重ねても補足が得られないときは、confirm、repair、carry_over、consultを検討する。別の対象や論点へは移らない。",
   carry_over: "いま扱う問題が未解決で、処理が停滞しているか困難であり、修復を続けるより進めることに利点があるとき、その問題を未解決のまま残し、別の図形、同じ図形の別の論点、または以前の未解決の問題へ処理を移す。移った先で何をするかにかかわらず、自分から処理を移すときはこの行動を選ぶ。合意・解決後の通常の進行、相手が移した先への応答、以前の問題そのものを解決するためのrevisitとは区別する。問題の解決を諦めない。残りの図形の数や回数だけで決めず、有効な修復の手がかりと再開の見込みを考える。今回の人が移行やいまの問題をいったん置くことを明示的に主導したときは、命名や同定の解決を前提とせずcarry_overで受け止める。",
   revisit: "以前に未解決のまま残した問題そのものを解決するため、明示的に取り上げ直す。いまの未解決の問題を切り上げて進むために以前の問題へ移るならcarry_overを選ぶ。以前に共有できた対象を説明の手がかりに使うだけなら選ばない。十分に共有できていて命名に進めるとき、話を延ばすためには選ばない。",
   consult: "同じ問題の修復が停滞しているか困難で、続けるか別の進め方にするかを自分では決めないとき、まだ合わせられていないことを伝えて相手に進め方を尋ねる。自分からは移らず、どちらにも誘導しない。修復に進展が見込めるとき、まだ確かめていない手がかりがあるとき、自分の画像を見直せば解けるときは選ばない。",
   close: JEV_ACTION_CRITERIA.close + "未解決の点を残して自分から終了を相談するのは、全図形に呼び名が決まったとき、相手が終わりを求めたとき、または修復が停滞・困難で続ける見込みが乏しいときに限る。残っている点を解決済みや放棄として扱わない。",
 });
+/** The accept and request_observation criteria of a request that carries a rotation memory: each point stated once, the memo answers what the single-view memo sent to re-observation. Other actions keep theirs. */
+function rotationCriterion(action: JevAction, { issueHandling, visualPurpose }: { issueHandling: boolean; visualPurpose: boolean }): string | undefined {
+  if (action === "accept") return (issueHandling ? ISSUE_ACCEPT_BASE : JEV_ACTION_CRITERIA.accept + V3_ACCEPT_AFTER_RESOLUTION) + ROTATION_ACCEPT_ANSWER + ROTATION_ACCEPT_BACKCHANNEL;
+  if (action === "request_observation") return visualPurpose ? ROTATION_REQUEST_OBSERVATION.replace("Lunaへ", "Terraへ") : ROTATION_REQUEST_OBSERVATION;
+  if (action === "propose_name") return ROTATION_PROPOSE_NAME;
+  if (action === "confirm" && visualPurpose) return ROTATION_CONFIRM;
+  return undefined;
+}
 const ISSUE_HANDLING_GUIDANCE = "hold_open（判断の保留）とcarry_over（持ち越し）は、未確認の点をすべて埋めないための選択肢です。明らかな食い違いは基本的に修復し、材料が足りないか、修復が停滞しているかを公開対話・観察メモ・修復の履歴から判断してください。未解決の問題を残して自分から別の対象・論点へ移るときは、移った先での行動にかかわらずcarry_overを選んでください。この判断の後の扱いは考慮せず、同じ材料からふさわしい行動を選んでください。handlingsはこれまでに実際に公開した保留・持ち越し・相談・再訪の記録です。";
 const COMMITMENT_STATE_CRITERIA = Object.freeze({
   not_due: "判断の表明は求められていない。説明の途中であるか、相槌や問いへの直接の回答で足りる。",
@@ -204,11 +220,22 @@ export const TWO_STAGE_V3_TARGET_INSTRUCTIONS = "stateのselected.actionが第1�
 export const TWO_STAGE_V2_CANDIDATE_SET_INSTRUCTIONS = "第1段で対象をmultiple（一つに絞れない）としました。この行動で対象候補として扱う自分の図形の集合を、2図形以上の組合せから一つ選んでください。公開発話と観察メモに根拠がある図形を含め、根拠のない図形は含めないでください。";
 export const TWO_STAGE_V2_CANDIDATE_SET_CRITERION = (figureIds: readonly string[]) => `自分の候補図形の集合 ${JSON.stringify(figureIds)}。観察メモを参照。`;
 /** holistic_v5: the notation legend and the task's rotation condition, for every question (the referent estimate included). */
-const v5Suffix = (input: JevDecisionInput) => input.judgmentLedger === undefined ? "" : "\n" + judgmentV5Legend(input.ownSlots.length) + (input.notationV11 === true ? "\n" + JUDGMENT_V11_ANSWER_LEGEND : "") + rotationPremise(input.rotationMode) +
+const v5LegacySuffix = (input: JevDecisionInput) => input.judgmentLedger === undefined ? "" : "\n" + judgmentV5Legend(input.ownSlots.length) + (input.notationV11 === true ? "\n" + JUDGMENT_V11_ANSWER_LEGEND : "") + rotationPremise(input.rotationMode) +
   (input.issueHandlingVersion === ISSUE_HANDLING_VERSION ? "\n" + ISSUE_HANDLING_LEGEND +
     (input.previousAction && input.judgmentLedger.some(a => a.turn === input.previousAction!.decisionTurn && a.extras?.length)
       ? "\n" + PREVIOUS_EXTRAS_LEGEND : "") : "");
-const decisionInstructions = (input: JevDecisionInput, prospect = false, layout: JevQuestionLayout = "two_stage_v1", participantPrompts = false) =>
+const v5Suffix = (input: JevDecisionInput) => v5LegacySuffix(input) +
+  (hasPartGeometry(input.observations) ? "\n" + PART_INDEX_INSTRUCTIONS : "");
+/** A request whose memo carries a rotation memory: the common sentence that sends a different construal to re-observation first is replaced (every other byte stays). */
+const withRotationCommon = (instructions: string) => {
+  if (instructions.split(COMMON_DIFFERENT_CONSTRUAL).length !== 2) throw new Error("rotation_decision_instructions_out_of_sync");
+  return instructions.replace(COMMON_DIFFERENT_CONSTRUAL, () => COMMON_DIFFERENT_CONSTRUAL_ROTATION);
+};
+const decisionInstructions = (input: JevDecisionInput, prospect = false, layout: JevQuestionLayout = "two_stage_v1", participantPrompts = false) => {
+  const base = decisionInstructionsBase(input, prospect, layout, participantPrompts);
+  return hasRotationMemory(input.observations) ? withRotationCommon(base) : base;
+};
+const decisionInstructionsBase = (input: JevDecisionInput, prospect = false, layout: JevQuestionLayout = "two_stage_v1", participantPrompts = false) =>
   (layout === "two_stage_v3" ? (participantPrompts ? COMMON_V3 : RESEARCH_COMMON_V3) : layout === "two_stage_v2" ? COMMON_V2 : COMMON) + (input.humanReferent === undefined ? "" : "\n" + HUMAN_REFERENT_GUIDANCE) + (!prospect || input.repairProspect === undefined ? "" : "\n" + REPAIR_PROSPECT_GUIDANCE) + factsGuidance(input) + v5Suffix(input) +
   (input.jevNaming ? "\n" + JEV_NAMING_GUIDANCE : "") +
   (input.judgmentMaterialVersion === JEV_REPAIR_QUALITY_VERSION ? "\n" + REPAIR_QUALITY_GUIDANCE : "") +
@@ -635,6 +662,8 @@ function prepare(input: JevDecisionInput, layout: JevQuestionLayout = "two_stage
       !validReferenceEvidence(referenceEvidence, slots, input.turn, input.publicTurns))) fail("invalid_input");
   const figures = input.observations?.figures;
   if (!Array.isArray(figures) || figures.length !== slots.length || unique(figures.map(f => f?.id)).length !== slots.length) fail("invalid_input");
+  // A rotation memory is read whole and well formed or not at all (a malformed one is treated as absent, never a failure); the request carries its decision layer only.
+  const rotationOf = new Map<string, OwnRotationMemory>();
   const observations = slots.map(figureId => {
     const f = figures.find(f => f?.id === figureId);
     if (!f || !Array.isArray(f.holistic) || f.holistic.length > 32 || !f.analytic || !strings(f.analytic.shapes, 32, 1000) ||
@@ -651,9 +680,19 @@ function prepare(input: JevDecisionInput, layout: JevQuestionLayout = "two_stage
       return { figureId, issue: { aspect: r.issue.aspect, question: r.issue.question, partnerConstrual: r.issue.partnerConstrual },
         supports: [...r.supports], contradicts: [...r.contradicts], unknown: [...r.unknown] };
     });
+    let parts;
+    if (Object.hasOwn(f, "parts")) {
+      try { parts = modelPartGeometry((f as typeof f & { parts?: unknown }).parts); }
+      catch { return fail("invalid_input"); }
+      if (!f.region || parts.origin[0] !== f.region.x || parts.origin[1] !== f.region.y ||
+          parts.size[0] !== f.region.w || parts.size[1] !== f.region.h) fail("invalid_input");
+    }
+    const rotation = figureRotation(f);
+    if (rotation) rotationOf.set(figureId, rotation);
     return { figureId, holistic, analytic: { shapes: [...f.analytic.shapes], composition: f.analytic.composition, relations: [...f.analytic.relations] },
-      unknowns: [...f.unknowns], reobservations };
+      unknowns: [...f.unknowns], reobservations, ...(parts ? { parts } : {}), ...(rotation ? { rotation: rotationMemoryLayer(rotation, ROTATION_LAYER_OF_CALL.decision) } : {}) };
   });
+  const rotationPresent = rotationOf.size > 0;
   const claimIds = new Set<string>();
   const priorClaims = input.priorClaims.filter(c => c?.turn <= input.turn && c.sourceTurn <= input.turn &&
     publicTurns.some(t => t.turn === c.sourceTurn && t.speaker === c.speaker)).map(c => {
@@ -742,7 +781,7 @@ function prepare(input: JevDecisionInput, layout: JevQuestionLayout = "two_stage
   }
   const omitted: DecisionInputBudget["omitted"] = { publicTurns: 0, claims: 0, publicNames: 0, repairHistory: 0,
     reobservations: 0, observationDetails: 0, observationChars: 0, issueSummaryChars: 0 };
-  const material = { turn: input.turn, publicTurns, ownSlots: slots, observations, issueSummary: input.issueSummary,
+  const material = { turn: input.turn, publicTurns, ownSlots: slots, ...(rotationPresent ? rotationLegendEntry(input.observations, ROTATION_LAYER_OF_CALL.decision) : {}), observations, issueSummary: input.issueSummary,
     priorClaims, repairHistory, previousAction, publicNames, reobservationAllowed, ...(selection ? { selected: selection } : {}),
     ...(!referentOnly && input.humanReferent !== undefined ? { humanReferent: cleanHumanReferentMaterial(input.humanReferent, slots) } : {}),
     ...(!referentOnly && input.repairProspect !== undefined ? { repairProspect: validateRepairProspectMaterial(input.repairProspect, input.repairHistory, input.turn) } : {}),
@@ -852,10 +891,13 @@ function prepare(input: JevDecisionInput, layout: JevQuestionLayout = "two_stage
   const liveTurns = new Set(publicTurns.map(t => t.turn));
   const agreeLive = agreeNames === undefined ? undefined : v3
     ? agreeNames.filter(n => liveTurns.has(n.sourceTurn) || hasRetainedNameSource(referenceEvidence, n.sourceTurn, n.name)) : agreeNames;
-  const catalog: Catalog = { names: observations.map(o => unique([...(publicOnlyNames && !repairQuality ? [] : o.holistic.map(h => h.construal).filter(n => n.length <= 80)),
+  const catalog: Catalog = { names: observations.map(o => unique([...(publicOnlyNames && !repairQuality ? [] : [...o.holistic.map(h => h.construal),
+      ...(rotationOf.has(o.figureId) ? rotationNameCandidates(rotationOf.get(o.figureId)!) : [])].filter(n => n.length <= 80)),
     ...publicNames.filter(n => n.figureId === null || n.figureId === o.figureId).map(n => n.name)])),
   ...(agreeLive === undefined ? {} : { agreeNames: observations.map(o => unique(agreeLive.filter(n => n.figureId === null || n.figureId === o.figureId).map(n => n.name))) }),
-  features: observations.map(o => visualPurpose ? [] : unique([...o.analytic.shapes, o.analytic.composition, ...o.analytic.relations,
+  // A rotation-memo figure has a fixed filler line as its composition (its geometry is in the rotation memory; ROTATION_MEMO_ABSENT for a figure the bundle lacks). A filler is not a feature to ask about; the features come from the rotation memory.
+  features: observations.map(o => visualPurpose ? [] : unique([...o.analytic.shapes, ...(rotationOf.has(o.figureId) || o.analytic.composition === ROTATION_MEMO_COMPOSITION || o.analytic.composition === ROTATION_MEMO_ABSENT ? [] : [o.analytic.composition]), ...o.analytic.relations,
+    ...(rotationOf.has(o.figureId) ? rotationFeatureCandidates(rotationOf.get(o.figureId)!) : []),
     ...o.reobservations.flatMap(r => r.supports)].filter(v => !!v.trim() && v.length <= 400))) };
   if (participantLedger) {
     const allowedName = (action: "propose_name" | "agree", targetSlot: string, candidateName: string) => {
@@ -906,14 +948,18 @@ function prepare(input: JevDecisionInput, layout: JevQuestionLayout = "two_stage
     // Only actions with at least one legal target and detail in the material that survived the budget; scores of all of them are saved.
     add("action", "次の行動を一つ選んでください。request_observationは公開発話を生成する前の追加観察要求です。" +
       (repairQuality && (input.humanLedMoveOn || issueHandling) ? "人が命名と移行を同時に求めたときは、この問いで命名の扱いを選び、移行の出所は別の問いに残してください。" : ""), Object.fromEntries(
-      legalActionsV3({ slots, catalog, reobservationAllowed, noAccept, visualPurpose, issueHandling }).map(a => [a,
-        (visualPurpose && a === "confirm"
+      legalActionsV3({ slots, catalog, reobservationAllowed, noAccept, visualPurpose, issueHandling }).map(a => {
+        // A rotation memory answers what the older single-view memo sent to re-observation: accept and request_observation are stated once, as a whole (repair-quality paragraph included).
+        const rotationText = rotationPresent ? rotationCriterion(a, { issueHandling, visualPurpose }) : undefined;
+        return [a,
+        (rotationText !== undefined ? rotationText : visualPurpose && a === "confirm"
           ? VISUAL_CONFIRM_CRITERION
           : visualPurpose && a === "request_observation" ? v3Criteria(issueHandling ? "holistic_v5" : policy)[a].replace("Lunaへ", "Terraへ")
             : (issueHandling ? ISSUE_ACTION_CRITERIA[a] : undefined) ?? v3Criteria(issueHandling ? "holistic_v5" : policy)[a as LegacyJevAction]) +
         (input.humanLedMoveOn && a === "move_on" ? HUMAN_MOVE_ON_ACTION_NOTE : "") +
         (!shared.length ? "" : a === "accept" ? "\n" + SHARED_ACCEPT : a === "confirm" || a === "repair" ? "\n" + SHARED_CONFIRM : "") +
-        (repairQuality && REPAIR_QUALITY_ACTION[a as LegacyJevAction] ? "\n" + REPAIR_QUALITY_ACTION[a as LegacyJevAction] : "")])));
+        (rotationText === undefined && repairQuality && REPAIR_QUALITY_ACTION[a as LegacyJevAction] ? "\n" + REPAIR_QUALITY_ACTION[a as LegacyJevAction] : "")];
+      })));
     if (issueHandling) {
       add(MOVE_ON_SOURCE_QUESTION, ISSUE_HANDLING_MOVE_ON_INSTRUCTIONS, { ...ISSUE_HANDLING_MOVE_ON_CRITERIA });
       add("commitment_state", "今回の人間の公開発話に対し、対象の同定、候補や呼び名の採否、理解の可否の表明が関連しているか、関連していれば自分の材料がどの状態かを一つ選んでください。この答えは研究記録に使い、次に取る行動を選ぶ問いではありません。", { ...COMMITMENT_STATE_CRITERIA });
@@ -931,7 +977,7 @@ function prepare(input: JevDecisionInput, layout: JevQuestionLayout = "two_stage
       { include: "公開発話の対象候補に含む。", exclude: "対象候補に含まない。" });
   });
   const retainedIds = visualPurpose ? new Set(priorClaims.map(c => c.id)) : undefined;
-  return { payload: { model: JEV_DECISION_MODEL, state, questions } as JevDecisionPayload, slots, catalog, human: humans[0].text, reobservationAllowed, noAccept,
+  return { payload: { model: JEV_DECISION_MODEL, state, questions } as JevDecisionPayload, slots, catalog, rotationPresent, human: humans[0].text, reobservationAllowed, noAccept,
     budget, layout, previousAction, publicTurns, priorClaims, repairHistory, ledgerActions, answers, answerRows, shared, agreeLive, visualPurpose, issueHandling, nameLedger,
     purposeSources: purposeSources.filter(c => retainedIds?.has(c.id)) };
 }
@@ -949,7 +995,7 @@ function prepareReferent(input: JevDecisionInput, includePartnerPosition = true)
       "観察メモの見立ては仮説です。見立ての語の一致・不一致だけで決めず、合う特徴・矛盾する特徴・未言及の特徴を公開履歴・局所claim・修復履歴と照合してください。" +
       "同じ図形の別の見立てを即不一致にせず、相手の見立てに迎合もしないでください。" + (includePartnerPosition ? PARTNER_POSITION_GUIDANCE : "") + "指示がなければnone、複数や判定不能ならmultipleとしてください。" +
       "全8ラベルの未校正の生スコアを研究材料として記録します。正答確率や一位の正解認定ではありません。inputBudgetの省略は解決や合意を意味しません。" + v5Suffix(input) +
-      (input.judgmentMaterialVersion === JEV_REPAIR_QUALITY_VERSION ? "\n" + REPAIR_QUALITY_GUIDANCE : ""),
+      (input.judgmentMaterialVersion === JEV_REPAIR_QUALITY_VERSION ? "\n" + REPAIR_QUALITY_GUIDANCE : "") + (p.rotationPresent ? "\n" + ROTATION_MATCH_USE : ""),
     criteria: Object.fromEntries([...p.slots.map((id, i) => [`figure_${i}`, `今回の人間発話が指す自分側の図形 ${JSON.stringify(id)}`]),
       ["none", "図形への指示がない。"], ["multiple", "複数の図形を指す、または一つに判定できない。"]]) } };
   return { ...p, payload: { ...p.payload, questions } };
@@ -1201,7 +1247,7 @@ function prepareTarget(input: JevDecisionInput, action: JevAction, participantPr
     : o.target.kind === "single" ? `自分の候補図形 ${JSON.stringify(o.target.figureId)}。観察メモを参照。` : TWO_STAGE_V2_CANDIDATE_SET_CRITERION(o.target.figureIds);
   const questions: Record<string, Question> = { target: { type: "choice",
     instructions: decisionInstructions(input, false, "two_stage_v3", participantPrompts) + "\n" + TWO_STAGE_V3_TARGET_INSTRUCTIONS +
-      (p.issueHandling ? "\n" + ISSUE_TARGET_GUIDANCE : ""),
+      (p.issueHandling ? "\n" + ISSUE_TARGET_GUIDANCE : "") + (p.rotationPresent ? "\n" + ROTATION_MATCH_USE : ""),
     criteria: Object.fromEntries(targets.map(o => [o.label, criterion(o)])) } };
   return { ...p, targets, payload: { ...p.payload, questions } };
 }
@@ -1576,7 +1622,7 @@ function decodeDetail(selected: JevActionTarget, p: ReturnType<typeof prepareDet
     if (selected.action === "request_observation") {
       const figureIds = p.subsets.find((_ids, i) => choices.observe_targets === `subset_${i}`)!;
       const aspect = choices.observe_aspect as JevObservationRequest["aspect"];
-      observe = { figureIds: [...figureIds], aspect, question: OBSERVE_QUESTIONS[aspect] + "\n今回の公開人間発話（引用）: " + p.human.slice(0, 160), partnerConstrual: null };
+      observe = { figureIds: [...figureIds], aspect, question: (p.rotationPresent ? ROTATION_OBSERVE_TOPICS[aspect as keyof typeof ROTATION_OBSERVE_TOPICS] : OBSERVE_QUESTIONS[aspect]) + "\n今回の公開人間発話（引用）: " + p.human.slice(0, 160), partnerConstrual: null };
     } else if (selected.action !== "accept" && !p.purposeOptions && !p.issueOptions) {
       const kind = ["propose_name", "agree"].includes(selected.action) ? "name" : "feature";
       const c = p.candidates.find((_c, i) => choices[kind] === `${kind}_${i}`)!;

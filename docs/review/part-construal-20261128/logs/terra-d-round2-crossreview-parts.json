@@ -1,0 +1,2028 @@
+{
+  "observer": "HardyGuericke",
+  "model": "gpt-6.1-terra",
+  "reviewer": "HardyGuericke",
+  "readOpusRound1": true,
+  "items": [
+    {
+      "item": "item-01",
+      "regions": [
+        {
+          "id": "P1",
+          "supports": [
+            "尾びれ",
+            "翼"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": ""
+        },
+        {
+          "id": "P2",
+          "supports": [
+            "胴",
+            "船体"
+          ],
+          "objects": [
+            {
+              "noun": "船底",
+              "reason": "領域は船の下端だけでなく上縁まで含むため船底に限定しにくい。"
+            }
+          ],
+          "proposals": [],
+          "note": "D1: 船底を船体に置き換えることに同意。"
+        },
+        {
+          "id": "P3",
+          "supports": [
+            "煙突"
+          ],
+          "objects": [
+            {
+              "noun": "背びれ",
+              "reason": "上辺が平らな正方形で、ひれの尖りや広がりが見えない。"
+            }
+          ],
+          "proposals": [],
+          "note": ""
+        }
+      ]
+    },
+    {
+      "item": "item-02",
+      "regions": [
+        {
+          "id": "P2",
+          "supports": [
+            "耳",
+            "屋根"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": ""
+        },
+        {
+          "id": "P4",
+          "supports": [
+            "前足"
+          ],
+          "objects": [
+            {
+              "noun": "かかと",
+              "reason": "四角いP4は下端にあるが、P1に靴や足先に相当する輪郭を見いだせない。"
+            }
+          ],
+          "proposals": [],
+          "note": "D3: かかとは取り下げる。"
+        }
+      ]
+    },
+    {
+      "item": "item-03",
+      "regions": [
+        {
+          "id": "P2",
+          "supports": [
+            "尾びれ"
+          ],
+          "objects": [
+            {
+              "noun": "足",
+              "reason": "下向きに尖る三角形で足先の広がりを見いだしにくい。"
+            }
+          ],
+          "proposals": [],
+          "note": "D4: 足は取り下げる。"
+        }
+      ]
+    },
+    {
+      "item": "item-04",
+      "regions": [
+        {
+          "id": "P2",
+          "supports": [
+            "鼻づら"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": ""
+        },
+        {
+          "id": "P3",
+          "supports": [],
+          "objects": [
+            {
+              "noun": "首",
+              "reason": "P3はP1の下端にあるが、さらに左のP4と下側で続き首の位置を特定しにくい。"
+            }
+          ],
+          "proposals": [],
+          "note": ""
+        }
+      ]
+    },
+    {
+      "item": "item-05",
+      "regions": [
+        {
+          "id": "P4",
+          "supports": [
+            "頭"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": ""
+        },
+        {
+          "id": "P5",
+          "supports": [
+            "脚"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": ""
+        }
+      ]
+    },
+    {
+      "item": "item-06",
+      "regions": [
+        {
+          "id": "P1",
+          "supports": [
+            "船体"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "B3: 船底から船体への統一に同意。"
+        },
+        {
+          "id": "P2",
+          "supports": [
+            "尾",
+            "煙突"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": ""
+        },
+        {
+          "id": "P3",
+          "supports": [
+            "船室",
+            "煙突"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "A3: P2を煙突と見る場合とは独立した別解。"
+        }
+      ]
+    },
+    {
+      "item": "item-07",
+      "regions": [
+        {
+          "id": "P2",
+          "supports": [
+            "背びれ",
+            "耳"
+          ],
+          "objects": [
+            {
+              "noun": "尾",
+              "reason": "P1の上辺の途中から垂直に立ち、後端から伸びる位置ではない。"
+            }
+          ],
+          "proposals": [],
+          "note": ""
+        },
+        {
+          "id": "P3",
+          "supports": [
+            "尾",
+            "くちばし"
+          ],
+          "objects": [
+            {
+              "noun": "尾びれ",
+              "reason": "右へ尖る小さな三角形で、外側へ扇状に広がる縁がない。"
+            }
+          ],
+          "proposals": [],
+          "note": "D6: くちばしの合意確信度を低とすることに異議なし。"
+        },
+        {
+          "id": "P4",
+          "supports": [
+            "脚"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": ""
+        }
+      ]
+    },
+    {
+      "item": "item-08",
+      "regions": [
+        {
+          "id": "P1",
+          "supports": [
+            "頭"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": ""
+        },
+        {
+          "id": "P3",
+          "supports": [
+            "足先"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": ""
+        },
+        {
+          "id": "P4",
+          "supports": [
+            "尾",
+            "翼"
+          ],
+          "objects": [
+            {
+              "noun": "耳",
+              "reason": "P4の付け根のP2上端に独立した頭の領域がなく、耳としての位置が曖昧である。"
+            }
+          ],
+          "proposals": [],
+          "note": "D7: 耳の候補は取り下げる。"
+        }
+      ]
+    },
+    {
+      "item": "item-09",
+      "regions": [
+        {
+          "id": "P1",
+          "supports": [
+            "屋根",
+            "帆"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "A5: 両者の低い方を採る規則に異議なし。"
+        },
+        {
+          "id": "P2",
+          "supports": [
+            "船体"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "B3: 船底から船体への統一に同意。"
+        }
+      ]
+    },
+    {
+      "item": "item-10",
+      "regions": [
+        {
+          "id": "P3",
+          "supports": [
+            "頭"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": ""
+        }
+      ]
+    },
+    {
+      "item": "item-11",
+      "regions": [
+        {
+          "id": "P2",
+          "supports": [
+            "耳",
+            "翼",
+            "背びれ"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": ""
+        },
+        {
+          "id": "P5",
+          "supports": [
+            "胸びれ"
+          ],
+          "objects": [
+            {
+              "noun": "牙",
+              "reason": "P5近くに口の切れ込みがなく、頭の領域も特定しにくい。"
+            }
+          ],
+          "proposals": [],
+          "note": "D9: 牙は取り下げる。"
+        }
+      ]
+    },
+    {
+      "item": "item-12",
+      "regions": [
+        {
+          "id": "P3",
+          "supports": [
+            "ふた",
+            "屋根"
+          ],
+          "objects": [
+            {
+              "noun": "帽子のつば",
+              "reason": "台形は高さがあり、薄い横長のつばというより帽子の山に近い。"
+            }
+          ],
+          "proposals": [],
+          "note": "D10: 帽子のつばは取り下げる。"
+        }
+      ]
+    },
+    {
+      "item": "item-13",
+      "regions": [
+        {
+          "id": "P1",
+          "supports": [
+            "頭",
+            "屋根"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": ""
+        }
+      ]
+    },
+    {
+      "item": "item-14",
+      "regions": [
+        {
+          "id": "P2",
+          "supports": [
+            "柄",
+            "尾"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": ""
+        }
+      ]
+    },
+    {
+      "item": "item-15",
+      "regions": [
+        {
+          "id": "P1",
+          "supports": [
+            "耳",
+            "とさか",
+            "屋根"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "D12: 屋根の合意確信度を低とすることに異議なし。"
+        },
+        {
+          "id": "P2",
+          "supports": [
+            "頭"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": ""
+        },
+        {
+          "id": "P3",
+          "supports": [
+            "首"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": ""
+        },
+        {
+          "id": "P4",
+          "supports": [
+            "足先",
+            "尾"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": ""
+        }
+      ]
+    },
+    {
+      "item": "item-16",
+      "regions": [
+        {
+          "id": "P3",
+          "supports": [
+            "頭"
+          ],
+          "objects": [
+            {
+              "noun": "煙突",
+              "reason": "四角いP3はP1に直接載らず、斜めの細いP2を介して接している。"
+            }
+          ],
+          "proposals": [],
+          "note": ""
+        },
+        {
+          "id": "P4",
+          "supports": [
+            "脚",
+            "腕"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": ""
+        },
+        {
+          "id": "P5",
+          "supports": [
+            "足先"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": ""
+        }
+      ]
+    },
+    {
+      "item": "item-17",
+      "regions": [
+        {
+          "id": "P1",
+          "supports": [
+            "船体"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": ""
+        },
+        {
+          "id": "P2",
+          "supports": [
+            "煙突",
+            "耳",
+            "背びれ"
+          ],
+          "objects": [
+            {
+              "noun": "帆",
+              "reason": "縦に細く上が台形状に切れ、広がる帆の面としては幅が足りない。"
+            }
+          ],
+          "proposals": [],
+          "note": ""
+        }
+      ]
+    },
+    {
+      "item": "item-18",
+      "regions": [
+        {
+          "id": "P1",
+          "supports": [],
+          "objects": [
+            {
+              "noun": "スカート",
+              "reason": "上辺が最も広く下向きに一点へすぼまるため、広がった裾としては逆向きに見える。"
+            }
+          ],
+          "proposals": [],
+          "note": "C18: 第1段階の候補を取り下げる。"
+        },
+        {
+          "id": "P3",
+          "supports": [
+            "頭"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": ""
+        },
+        {
+          "id": "P4",
+          "supports": [
+            "脚",
+            "尾",
+            "腕"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": ""
+        }
+      ]
+    },
+    {
+      "item": "item-19",
+      "regions": [
+        {
+          "id": "P1",
+          "supports": [
+            "袖",
+            "腕"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": ""
+        }
+      ]
+    },
+    {
+      "item": "item-20",
+      "regions": [
+        {
+          "id": "P1",
+          "supports": [
+            "屋根"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "C19: 全体では頂点が隠れるため、合意の確信度を低とすることに異議なし。"
+        },
+        {
+          "id": "P2",
+          "supports": [
+            "翼"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": ""
+        },
+        {
+          "id": "P3",
+          "supports": [
+            "翼",
+            "帆",
+            "耳"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": ""
+        },
+        {
+          "id": "P5",
+          "supports": [
+            "脚"
+          ],
+          "objects": [
+            {
+              "noun": "尾",
+              "reason": "P5はP4の側辺から下がり、星に付く長く広がる尾としては接続が弱い。"
+            }
+          ],
+          "proposals": [],
+          "note": ""
+        }
+      ]
+    },
+    {
+      "item": "item-21",
+      "regions": [
+        {
+          "id": "P3",
+          "supports": [
+            "頭"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": ""
+        }
+      ]
+    },
+    {
+      "item": "item-22",
+      "regions": [
+        {
+          "id": "P4",
+          "supports": [
+            "足先"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "C20: 上に胴は見えないがP3の下に続く足先という局所関係なら低で維持する。"
+        }
+      ]
+    },
+    {
+      "item": "item-24",
+      "regions": [
+        {
+          "id": "P2",
+          "supports": [
+            "ひれ"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "C21: 右へ出るP3をくちばしとする読みとは独立した見立て。"
+        },
+        {
+          "id": "P3",
+          "supports": [
+            "くちばし"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "C21: P2をひれとする読みとは独立した見立てだが、両者は点で隣接する。"
+        }
+      ]
+    },
+    {
+      "item": "item-25",
+      "regions": [
+        {
+          "id": "P2",
+          "supports": [],
+          "objects": [
+            {
+              "noun": "耳",
+              "reason": "P1の上にあるが横に幅広い台形で、左のP3とも形が大きく異なる。"
+            }
+          ],
+          "proposals": [],
+          "note": ""
+        },
+        {
+          "id": "P3",
+          "supports": [
+            "耳"
+          ],
+          "objects": [
+            {
+              "noun": "尾",
+              "reason": "P3は左上に伸びるが、反対側に鳥の頭や首を特定しにくい。"
+            }
+          ],
+          "proposals": [],
+          "note": "D17: 尾は取り下げる。耳は低でありP2と対称ではない。"
+        },
+        {
+          "id": "P4",
+          "supports": [],
+          "objects": [
+            {
+              "noun": "ひれ",
+              "reason": "P1右下の三角形だが、隣のP5との関係から魚の胴とひれの配置を特定しにくい。"
+            }
+          ],
+          "proposals": [],
+          "note": "C22: 魚種やひれの種類を画像から特定できず第1段階の候補を取り下げる。"
+        },
+        {
+          "id": "P5",
+          "supports": [],
+          "objects": [
+            {
+              "noun": "ひれ",
+              "reason": "P1の下端付近に尖るが、P4との接続もあり魚の胴との関係が曖昧である。"
+            }
+          ],
+          "proposals": [],
+          "note": "C22: 魚種やひれの種類を画像から特定できず第1段階の候補を取り下げる。"
+        }
+      ]
+    },
+    {
+      "item": "item-26",
+      "regions": [
+        {
+          "id": "P2",
+          "supports": [
+            "翼"
+          ],
+          "objects": [
+            {
+              "noun": "尾びれ",
+              "reason": "外側の左端が尖り、尾びれとしての外向きの広い縁がない。"
+            }
+          ],
+          "proposals": [],
+          "note": "D18: 尾びれは取り下げる。"
+        },
+        {
+          "id": "P4",
+          "supports": [
+            "頭"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": ""
+        }
+      ]
+    },
+    {
+      "item": "item-28",
+      "regions": [
+        {
+          "id": "P2",
+          "supports": [
+            "煙突"
+          ],
+          "objects": [
+            {
+              "noun": "耳",
+              "reason": "P1の上に立つが正方形で、耳を示す先細りや傾きが乏しい。"
+            }
+          ],
+          "proposals": [],
+          "note": ""
+        },
+        {
+          "id": "P3",
+          "supports": [
+            "耳"
+          ],
+          "objects": [
+            {
+              "noun": "ひれ",
+              "reason": "上に尖るが魚の胴の向きとひれの種類を特定しにくい。"
+            }
+          ],
+          "proposals": [],
+          "note": "D20: ひれは取り下げる。"
+        },
+        {
+          "id": "P4",
+          "supports": [],
+          "objects": [
+            {
+              "noun": "ひれ",
+              "reason": "P1の右下辺に付くがP5へ続き、魚の胴との明確な関係が取れない。"
+            }
+          ],
+          "proposals": [],
+          "note": "C23: 魚種やひれの種類を特定できず第1段階の候補を取り下げる。"
+        },
+        {
+          "id": "P5",
+          "supports": [
+            "尾",
+            "脚"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": ""
+        }
+      ]
+    },
+    {
+      "item": "item-29",
+      "regions": [
+        {
+          "id": "P2",
+          "supports": [
+            "頭",
+            "鼻づら"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": ""
+        },
+        {
+          "id": "P3",
+          "supports": [
+            "脚"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": ""
+        }
+      ]
+    },
+    {
+      "item": "item-30",
+      "regions": [
+        {
+          "id": "P2",
+          "supports": [
+            "上あご",
+            "翼"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": ""
+        },
+        {
+          "id": "P3",
+          "supports": [
+            "下あご"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": ""
+        }
+      ]
+    }
+  ],
+  "responses": [
+    {
+      "q": "A1",
+      "item": "item-01",
+      "id": "P1",
+      "positions": [
+        {
+          "noun": "尾びれ",
+          "stance": "支持",
+          "confidence": "中",
+          "reason": "右端の外向きに縦に広がり、左のP2へ細くつながる。"
+        },
+        {
+          "noun": "翼",
+          "stance": "支持",
+          "confidence": "低",
+          "reason": "P2の右上へ大きく高く広がる直線的な三角形に見える。"
+        }
+      ],
+      "keepNoCandidate": false,
+      "note": ""
+    },
+    {
+      "q": "A2",
+      "item": "item-01",
+      "id": "P3",
+      "positions": [
+        {
+          "noun": "煙突",
+          "stance": "支持",
+          "confidence": "低",
+          "reason": "横長のP2の上から四角く立ち上がる。"
+        },
+        {
+          "noun": "背びれ",
+          "stance": "不支持",
+          "confidence": "",
+          "reason": "上辺が平らな正方形で、ひれの尖りや広がりが見えない。"
+        }
+      ],
+      "keepNoCandidate": false,
+      "note": ""
+    },
+    {
+      "q": "A3",
+      "item": "item-06",
+      "id": "P3",
+      "positions": [
+        {
+          "noun": "船室",
+          "stance": "支持",
+          "confidence": "低",
+          "reason": "横広いP1の上辺の中央寄りに四角く載る。"
+        },
+        {
+          "noun": "煙突",
+          "stance": "支持",
+          "confidence": "低",
+          "reason": "横広いP1の上辺から垂直に立つ小さな四角である。"
+        }
+      ],
+      "keepNoCandidate": false,
+      "note": "P2を煙突と見る場合とは独立した別解。"
+    },
+    {
+      "q": "A4",
+      "item": "item-07",
+      "id": "P2",
+      "positions": [
+        {
+          "noun": "背びれ",
+          "stance": "支持",
+          "confidence": "中",
+          "reason": "大きなP1の上から縦に立ち上がり、上端が尖る。"
+        },
+        {
+          "noun": "耳",
+          "stance": "支持",
+          "confidence": "低",
+          "reason": "上側に細長く立ち、先が斜めに尖る。"
+        },
+        {
+          "noun": "尾",
+          "stance": "不支持",
+          "confidence": "",
+          "reason": "P1の上辺の途中から垂直に立ち、後端から伸びる位置ではない。"
+        }
+      ],
+      "keepNoCandidate": false,
+      "note": ""
+    },
+    {
+      "q": "A5",
+      "item": "item-09",
+      "id": "P1",
+      "positions": [
+        {
+          "noun": "屋根",
+          "stance": "支持",
+          "confidence": "高",
+          "reason": "水平な底辺から左右の斜辺が上の頂点に集まる。"
+        },
+        {
+          "noun": "帆",
+          "stance": "支持",
+          "confidence": "低",
+          "reason": "P2の上に大きな上向き三角形が立ち、水平な下辺を持つ。"
+        }
+      ],
+      "keepNoCandidate": false,
+      "note": "両者の低い方を採る規則に異議なし。"
+    },
+    {
+      "q": "A6",
+      "item": "item-14",
+      "id": "P2",
+      "positions": [
+        {
+          "noun": "柄",
+          "stance": "支持",
+          "confidence": "中",
+          "reason": "大きなP1から右下へ幅のほぼ一定な帯が伸びる。"
+        },
+        {
+          "noun": "尾",
+          "stance": "支持",
+          "confidence": "低",
+          "reason": "P1の下端から右下へ細長く垂れる。"
+        }
+      ],
+      "keepNoCandidate": false,
+      "note": ""
+    },
+    {
+      "q": "A7",
+      "item": "item-20",
+      "id": "P5",
+      "positions": [
+        {
+          "noun": "脚",
+          "stance": "支持",
+          "confidence": "低",
+          "reason": "下側のP4から左下へ細長い帯が伸びる。"
+        },
+        {
+          "noun": "尾",
+          "stance": "不支持",
+          "confidence": "",
+          "reason": "P5はP4の側辺から下がり、星に付く長く広がる尾としては接続が弱い。"
+        }
+      ],
+      "keepNoCandidate": false,
+      "note": ""
+    },
+    {
+      "q": "B1",
+      "item": "item-05",
+      "id": "P5",
+      "positions": [
+        {
+          "noun": "脚",
+          "stance": "支持",
+          "confidence": "低",
+          "reason": "P2の下辺から右下に細長く伸び、足先より脚の位置に当たる。"
+        }
+      ],
+      "keepNoCandidate": false,
+      "note": ""
+    },
+    {
+      "q": "B1",
+      "item": "item-07",
+      "id": "P4",
+      "positions": [
+        {
+          "noun": "脚",
+          "stance": "支持",
+          "confidence": "低",
+          "reason": "P1の下側から垂直に短く伸びており足先より支える脚に近い。"
+        }
+      ],
+      "keepNoCandidate": false,
+      "note": ""
+    },
+    {
+      "q": "B2",
+      "item": "item-08",
+      "id": "P3",
+      "positions": [
+        {
+          "noun": "足先",
+          "stance": "支持",
+          "confidence": "低",
+          "reason": "斜めのP2の下端から左へ小さく張り出し下辺が水平である。"
+        }
+      ],
+      "keepNoCandidate": false,
+      "note": ""
+    },
+    {
+      "q": "B2",
+      "item": "item-15",
+      "id": "P4",
+      "positions": [
+        {
+          "noun": "足先",
+          "stance": "支持",
+          "confidence": "低",
+          "reason": "最下部で上のP3から左下に伸び、下辺が水平になる。"
+        },
+        {
+          "noun": "尾",
+          "stance": "支持",
+          "confidence": "低",
+          "reason": "P3の下端から左下へ折れて細長く続く。"
+        }
+      ],
+      "keepNoCandidate": false,
+      "note": ""
+    },
+    {
+      "q": "B2",
+      "item": "item-16",
+      "id": "P5",
+      "positions": [
+        {
+          "noun": "足先",
+          "stance": "支持",
+          "confidence": "低",
+          "reason": "P1の下端から下向きに小さく尖っている。"
+        }
+      ],
+      "keepNoCandidate": false,
+      "note": ""
+    },
+    {
+      "q": "B3",
+      "item": "item-06",
+      "id": "P1",
+      "positions": [
+        {
+          "noun": "船体",
+          "stance": "支持",
+          "confidence": "低",
+          "reason": "平らな上辺と下辺の間に広がり、右端が舳先のように上がる。"
+        }
+      ],
+      "keepNoCandidate": false,
+      "note": "船底から船体への統一に同意。"
+    },
+    {
+      "q": "B3",
+      "item": "item-09",
+      "id": "P2",
+      "positions": [
+        {
+          "noun": "船体",
+          "stance": "支持",
+          "confidence": "低",
+          "reason": "上辺が長く下辺が短い横長の台形で上にP1が載る。"
+        }
+      ],
+      "keepNoCandidate": false,
+      "note": "船底から船体への統一に同意。"
+    },
+    {
+      "q": "B4",
+      "item": "item-19",
+      "id": "P1",
+      "positions": [
+        {
+          "noun": "袖",
+          "stance": "支持",
+          "confidence": "低",
+          "reason": "P2の上部から左に太く張り出し先端が縦に切れる。"
+        },
+        {
+          "noun": "腕",
+          "stance": "支持",
+          "confidence": "低",
+          "reason": "P2の上部から左へ水平に細長く伸びる。"
+        }
+      ],
+      "keepNoCandidate": false,
+      "note": ""
+    },
+    {
+      "q": "C1",
+      "item": "item-04",
+      "id": "P2",
+      "positions": [
+        {
+          "noun": "鼻づら",
+          "stance": "支持",
+          "confidence": "低",
+          "reason": "大きなP1の右上から水平に小さく突き出す。"
+        }
+      ],
+      "keepNoCandidate": false,
+      "note": ""
+    },
+    {
+      "q": "C2",
+      "item": "item-04",
+      "id": "P3",
+      "positions": [
+        {
+          "noun": "首",
+          "stance": "不支持",
+          "confidence": "",
+          "reason": "P3はP1の下端にあるが、さらに左のP4と下側で続き首の位置を特定しにくい。"
+        }
+      ],
+      "keepNoCandidate": true,
+      "note": ""
+    },
+    {
+      "q": "C3",
+      "item": "item-05",
+      "id": "P4",
+      "positions": [
+        {
+          "noun": "頭",
+          "stance": "支持",
+          "confidence": "低",
+          "reason": "右上端でP3の外側に四角い小領域が付く。"
+        }
+      ],
+      "keepNoCandidate": false,
+      "note": ""
+    },
+    {
+      "q": "C4",
+      "item": "item-08",
+      "id": "P1",
+      "positions": [
+        {
+          "noun": "頭",
+          "stance": "支持",
+          "confidence": "低",
+          "reason": "斜めの大きなP2の左上に付き左へ尖った輪郭を持つ。"
+        }
+      ],
+      "keepNoCandidate": false,
+      "note": ""
+    },
+    {
+      "q": "C5",
+      "item": "item-10",
+      "id": "P3",
+      "positions": [
+        {
+          "noun": "頭",
+          "stance": "支持",
+          "confidence": "低",
+          "reason": "縦長のP1の最上端の左側に小さく付く。"
+        }
+      ],
+      "keepNoCandidate": false,
+      "note": ""
+    },
+    {
+      "q": "C6",
+      "item": "item-15",
+      "id": "P2",
+      "positions": [
+        {
+          "noun": "頭",
+          "stance": "支持",
+          "confidence": "低",
+          "reason": "図形の上部で左に尖り、その上にP1が載る。"
+        }
+      ],
+      "keepNoCandidate": false,
+      "note": ""
+    },
+    {
+      "q": "C7",
+      "item": "item-15",
+      "id": "P3",
+      "positions": [
+        {
+          "noun": "首",
+          "stance": "支持",
+          "confidence": "低",
+          "reason": "上のP2の右下から、より幅の狭い四角が下へ続く。"
+        }
+      ],
+      "keepNoCandidate": false,
+      "note": ""
+    },
+    {
+      "q": "C8",
+      "item": "item-16",
+      "id": "P3",
+      "positions": [
+        {
+          "noun": "頭",
+          "stance": "支持",
+          "confidence": "低",
+          "reason": "最上端で細いP2の上に四角い小領域が付く。"
+        },
+        {
+          "noun": "煙突",
+          "stance": "不支持",
+          "confidence": "",
+          "reason": "四角いP3はP1に直接載らず、斜めの細いP2を介して接している。"
+        }
+      ],
+      "keepNoCandidate": false,
+      "note": ""
+    },
+    {
+      "q": "C9",
+      "item": "item-17",
+      "id": "P1",
+      "positions": [
+        {
+          "noun": "船体",
+          "stance": "支持",
+          "confidence": "低",
+          "reason": "横長で上下に水平な辺があり、左端が舳先のように尖る。"
+        }
+      ],
+      "keepNoCandidate": false,
+      "note": ""
+    },
+    {
+      "q": "C10",
+      "item": "item-18",
+      "id": "P3",
+      "positions": [
+        {
+          "noun": "頭",
+          "stance": "支持",
+          "confidence": "低",
+          "reason": "細長いP2の上端に小さな四角が載っている。"
+        }
+      ],
+      "keepNoCandidate": false,
+      "note": ""
+    },
+    {
+      "q": "C11",
+      "item": "item-20",
+      "id": "P2",
+      "positions": [
+        {
+          "noun": "翼",
+          "stance": "支持",
+          "confidence": "低",
+          "reason": "中央のP1の上端から右へ小さな三角形が張り出す。"
+        }
+      ],
+      "keepNoCandidate": false,
+      "note": ""
+    },
+    {
+      "q": "C12",
+      "item": "item-21",
+      "id": "P3",
+      "positions": [
+        {
+          "noun": "頭",
+          "stance": "支持",
+          "confidence": "低",
+          "reason": "右上端の小さな四角が細いP2の先に載る。"
+        }
+      ],
+      "keepNoCandidate": false,
+      "note": ""
+    },
+    {
+      "q": "C13",
+      "item": "item-25",
+      "id": "P2",
+      "positions": [
+        {
+          "noun": "耳",
+          "stance": "不支持",
+          "confidence": "",
+          "reason": "P1の上にあるが横に幅広い台形で、左のP3とも形が大きく異なる。"
+        }
+      ],
+      "keepNoCandidate": true,
+      "note": ""
+    },
+    {
+      "q": "C14",
+      "item": "item-26",
+      "id": "P4",
+      "positions": [
+        {
+          "noun": "頭",
+          "stance": "支持",
+          "confidence": "低",
+          "reason": "左上端でP3の先に小さな四角が付く。"
+        }
+      ],
+      "keepNoCandidate": false,
+      "note": ""
+    },
+    {
+      "q": "C15",
+      "item": "item-29",
+      "id": "P2",
+      "positions": [
+        {
+          "noun": "頭",
+          "stance": "支持",
+          "confidence": "低",
+          "reason": "大きなP1の右上から小さな四角が外に張り出す。"
+        },
+        {
+          "noun": "鼻づら",
+          "stance": "支持",
+          "confidence": "低",
+          "reason": "P1の右側から水平に短く突き出している。"
+        }
+      ],
+      "keepNoCandidate": false,
+      "note": ""
+    },
+    {
+      "q": "C16",
+      "item": "item-29",
+      "id": "P3",
+      "positions": [
+        {
+          "noun": "脚",
+          "stance": "支持",
+          "confidence": "低",
+          "reason": "大きなP1の下辺から四角い領域が下に垂れる。"
+        }
+      ],
+      "keepNoCandidate": false,
+      "note": ""
+    },
+    {
+      "q": "C17",
+      "item": "item-30",
+      "id": "P3",
+      "positions": [
+        {
+          "noun": "下あご",
+          "stance": "支持",
+          "confidence": "低",
+          "reason": "右へ突き出す四角の上にP2とのV字の切れ込みがある。"
+        }
+      ],
+      "keepNoCandidate": false,
+      "note": ""
+    },
+    {
+      "q": "C18",
+      "item": "item-18",
+      "id": "P1",
+      "positions": [
+        {
+          "noun": "スカート",
+          "stance": "不支持",
+          "confidence": "",
+          "reason": "上辺が最も広く下向きに一点へすぼまるため、広がった裾としては逆向きに見える。"
+        }
+      ],
+      "keepNoCandidate": true,
+      "note": "第1段階の候補を取り下げる。"
+    },
+    {
+      "q": "C19",
+      "item": "item-20",
+      "id": "P1",
+      "positions": [
+        {
+          "noun": "屋根",
+          "stance": "支持",
+          "confidence": "中",
+          "reason": "領域単独では水平な底辺と上向きの頂点を持つ三角形である。"
+        }
+      ],
+      "keepNoCandidate": false,
+      "note": "全体では頂点が隠れるため、合意の確信度を低とすることに異議なし。"
+    },
+    {
+      "q": "C20",
+      "item": "item-22",
+      "id": "P4",
+      "positions": [
+        {
+          "noun": "足先",
+          "stance": "支持",
+          "confidence": "低",
+          "reason": "最下端でP3から左下に伸び、下辺が水平になる。"
+        }
+      ],
+      "keepNoCandidate": false,
+      "note": "上に胴は見えないがP3の下に続く足先という局所関係なら低で維持する。"
+    },
+    {
+      "q": "C21",
+      "item": "item-24",
+      "id": "P2",
+      "positions": [
+        {
+          "noun": "ひれ",
+          "stance": "支持",
+          "confidence": "低",
+          "reason": "P1の下辺から下向きに小さく尖り、腹側のひれの位置にある。"
+        }
+      ],
+      "keepNoCandidate": false,
+      "note": "右へ出るP3をくちばしとする読みとは独立した見立て。"
+    },
+    {
+      "q": "C21",
+      "item": "item-24",
+      "id": "P3",
+      "positions": [
+        {
+          "noun": "くちばし",
+          "stance": "支持",
+          "confidence": "低",
+          "reason": "P1の右辺から右へ小さく尖り、横向きの口先の位置にある。"
+        }
+      ],
+      "keepNoCandidate": false,
+      "note": "P2をひれとする読みとは独立した見立てだが、両者は点で隣接する。"
+    },
+    {
+      "q": "C22",
+      "item": "item-25",
+      "id": "P4",
+      "positions": [
+        {
+          "noun": "ひれ",
+          "stance": "不支持",
+          "confidence": "",
+          "reason": "P1右下の三角形だが、隣のP5との関係から魚の胴とひれの配置を特定しにくい。"
+        }
+      ],
+      "keepNoCandidate": true,
+      "note": "魚種やひれの種類を画像から特定できず第1段階の候補を取り下げる。"
+    },
+    {
+      "q": "C22",
+      "item": "item-25",
+      "id": "P5",
+      "positions": [
+        {
+          "noun": "ひれ",
+          "stance": "不支持",
+          "confidence": "",
+          "reason": "P1の下端付近に尖るが、P4との接続もあり魚の胴との関係が曖昧である。"
+        }
+      ],
+      "keepNoCandidate": true,
+      "note": "魚種やひれの種類を画像から特定できず第1段階の候補を取り下げる。"
+    },
+    {
+      "q": "C23",
+      "item": "item-28",
+      "id": "P4",
+      "positions": [
+        {
+          "noun": "ひれ",
+          "stance": "不支持",
+          "confidence": "",
+          "reason": "P1の右下辺に付くがP5へ続き、魚の胴との明確な関係が取れない。"
+        }
+      ],
+      "keepNoCandidate": true,
+      "note": "魚種やひれの種類を特定できず第1段階の候補を取り下げる。"
+    },
+    {
+      "q": "D1",
+      "item": "item-01",
+      "id": "P2",
+      "positions": [
+        {
+          "noun": "胴",
+          "stance": "支持",
+          "confidence": "低",
+          "reason": "右側のP1に接し、左へ尖る横長の塊をなす。"
+        },
+        {
+          "noun": "船底",
+          "stance": "不支持",
+          "confidence": "",
+          "reason": "領域は船の下端だけでなく上縁まで含むため船底に限定しにくい。"
+        },
+        {
+          "noun": "船体",
+          "stance": "支持",
+          "confidence": "低",
+          "reason": "左端が尖る横広の塊で上に小さなP3が載る。"
+        }
+      ],
+      "keepNoCandidate": false,
+      "note": "船底を船体に置き換えることに同意。"
+    },
+    {
+      "q": "D2",
+      "item": "item-02",
+      "id": "P2",
+      "positions": [
+        {
+          "noun": "耳",
+          "stance": "支持",
+          "confidence": "低",
+          "reason": "大きなP1の上辺に載り上に尖る小さな三角形である。"
+        },
+        {
+          "noun": "屋根",
+          "stance": "支持",
+          "confidence": "中",
+          "reason": "水平な底辺から頂点に向かう上向きの三角形である。"
+        }
+      ],
+      "keepNoCandidate": false,
+      "note": ""
+    },
+    {
+      "q": "D3",
+      "item": "item-02",
+      "id": "P4",
+      "positions": [
+        {
+          "noun": "かかと",
+          "stance": "不支持",
+          "confidence": "",
+          "reason": "四角いP4は下端にあるが、P1に靴や足先に相当する輪郭を見いだせない。"
+        },
+        {
+          "noun": "前足",
+          "stance": "支持",
+          "confidence": "低",
+          "reason": "大きなP1の左下端で左へ張り出し、水平な下辺を持つ。"
+        }
+      ],
+      "keepNoCandidate": false,
+      "note": "かかとは取り下げる。"
+    },
+    {
+      "q": "D4",
+      "item": "item-03",
+      "id": "P2",
+      "positions": [
+        {
+          "noun": "尾びれ",
+          "stance": "支持",
+          "confidence": "低",
+          "reason": "P1の下側につながる三角形が外側へ広がる。"
+        },
+        {
+          "noun": "足",
+          "stance": "不支持",
+          "confidence": "",
+          "reason": "下向きに尖る三角形で足先の広がりを見いだしにくい。"
+        }
+      ],
+      "keepNoCandidate": false,
+      "note": "足は取り下げる。"
+    },
+    {
+      "q": "D5",
+      "item": "item-06",
+      "id": "P2",
+      "positions": [
+        {
+          "noun": "尾",
+          "stance": "支持",
+          "confidence": "低",
+          "reason": "P1の左上端から左上へ細長く伸びる。"
+        },
+        {
+          "noun": "煙突",
+          "stance": "支持",
+          "confidence": "低",
+          "reason": "P1の上に斜めに立つ細長い帯である。"
+        }
+      ],
+      "keepNoCandidate": false,
+      "note": ""
+    },
+    {
+      "q": "D6",
+      "item": "item-07",
+      "id": "P3",
+      "positions": [
+        {
+          "noun": "尾びれ",
+          "stance": "不支持",
+          "confidence": "",
+          "reason": "右へ尖る小さな三角形で、外側へ扇状に広がる縁がない。"
+        },
+        {
+          "noun": "尾",
+          "stance": "支持",
+          "confidence": "低",
+          "reason": "P1の右側面から短く右へ突き出す。"
+        },
+        {
+          "noun": "くちばし",
+          "stance": "支持",
+          "confidence": "中",
+          "reason": "P1の右側面から小さな三角形が右に突き出す。"
+        }
+      ],
+      "keepNoCandidate": false,
+      "note": "くちばしの合意確信度を低とすることに異議なし。"
+    },
+    {
+      "q": "D7",
+      "item": "item-08",
+      "id": "P4",
+      "positions": [
+        {
+          "noun": "尾",
+          "stance": "支持",
+          "confidence": "低",
+          "reason": "P2の右上端から右下へ細長く垂れる。"
+        },
+        {
+          "noun": "翼",
+          "stance": "支持",
+          "confidence": "低",
+          "reason": "P2の上端から右下へ斜めの帯が張り出す。"
+        },
+        {
+          "noun": "耳",
+          "stance": "不支持",
+          "confidence": "",
+          "reason": "P4の付け根のP2上端に独立した頭の領域がなく、耳としての位置が曖昧である。"
+        }
+      ],
+      "keepNoCandidate": false,
+      "note": "耳の候補は取り下げる。"
+    },
+    {
+      "q": "D8",
+      "item": "item-11",
+      "id": "P2",
+      "positions": [
+        {
+          "noun": "耳",
+          "stance": "支持",
+          "confidence": "低",
+          "reason": "上方へ鋭く立つ三角形で付け根が下にある。"
+        },
+        {
+          "noun": "翼",
+          "stance": "支持",
+          "confidence": "低",
+          "reason": "P1の左上から上向きに三角形が広がる。"
+        },
+        {
+          "noun": "背びれ",
+          "stance": "支持",
+          "confidence": "低",
+          "reason": "P1の上側で上に向かって尖る。"
+        }
+      ],
+      "keepNoCandidate": false,
+      "note": ""
+    },
+    {
+      "q": "D9",
+      "item": "item-11",
+      "id": "P5",
+      "positions": [
+        {
+          "noun": "胸びれ",
+          "stance": "支持",
+          "confidence": "低",
+          "reason": "横長のP1の左下付近から小さい三角形が下へ突き出す。"
+        },
+        {
+          "noun": "牙",
+          "stance": "不支持",
+          "confidence": "",
+          "reason": "P5近くに口の切れ込みがなく、頭の領域も特定しにくい。"
+        }
+      ],
+      "keepNoCandidate": false,
+      "note": "牙は取り下げる。"
+    },
+    {
+      "q": "D10",
+      "item": "item-12",
+      "id": "P3",
+      "positions": [
+        {
+          "noun": "ふた",
+          "stance": "支持",
+          "confidence": "低",
+          "reason": "幅広いP1の上に底辺が長い台形が載る。"
+        },
+        {
+          "noun": "屋根",
+          "stance": "支持",
+          "confidence": "低",
+          "reason": "下に広がり上辺が短い台形で寄棟屋根に近い。"
+        },
+        {
+          "noun": "帽子のつば",
+          "stance": "不支持",
+          "confidence": "",
+          "reason": "台形は高さがあり、薄い横長のつばというより帽子の山に近い。"
+        }
+      ],
+      "keepNoCandidate": false,
+      "note": "帽子のつばは取り下げる。"
+    },
+    {
+      "q": "D11",
+      "item": "item-13",
+      "id": "P1",
+      "positions": [
+        {
+          "noun": "頭",
+          "stance": "支持",
+          "confidence": "低",
+          "reason": "P2の上側から右にずれ、右端が尖って突き出す。"
+        },
+        {
+          "noun": "屋根",
+          "stance": "支持",
+          "confidence": "低",
+          "reason": "下辺が長く上辺が短い左右斜めの台形である。"
+        }
+      ],
+      "keepNoCandidate": false,
+      "note": ""
+    },
+    {
+      "q": "D12",
+      "item": "item-15",
+      "id": "P1",
+      "positions": [
+        {
+          "noun": "耳",
+          "stance": "支持",
+          "confidence": "低",
+          "reason": "左に尖るP2の上に上向きの三角形が載る。"
+        },
+        {
+          "noun": "とさか",
+          "stance": "支持",
+          "confidence": "低",
+          "reason": "上部のP2から上に尖る三角形が立つ。"
+        },
+        {
+          "noun": "屋根",
+          "stance": "支持",
+          "confidence": "中",
+          "reason": "水平な底辺と上向きの頂点を持つ三角形である。"
+        }
+      ],
+      "keepNoCandidate": false,
+      "note": "屋根の合意確信度を低とすることに異議なし。"
+    },
+    {
+      "q": "D13",
+      "item": "item-16",
+      "id": "P4",
+      "positions": [
+        {
+          "noun": "脚",
+          "stance": "支持",
+          "confidence": "低",
+          "reason": "P1の右側から右下に伸び、先端がP1の底辺と同じ高さにある。"
+        },
+        {
+          "noun": "腕",
+          "stance": "支持",
+          "confidence": "低",
+          "reason": "P1の右上寄りから右下へ細長い帯が伸びる。"
+        }
+      ],
+      "keepNoCandidate": false,
+      "note": ""
+    },
+    {
+      "q": "D14",
+      "item": "item-17",
+      "id": "P2",
+      "positions": [
+        {
+          "noun": "煙突",
+          "stance": "支持",
+          "confidence": "低",
+          "reason": "横長のP1の上から縦に細く立つ。"
+        },
+        {
+          "noun": "耳",
+          "stance": "支持",
+          "confidence": "低",
+          "reason": "P1の上から立ち上がり上端が斜めに尖る。"
+        },
+        {
+          "noun": "帆",
+          "stance": "不支持",
+          "confidence": "",
+          "reason": "縦に細く上が台形状に切れ、広がる帆の面としては幅が足りない。"
+        },
+        {
+          "noun": "背びれ",
+          "stance": "支持",
+          "confidence": "中",
+          "reason": "P1の上から縦に立ち先が尖る。"
+        }
+      ],
+      "keepNoCandidate": false,
+      "note": ""
+    },
+    {
+      "q": "D15",
+      "item": "item-18",
+      "id": "P4",
+      "positions": [
+        {
+          "noun": "脚",
+          "stance": "支持",
+          "confidence": "低",
+          "reason": "P1の右辺から右下へ細い帯が伸びる。"
+        },
+        {
+          "noun": "尾",
+          "stance": "支持",
+          "confidence": "低",
+          "reason": "P1の右側から右下へ細長く垂れる。"
+        },
+        {
+          "noun": "腕",
+          "stance": "支持",
+          "confidence": "低",
+          "reason": "P1の右上の接点から右下へ細長く伸びる。"
+        }
+      ],
+      "keepNoCandidate": false,
+      "note": ""
+    },
+    {
+      "q": "D16",
+      "item": "item-20",
+      "id": "P3",
+      "positions": [
+        {
+          "noun": "翼",
+          "stance": "支持",
+          "confidence": "低",
+          "reason": "中央のP1の上側から左上へ尖って広がる。"
+        },
+        {
+          "noun": "帆",
+          "stance": "支持",
+          "confidence": "低",
+          "reason": "縦の左辺から右の頂点へ広がる三角形である。"
+        },
+        {
+          "noun": "耳",
+          "stance": "支持",
+          "confidence": "低",
+          "reason": "中央上部から左上へ鋭く立つ。"
+        }
+      ],
+      "keepNoCandidate": false,
+      "note": ""
+    },
+    {
+      "q": "D17",
+      "item": "item-25",
+      "id": "P3",
+      "positions": [
+        {
+          "noun": "耳",
+          "stance": "支持",
+          "confidence": "低",
+          "reason": "P1の上辺左側から左上へ細長く立つ。"
+        },
+        {
+          "noun": "尾",
+          "stance": "不支持",
+          "confidence": "",
+          "reason": "P3は左上に伸びるが、反対側に鳥の頭や首を特定しにくい。"
+        }
+      ],
+      "keepNoCandidate": false,
+      "note": "尾は取り下げる。耳は低でありP2と対称ではない。"
+    },
+    {
+      "q": "D18",
+      "item": "item-26",
+      "id": "P2",
+      "positions": [
+        {
+          "noun": "翼",
+          "stance": "支持",
+          "confidence": "低",
+          "reason": "P1の左から外へ広がる下向きの三角形である。"
+        },
+        {
+          "noun": "尾びれ",
+          "stance": "不支持",
+          "confidence": "",
+          "reason": "外側の左端が尖り、尾びれとしての外向きの広い縁がない。"
+        }
+      ],
+      "keepNoCandidate": false,
+      "note": "尾びれは取り下げる。"
+    },
+    {
+      "q": "D19",
+      "item": "item-28",
+      "id": "P2",
+      "positions": [
+        {
+          "noun": "耳",
+          "stance": "不支持",
+          "confidence": "",
+          "reason": "P1の上に立つが正方形で、耳を示す先細りや傾きが乏しい。"
+        },
+        {
+          "noun": "煙突",
+          "stance": "支持",
+          "confidence": "低",
+          "reason": "幅広いP1の上から四角く垂直に立つ。"
+        }
+      ],
+      "keepNoCandidate": false,
+      "note": ""
+    },
+    {
+      "q": "D20",
+      "item": "item-28",
+      "id": "P3",
+      "positions": [
+        {
+          "noun": "耳",
+          "stance": "支持",
+          "confidence": "低",
+          "reason": "P1の右上端から三角形が上に尖って立つ。"
+        },
+        {
+          "noun": "ひれ",
+          "stance": "不支持",
+          "confidence": "",
+          "reason": "上に尖るが魚の胴の向きとひれの種類を特定しにくい。"
+        }
+      ],
+      "keepNoCandidate": false,
+      "note": "ひれは取り下げる。"
+    },
+    {
+      "q": "D21",
+      "item": "item-28",
+      "id": "P5",
+      "positions": [
+        {
+          "noun": "尾",
+          "stance": "支持",
+          "confidence": "低",
+          "reason": "P1の下側から右下へ細長く伸びる。"
+        },
+        {
+          "noun": "脚",
+          "stance": "支持",
+          "confidence": "低",
+          "reason": "下側の接点から右下へ細長く伸びる。"
+        }
+      ],
+      "keepNoCandidate": false,
+      "note": ""
+    },
+    {
+      "q": "D22",
+      "item": "item-30",
+      "id": "P2",
+      "positions": [
+        {
+          "noun": "上あご",
+          "stance": "支持",
+          "confidence": "低",
+          "reason": "右上に張り出す三角形と下のP3との間にV字の口のような隙間がある。"
+        },
+        {
+          "noun": "翼",
+          "stance": "支持",
+          "confidence": "低",
+          "reason": "縦長のP1の右上から三角形が横に張り出す。"
+        }
+      ],
+      "keepNoCandidate": false,
+      "note": ""
+    }
+  ]
+}

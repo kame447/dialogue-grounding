@@ -1,0 +1,1500 @@
+{
+  "observer": "HardyGuericke",
+  "model": "gpt-6.1-terra",
+  "effort": "ultra",
+  "viewedImages": true,
+  "items": [
+    {
+      "item": "item-01",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "尾びれ",
+              "owner": "魚",
+              "basis": "両方",
+              "confidence": "中",
+              "evidence": "右端に縦に広がり、左側の一点付近で他領域につながる。",
+              "weaknesses": "外側の辺が平らで切れ込みがない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P2",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "船底",
+              "owner": "船",
+              "basis": "両方",
+              "confidence": "低",
+              "evidence": "横に広く下側が斜めにすぼまり、上に小領域が載る。",
+              "weaknesses": "底が平らではなく尖っている。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P3",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "煙突",
+              "owner": "船",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "下の横長領域から四角く上に立ち上がる。",
+              "weaknesses": "高さと幅が同じで太い。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-02",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "中央の大きな直角二等辺三角形は広がりが中心的で、特定の部分に限定する根拠が乏しい。"
+        },
+        {
+          "id": "P2",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "屋根",
+              "owner": "家",
+              "basis": "単独",
+              "confidence": "中",
+              "evidence": "水平な底辺の上で二辺が頂点に集まる。",
+              "weaknesses": "建物の壁に相当する形は明瞭ではない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P3",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "尾",
+              "owner": "動物",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "右端から斜め上に細く伸びている。",
+              "weaknesses": "先端が尖らず直線で切れている。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P4",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "かかと",
+              "owner": "靴",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "左下端で上方の領域につながり、下辺が水平である。",
+              "weaknesses": "四角く、足先との区別がはっきりしない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-03",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "中央の大きな台形は広がりが中心的で、特定の部分に限定する根拠が乏しい。"
+        },
+        {
+          "id": "P2",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "足",
+              "owner": "動物",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "大きな領域の下から左下に広がる。",
+              "weaknesses": "三角形で関節や指は見えない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P3",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "上側の正方形は接続を含めても特定の物の部分を示す特徴に乏しい。"
+        },
+        {
+          "id": "P4",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "くちばし",
+              "owner": "鳥",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "上端の小領域から右上に細長く突き出す。",
+              "weaknesses": "先は水平に切れており尖っていない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-04",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "中央の大きな五角形は広がりが中心的で、特定の部分に限定する根拠が乏しい。"
+        },
+        {
+          "id": "P2",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "右側の正方形は接続を含めても特定の物の部分を示す特徴に乏しい。"
+        },
+        {
+          "id": "P3",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "下側の正方形は接続を含めても特定の物の部分を示す特徴に乏しい。"
+        },
+        {
+          "id": "P4",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "尾",
+              "owner": "動物",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "左下から斜め上へ細く伸び、小領域を介して中心につながる。",
+              "weaknesses": "帯状で先が尖らない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-05",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "尾びれ",
+              "owner": "魚",
+              "basis": "両方",
+              "confidence": "中",
+              "evidence": "左端に縦に広がり、右側の一点で大きな領域につながる。",
+              "weaknesses": "外側の辺は平らで切れ込みがない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P2",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "屋根",
+              "owner": "家",
+              "basis": "単独",
+              "confidence": "中",
+              "evidence": "幅広い水平な底辺から上向きの頂点に斜辺が集まる。",
+              "weaknesses": "領域の大部分を占め、軒の表現はない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P3",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "右側の直角二等辺三角形は形と接続から特定の物の部分を選ぶ決め手が乏しい。"
+        },
+        {
+          "id": "P4",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "上側の正方形は接続を含めても特定の物の部分を示す特徴に乏しい。"
+        },
+        {
+          "id": "P5",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "足",
+              "owner": "動物",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "下側から右下へ細長く伸びている。",
+              "weaknesses": "足指や明確な足首はない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-06",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "船底",
+              "owner": "船",
+              "basis": "両方",
+              "confidence": "中",
+              "evidence": "横に広く、下に平らな辺があり右端が上へ尖る。",
+              "weaknesses": "左側が垂直に切れ左右対称ではない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P2",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "煙突",
+              "owner": "船",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "下の幅広い領域から左上へ帯状に立ち上がる。",
+              "weaknesses": "かなり斜めで先も斜めに切れている。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P3",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "船室",
+              "owner": "船",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "幅広い下側の領域の上に四角く載っている。",
+              "weaknesses": "窓や屋根の区別はない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-07",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "中央の大きな五角形は広がりが中心的で、特定の部分に限定する根拠が乏しい。"
+        },
+        {
+          "id": "P2",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "背びれ",
+              "owner": "魚",
+              "basis": "全体との関係",
+              "confidence": "中",
+              "evidence": "中央領域の上から高く立ち、上端が尖る。",
+              "weaknesses": "前後の辺が直線的で幅も広い。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P3",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "くちばし",
+              "owner": "鳥",
+              "basis": "全体との関係",
+              "confidence": "中",
+              "evidence": "右側面から小さく三角形に突き出している。",
+              "weaknesses": "付け根が縦に広く口の線はない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P4",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "足",
+              "owner": "動物",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "中央の下側から四角い領域が垂直に伸びる。",
+              "weaknesses": "足先や関節がない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-08",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "上側の五角形は形と接続から特定の物の部分を選ぶ決め手が乏しい。"
+        },
+        {
+          "id": "P2",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "中央の大きな平行四辺形は広がりが中心的で、特定の部分に限定する根拠が乏しい。"
+        },
+        {
+          "id": "P3",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "足先",
+              "owner": "鳥",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "斜めの大領域の下端から左へ小さく張り出す。",
+              "weaknesses": "足指がなく三角形にまとまっている。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P4",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "耳",
+              "owner": "動物",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "上端から右下へ細く垂れた形でつながる。",
+              "weaknesses": "上端が鋭く耳の丸みはない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-09",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "屋根",
+              "owner": "家",
+              "basis": "単独",
+              "confidence": "高",
+              "evidence": "長い水平の底辺と上向きの頂点を持つ三角形である。",
+              "weaknesses": "屋根の厚みは示されない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P2",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "船底",
+              "owner": "船",
+              "basis": "単独",
+              "confidence": "中",
+              "evidence": "横長で下辺が短く、両端が上に広がる。",
+              "weaknesses": "右端と左端が対称ではない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P3",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "幹",
+              "owner": "木",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "幅広い上側の領域の下から垂直に伸びる。",
+              "weaknesses": "正方形に近く短い。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-10",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "中央の大きな台形は広がりが中心的で、特定の部分に限定する根拠が乏しい。"
+        },
+        {
+          "id": "P2",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "翼",
+              "owner": "鳥",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "大きな縦長領域の右上から横へ広がり先が尖る。",
+              "weaknesses": "三角形の下側も尖り、羽の細部はない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P3",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "上側の正方形は接続を含めても特定の物の部分を示す特徴に乏しい。"
+        }
+      ]
+    },
+    {
+      "item": "item-11",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "中央の大きな六角形は広がりが中心的で、特定の部分に限定する根拠が乏しい。"
+        },
+        {
+          "id": "P2",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "背びれ",
+              "owner": "魚",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "大きな領域の左上に向かって尖った部分が立つ。",
+              "weaknesses": "中心の接点寄りにあり、背中に載る形ではない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P3",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "左側の直角二等辺三角形は形と接続から特定の物の部分を選ぶ決め手が乏しい。"
+        },
+        {
+          "id": "P4",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "下側の正方形は接続を含めても特定の物の部分を示す特徴に乏しい。"
+        },
+        {
+          "id": "P5",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "牙",
+              "owner": "動物",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "接点の近くから下向きに小さく尖る。",
+              "weaknesses": "歯列や口が見えない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-12",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "中央の大きな直角二等辺三角形は広がりが中心的で、特定の部分に限定する根拠が乏しい。"
+        },
+        {
+          "id": "P2",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "中央の直角二等辺三角形は形と接続から特定の物の部分を選ぶ決め手が乏しい。"
+        },
+        {
+          "id": "P3",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "帽子のつば",
+              "owner": "帽子",
+              "basis": "単独",
+              "confidence": "低",
+              "evidence": "上が短く下が長い水平辺を持つ横広の台形である。",
+              "weaknesses": "帽子の山とつばが分かれていない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P4",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "脚",
+              "owner": "人",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "上方の領域につながり下端まで縦に伸びる。",
+              "weaknesses": "足先や関節が見えず上辺が斜めである。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-13",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "屋根",
+              "owner": "家",
+              "basis": "単独",
+              "confidence": "低",
+              "evidence": "横長で上辺が短く、左右に斜めの軒が広がる。",
+              "weaknesses": "頂上が平らで壁との対応は明瞭でない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P2",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "中央の大きな直角二等辺三角形は広がりが中心的で、特定の部分に限定する根拠が乏しい。"
+        },
+        {
+          "id": "P3",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "左側の直角二等辺三角形は形と接続から特定の物の部分を選ぶ決め手が乏しい。"
+        },
+        {
+          "id": "P4",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "脚",
+              "owner": "人",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "中央下から下端へ向かって縦長に伸びる。",
+              "weaknesses": "足先や関節が見えない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-14",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "中央の大きな五角形は広がりが中心的で、特定の部分に限定する根拠が乏しい。"
+        },
+        {
+          "id": "P2",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "柄",
+              "owner": "道具",
+              "basis": "全体との関係",
+              "confidence": "中",
+              "evidence": "大きな領域の下側から右下へ細長く伸びる。",
+              "weaknesses": "端が斜めに切れ、握りの形はない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-15",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "屋根",
+              "owner": "家",
+              "basis": "単独",
+              "confidence": "中",
+              "evidence": "水平な底辺から上向きの頂点に二辺が集まる。",
+              "weaknesses": "下の領域と底辺全体では接していない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P2",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "中央の大きな五角形は広がりが中心的で、特定の部分に限定する根拠が乏しい。"
+        },
+        {
+          "id": "P3",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "右側の正方形は接続を含めても特定の物の部分を示す特徴に乏しい。"
+        },
+        {
+          "id": "P4",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "足先",
+              "owner": "人",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "下の小領域から左下へ細長く伸び、下辺が水平になる。",
+              "weaknesses": "足首や指は見えない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-16",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "帆",
+              "owner": "船",
+              "basis": "単独",
+              "confidence": "低",
+              "evidence": "大きな直角三角形で、底辺が水平、右辺が垂直である。",
+              "weaknesses": "帆柱や船底がはっきりしない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P2",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "上側の直角二等辺三角形は形と接続から特定の物の部分を選ぶ決め手が乏しい。"
+        },
+        {
+          "id": "P3",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "上側の正方形は接続を含めても特定の物の部分を示す特徴に乏しい。"
+        },
+        {
+          "id": "P4",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "腕",
+              "owner": "人",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "中央付近から右下へ細長く伸びる。",
+              "weaknesses": "手や肘は見えず幅が一定である。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P5",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "足先",
+              "owner": "人",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "大きな領域の下端から下向きに小さく尖る。",
+              "weaknesses": "足指がなく三角形が強い。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-17",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "下側の大きな六角形は広がりが中心的で、特定の部分に限定する根拠が乏しい。"
+        },
+        {
+          "id": "P2",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "背びれ",
+              "owner": "魚",
+              "basis": "全体との関係",
+              "confidence": "中",
+              "evidence": "幅広い領域の上から縦に立ち上がり、上端が尖る。",
+              "weaknesses": "付け根が四角く辺が直線的である。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-18",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "スカート",
+              "owner": "衣服",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "上部の接点から左と下へ大きく広がる。",
+              "weaknesses": "裾が斜めで非対称である。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P2",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "首",
+              "owner": "鳥",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "上の小さな四角形と下の大領域を斜めの細長い帯でつなぐ。",
+              "weaknesses": "幅が一定で自然な曲がりがない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P3",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "上側の正方形は接続を含めても特定の物の部分を示す特徴に乏しい。"
+        },
+        {
+          "id": "P4",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "腕",
+              "owner": "人",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "中央の接点から右下へ細長く伸びる。",
+              "weaknesses": "手や肘は見えない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-19",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "袖",
+              "owner": "衣服",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "中央の領域から左へ横長に張り出す。",
+              "weaknesses": "先端が垂直で袖口などの細部はない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P2",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "中央の大きな台形は広がりが中心的で、特定の部分に限定する根拠が乏しい。"
+        },
+        {
+          "id": "P3",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "下側の直角二等辺三角形は形と接続から特定の物の部分を選ぶ決め手が乏しい。"
+        },
+        {
+          "id": "P4",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "脚",
+              "owner": "人",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "中央下から右下へ細長く伸びる。",
+              "weaknesses": "足先や関節は見えない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-20",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "屋根",
+              "owner": "家",
+              "basis": "単独",
+              "confidence": "中",
+              "evidence": "水平な底辺と上向きの頂点を持つ幅広い三角形である。",
+              "weaknesses": "壁に相当する領域ははっきりしない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P2",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "上側の直角二等辺三角形は形と接続から特定の物の部分を選ぶ決め手が乏しい。"
+        },
+        {
+          "id": "P3",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "耳",
+              "owner": "動物",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "中央上部から左上へ鋭く立つ。",
+              "weaknesses": "内側の描写はない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P4",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "中央の正方形は接続を含めても特定の物の部分を示す特徴に乏しい。"
+        },
+        {
+          "id": "P5",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "脚",
+              "owner": "人",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "下側の四角い領域から左下へ伸びる。",
+              "weaknesses": "足や膝は区別できない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-21",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "中央の大きな台形は広がりが中心的で、特定の部分に限定する根拠が乏しい。"
+        },
+        {
+          "id": "P2",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "右側の直角二等辺三角形は形と接続から特定の物の部分を選ぶ決め手が乏しい。"
+        },
+        {
+          "id": "P3",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "上側の正方形は接続を含めても特定の物の部分を示す特徴に乏しい。"
+        },
+        {
+          "id": "P4",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "脚",
+              "owner": "動物",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "中心付近から右下へ細長く垂れている。",
+              "weaknesses": "関節や足先は示されない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-22",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "上側の大きな直角二等辺三角形は広がりが中心的で、特定の部分に限定する根拠が乏しい。"
+        },
+        {
+          "id": "P2",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "左側の台形は形と接続から特定の物の部分を選ぶ決め手が乏しい。"
+        },
+        {
+          "id": "P3",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "中央の台形は形と接続から特定の物の部分を選ぶ決め手が乏しい。"
+        },
+        {
+          "id": "P4",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "足先",
+              "owner": "人",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "右側の領域の下から左下へ伸び、下辺が水平になる。",
+              "weaknesses": "足指や踵はない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-23",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "帆",
+              "owner": "船",
+              "basis": "単独",
+              "confidence": "中",
+              "evidence": "縦の辺から右に尖る大きな三角形である。",
+              "weaknesses": "帆柱や船体との対応は明瞭ではない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P2",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "左側の大きな台形は広がりが中心的で、特定の部分に限定する根拠が乏しい。"
+        },
+        {
+          "id": "P3",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "下側の正方形は接続を含めても特定の物の部分を示す特徴に乏しい。"
+        }
+      ]
+    },
+    {
+      "item": "item-24",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "中央の大きな8角形は広がりが中心的で、特定の部分に限定する根拠が乏しい。"
+        },
+        {
+          "id": "P2",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "ひれ",
+              "owner": "魚",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "大きな領域の下端から小さく下に尖る。",
+              "weaknesses": "付け根が短く、ひれの筋はない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P3",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "くちばし",
+              "owner": "鳥",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "大きな領域の右端から小さな三角形が右へ突き出す。",
+              "weaknesses": "口の線がなく右端が上寄りに尖る。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-25",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "中央の大きな直角二等辺三角形は広がりが中心的で、特定の部分に限定する根拠が乏しい。"
+        },
+        {
+          "id": "P2",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "上側の台形は形と接続から特定の物の部分を選ぶ決め手が乏しい。"
+        },
+        {
+          "id": "P3",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "尾",
+              "owner": "鳥",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "左上端から中央へ斜めの細い帯が伸びる。",
+              "weaknesses": "羽の分かれ目がなく先が平らである。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P4",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "ひれ",
+              "owner": "魚",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "大きな領域の右下側から三角形が横に広がる。",
+              "weaknesses": "輪郭が直線的でひれの筋はない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P5",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "ひれ",
+              "owner": "魚",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "右下の接点から小さな三角形が下へ尖る。",
+              "weaknesses": "他の領域との接点が狭く、ひれの筋はない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-26",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "中央の大きな平行四辺形は広がりが中心的で、特定の部分に限定する根拠が乏しい。"
+        },
+        {
+          "id": "P2",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "尾びれ",
+              "owner": "魚",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "左端の三角形が大きな領域の左下に接して広がる。",
+              "weaknesses": "付け根が尖るのではなく斜辺全体で接している。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P3",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "上側の直角二等辺三角形は形と接続から特定の物の部分を選ぶ決め手が乏しい。"
+        },
+        {
+          "id": "P4",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "上側の正方形は接続を含めても特定の物の部分を示す特徴に乏しい。"
+        },
+        {
+          "id": "P5",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "脚",
+              "owner": "動物",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "下側から右下へ細い帯状に伸びる。",
+              "weaknesses": "足先や関節がない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-27",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "尾びれ",
+              "owner": "魚",
+              "basis": "両方",
+              "confidence": "中",
+              "evidence": "左端に縦に広がり、右側の一点で大きな領域につながる。",
+              "weaknesses": "外側の辺が平らで切れ込みはない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P2",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "屋根",
+              "owner": "家",
+              "basis": "単独",
+              "confidence": "中",
+              "evidence": "水平に長い底辺と上向きの頂点を持つ。",
+              "weaknesses": "屋根の下に壁は描かれていない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P3",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "下側の直角二等辺三角形は形と接続から特定の物の部分を選ぶ決め手が乏しい。"
+        },
+        {
+          "id": "P4",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "右側の直角二等辺三角形は形と接続から特定の物の部分を選ぶ決め手が乏しい。"
+        },
+        {
+          "id": "P5",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "くちばし",
+              "owner": "鳥",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "右上の領域からさらに右へ小さく尖って伸びる。",
+              "weaknesses": "上辺が水平で口の線はない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-28",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "中央の大きな直角二等辺三角形は広がりが中心的で、特定の部分に限定する根拠が乏しい。"
+        },
+        {
+          "id": "P2",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "煙突",
+              "owner": "船",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "幅広い領域の上から四角く立ち上がる。",
+              "weaknesses": "幅と高さが同じで太い。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P3",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "ひれ",
+              "owner": "魚",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "右上端で三角形が上方へ立っている。",
+              "weaknesses": "ひれの筋はない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P4",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "ひれ",
+              "owner": "魚",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "右側の接点から三角形が横に張り出す。",
+              "weaknesses": "輪郭が直線的でひれの筋はない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P5",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "脚",
+              "owner": "動物",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "下側の接点から右下へ細長く伸びる。",
+              "weaknesses": "先が斜めに切れて足や関節はない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-29",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "中央の大きな五角形は広がりが中心的で、特定の部分に限定する根拠が乏しい。"
+        },
+        {
+          "id": "P2",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "右側の正方形は接続を含めても特定の物の部分を示す特徴に乏しい。"
+        },
+        {
+          "id": "P3",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "下側の正方形は接続を含めても特定の物の部分を示す特徴に乏しい。"
+        },
+        {
+          "id": "P4",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "尾",
+              "owner": "動物",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "中央領域の左側から左上へ細長く伸びる。",
+              "weaknesses": "先が尖らず幅が一定である。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-30",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "左側の大きな台形は広がりが中心的で、特定の部分に限定する根拠が乏しい。"
+        },
+        {
+          "id": "P2",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "翼",
+              "owner": "鳥",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "大きな縦長領域の右上側から三角形が横に張り出す。",
+              "weaknesses": "羽の細部がなく下側も尖る。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P3",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "右側の正方形は接続を含めても特定の物の部分を示す特徴に乏しい。"
+        }
+      ]
+    }
+  ]
+}

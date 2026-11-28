@@ -1,4 +1,6 @@
 /** Participant assignment API. Researcher values only; never an allocation method. */
+import type { PartObservationVersion } from '../stimuli/part-geometry.ts';
+import type { RotationMemoryPin } from './rotation-memory-pin.ts';
 import type { OpeningMode } from './opening-mode.ts';
 import type { PreparedTrialObservationReference } from './prepared-observations.ts';
 import type { ParticipantProductionProfile } from '../web/participant-usage-policy.ts';
@@ -64,6 +66,9 @@ export type MakeBaseTask = (options: { strategy: Strategy; seed: number; referen
   figureSelection?: ResolvedFigureSelection; participantModelPin?: ParticipantModelPin; participantLimits?: Readonly<BudgetLimits>;
   initialObservationGeneration?: InitialObservationGeneration;
   preparedObservation?: PreparedTrialObservationReference;
+  partObservationVersion?: PartObservationVersion;
+  /** Present for new receptions that froze a rotation-memory bundle (new and restored trials alike). */
+  rotationMemory?: RotationMemoryPin;
   openingMode?: OpeningMode;
   participantDialogueProfile?: ParticipantDialogueProfile;
   postGenerationCheck?: PostGenerationCheck;

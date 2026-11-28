@@ -1,0 +1,2180 @@
+{
+  "observer": "SunnyBell",
+  "model": "gpt-6.1-terra",
+  "items": [
+    {
+      "item": "item-01",
+      "regions": [
+        {
+          "id": "P1",
+          "supports": [
+            "くちばし"
+          ],
+          "objects": [
+            {
+              "noun": "耳",
+              "reason": "Q2: 右向きの突出で、上に立つ細長い耳の手がかりが乏しい。"
+            }
+          ],
+          "proposals": [],
+          "note": "Q1 くちばし: 支持・低。右上の領域に広い付け根で接し、右へ鋭く張り出す。 Q2 耳: 不支持。右向きの突出で、上に立つ細長い耳の手がかりが乏しい。 Q3 ひれ: 取り下げ。上部右端の突出だけでは、ひれの位置を特定できない。",
+          "answers": [
+            {
+              "question": "Q1",
+              "noun": "くちばし",
+              "stance": "支持",
+              "confidence": "低",
+              "reason": "右上の領域に広い付け根で接し、右へ鋭く張り出す。"
+            },
+            {
+              "question": "Q2",
+              "noun": "耳",
+              "stance": "不支持",
+              "confidence": "",
+              "reason": "右向きの突出で、上に立つ細長い耳の手がかりが乏しい。"
+            },
+            {
+              "question": "Q3",
+              "noun": "ひれ",
+              "stance": "取り下げ",
+              "confidence": "",
+              "reason": "上部右端の突出だけでは、ひれの位置を特定できない。"
+            }
+          ]
+        },
+        {
+          "id": "P2",
+          "supports": [],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "answers": []
+        },
+        {
+          "id": "P3",
+          "supports": [],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "answers": []
+        },
+        {
+          "id": "P4",
+          "supports": [
+            "尾"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "Q4 尾: 合意名詞として支持・低。左端から斜め上に延びる形を尾と呼ぶことに同意し、尾羽はその限定的な読みとする。",
+          "answers": [
+            {
+              "question": "Q4",
+              "noun": "尾",
+              "stance": "合意名詞として支持",
+              "confidence": "低",
+              "reason": "左端から斜め上に延びる形を尾と呼ぶことに同意し、尾羽はその限定的な読みとする。"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "item": "item-02",
+      "regions": [
+        {
+          "id": "P1",
+          "supports": [],
+          "objects": [
+            {
+              "noun": "背びれ",
+              "reason": "Q5: 領域が中心の大半を占め、背に付く小さなひれとしては大きすぎる。"
+            }
+          ],
+          "proposals": [],
+          "note": "Q5 背びれ: 不支持。領域が中心の大半を占め、背に付く小さなひれとしては大きすぎる。",
+          "answers": [
+            {
+              "question": "Q5",
+              "noun": "背びれ",
+              "stance": "不支持",
+              "confidence": "",
+              "reason": "領域が中心の大半を占め、背に付く小さなひれとしては大きすぎる。"
+            }
+          ]
+        },
+        {
+          "id": "P2",
+          "supports": [
+            "脚"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "Q6 脚: 支持・低。中央から右下に延びて末端の四角につながる。",
+          "answers": [
+            {
+              "question": "Q6",
+              "noun": "脚",
+              "stance": "支持",
+              "confidence": "低",
+              "reason": "中央から右下に延びて末端の四角につながる。"
+            }
+          ]
+        },
+        {
+          "id": "P3",
+          "supports": [
+            "足"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "Q7 足: 支持・低。右下にある斜めの領域の先に四角く付いている。",
+          "answers": [
+            {
+              "question": "Q7",
+              "noun": "足",
+              "stance": "支持",
+              "confidence": "低",
+              "reason": "右下にある斜めの領域の先に四角く付いている。"
+            }
+          ]
+        },
+        {
+          "id": "P4",
+          "supports": [
+            "尾"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "Q8 尾: 支持・低。左下端へ細長く伸び、後方の尾とも読める。",
+          "answers": [
+            {
+              "question": "Q8",
+              "noun": "尾",
+              "stance": "支持",
+              "confidence": "低",
+              "reason": "左下端へ細長く伸び、後方の尾とも読める。"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "item": "item-03",
+      "regions": [
+        {
+          "id": "P1",
+          "supports": [],
+          "objects": [],
+          "proposals": [],
+          "note": "Q9 脚: 取り下げ。二股は領域の下端に限られ、領域の大半まで脚と呼ぶには広すぎる。",
+          "answers": [
+            {
+              "question": "Q9",
+              "noun": "脚",
+              "stance": "取り下げ",
+              "confidence": "",
+              "reason": "二股は領域の下端に限られ、領域の大半まで脚と呼ぶには広すぎる。"
+            }
+          ]
+        },
+        {
+          "id": "P2",
+          "supports": [
+            "翼"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "Q10 翼: 支持・低。上方の接点から右へ大きく広がる三角形である。",
+          "answers": [
+            {
+              "question": "Q10",
+              "noun": "翼",
+              "stance": "支持",
+              "confidence": "低",
+              "reason": "上方の接点から右へ大きく広がる三角形である。"
+            }
+          ]
+        },
+        {
+          "id": "P3",
+          "supports": [],
+          "objects": [
+            {
+              "noun": "くちばし",
+              "reason": "F2: 右の先は隣接領域の上辺と重なり、外へ突出するくちばしの根拠が弱い。"
+            }
+          ],
+          "proposals": [],
+          "note": "Q11 くちばし: 支持・低。上左の四角から右へ小さく先細りに伸びる。 F2: 支持を撤回。右の先は隣接領域の上辺と重なり、外へ突出するくちばしの根拠が弱い。",
+          "answers": [
+            {
+              "question": "Q11",
+              "noun": "くちばし",
+              "stance": "取り下げ",
+              "confidence": "",
+              "reason": "右の先は隣接領域の上辺と重なり、外へ突出するくちばしの根拠が弱い。",
+              "initialStance": "支持",
+              "initialReason": "上左の四角から右へ小さく先細りに伸びる。"
+            }
+          ],
+          "followup": [
+            {
+              "question": "F2",
+              "noun": "くちばし",
+              "stance": "取り下げ",
+              "confidence": "",
+              "reason": "右の先は隣接領域の上辺と重なり、外へ突出するくちばしの根拠が弱い。"
+            }
+          ]
+        },
+        {
+          "id": "P4",
+          "supports": [
+            "頭"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "Q12 頭: 支持・低。上左にまとまって位置し右の小三角形と接している。",
+          "answers": [
+            {
+              "question": "Q12",
+              "noun": "頭",
+              "stance": "支持",
+              "confidence": "低",
+              "reason": "上左にまとまって位置し右の小三角形と接している。"
+            }
+          ]
+        },
+        {
+          "id": "P5",
+          "supports": [
+            "翼"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "Q13 翼: 支持・低。大きな下部領域の上側から左へ三角形に張り出す。",
+          "answers": [
+            {
+              "question": "Q13",
+              "noun": "翼",
+              "stance": "支持",
+              "confidence": "低",
+              "reason": "大きな下部領域の上側から左へ三角形に張り出す。"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "item": "item-04",
+      "regions": [
+        {
+          "id": "P1",
+          "supports": [],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "answers": []
+        },
+        {
+          "id": "P2",
+          "supports": [
+            "かさ"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "Q14 かさ: 支持・低。平らな上から両側へ広がり下に短い柄状領域がある。",
+          "answers": [
+            {
+              "question": "Q14",
+              "noun": "かさ",
+              "stance": "支持",
+              "confidence": "低",
+              "reason": "平らな上から両側へ広がり下に短い柄状領域がある。"
+            }
+          ]
+        },
+        {
+          "id": "P3",
+          "supports": [],
+          "objects": [],
+          "proposals": [],
+          "note": "Q15 柱: 取り下げ。幅と高さが同じ短い正方形で柱としての縦長さに欠ける。",
+          "answers": [
+            {
+              "question": "Q15",
+              "noun": "柱",
+              "stance": "取り下げ",
+              "confidence": "",
+              "reason": "幅と高さが同じ短い正方形で柱としての縦長さに欠ける。"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "item": "item-05",
+      "regions": [
+        {
+          "id": "P1",
+          "supports": [],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "answers": []
+        },
+        {
+          "id": "P2",
+          "supports": [
+            "くちばし"
+          ],
+          "objects": [
+            {
+              "noun": "耳",
+              "reason": "Q17: 横へ広がる幅が大きく、上へ立つ耳としては短い。"
+            }
+          ],
+          "proposals": [],
+          "note": "Q16 くちばし: 支持・低。上左端から左へ鋭く尖った三角形である。 Q17 耳: 不支持。横へ広がる幅が大きく、上へ立つ耳としては短い。 Q18 帆: 維持・低。垂直な一辺と水平な底辺を持つ直角三角形は帆として読める。",
+          "answers": [
+            {
+              "question": "Q16",
+              "noun": "くちばし",
+              "stance": "支持",
+              "confidence": "低",
+              "reason": "上左端から左へ鋭く尖った三角形である。"
+            },
+            {
+              "question": "Q17",
+              "noun": "耳",
+              "stance": "不支持",
+              "confidence": "",
+              "reason": "横へ広がる幅が大きく、上へ立つ耳としては短い。"
+            },
+            {
+              "question": "Q18",
+              "noun": "帆",
+              "stance": "維持",
+              "confidence": "低",
+              "reason": "垂直な一辺と水平な底辺を持つ直角三角形は帆として読める。"
+            }
+          ]
+        },
+        {
+          "id": "P3",
+          "supports": [],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "answers": []
+        },
+        {
+          "id": "P4",
+          "supports": [
+            "尾"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "Q19 尾: 合意名詞として支持・低。右下端へ伸びる細長い形は尾と呼べ、尾羽は限定的な読みである。",
+          "answers": [
+            {
+              "question": "Q19",
+              "noun": "尾",
+              "stance": "合意名詞として支持",
+              "confidence": "低",
+              "reason": "右下端へ伸びる細長い形は尾と呼べ、尾羽は限定的な読みである。"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "item": "item-06",
+      "regions": [
+        {
+          "id": "P1",
+          "supports": [],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "answers": []
+        },
+        {
+          "id": "P2",
+          "supports": [],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "answers": []
+        },
+        {
+          "id": "P3",
+          "supports": [
+            "くちばし"
+          ],
+          "objects": [
+            {
+              "noun": "頭",
+              "reason": "Q21: 細く尖った三角形だけでは頭部のまとまりが弱い。"
+            }
+          ],
+          "proposals": [],
+          "note": "Q20 くちばし: 支持・低。上右側で右へ鋭い先が突き出している。 Q21 頭: 不支持。細く尖った三角形だけでは頭部のまとまりが弱い。 Q22 翼: 維持・低。上部側面から右へ広がる三角形として読める。",
+          "answers": [
+            {
+              "question": "Q20",
+              "noun": "くちばし",
+              "stance": "支持",
+              "confidence": "低",
+              "reason": "上右側で右へ鋭い先が突き出している。"
+            },
+            {
+              "question": "Q21",
+              "noun": "頭",
+              "stance": "不支持",
+              "confidence": "",
+              "reason": "細く尖った三角形だけでは頭部のまとまりが弱い。"
+            },
+            {
+              "question": "Q22",
+              "noun": "翼",
+              "stance": "維持",
+              "confidence": "低",
+              "reason": "上部側面から右へ広がる三角形として読める。"
+            }
+          ]
+        },
+        {
+          "id": "P4",
+          "supports": [],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "answers": []
+        },
+        {
+          "id": "P5",
+          "supports": [
+            "尾"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "Q23 尾: 合意名詞として支持・低。左上端の細長い突出を尾と呼ぶことに同意し、尾羽は限定的な読みとする。",
+          "answers": [
+            {
+              "question": "Q23",
+              "noun": "尾",
+              "stance": "合意名詞として支持",
+              "confidence": "低",
+              "reason": "左上端の細長い突出を尾と呼ぶことに同意し、尾羽は限定的な読みとする。"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "item": "item-07",
+      "regions": [
+        {
+          "id": "P1",
+          "supports": [],
+          "objects": [
+            {
+              "noun": "砲身",
+              "reason": "Q24: 一端が鋭く尖り、砲口のある筒の形は見えない。"
+            }
+          ],
+          "proposals": [],
+          "note": "Q24 砲身: 不支持。一端が鋭く尖り、砲口のある筒の形は見えない。 Q25 刃: 維持・低。斜めの長い領域が左下へ鋭く尖っている。",
+          "answers": [
+            {
+              "question": "Q24",
+              "noun": "砲身",
+              "stance": "不支持",
+              "confidence": "",
+              "reason": "一端が鋭く尖り、砲口のある筒の形は見えない。"
+            },
+            {
+              "question": "Q25",
+              "noun": "刃",
+              "stance": "維持",
+              "confidence": "低",
+              "reason": "斜めの長い領域が左下へ鋭く尖っている。"
+            }
+          ]
+        },
+        {
+          "id": "P2",
+          "supports": [
+            "脚"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "Q26 脚: 支持・低。中央の下から右下の四角い末端へつながる。",
+          "answers": [
+            {
+              "question": "Q26",
+              "noun": "脚",
+              "stance": "支持",
+              "confidence": "低",
+              "reason": "中央の下から右下の四角い末端へつながる。"
+            }
+          ]
+        },
+        {
+          "id": "P3",
+          "supports": [],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "answers": []
+        },
+        {
+          "id": "P4",
+          "supports": [],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "answers": []
+        }
+      ]
+    },
+    {
+      "item": "item-08",
+      "regions": [
+        {
+          "id": "P1",
+          "supports": [],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "answers": []
+        },
+        {
+          "id": "P2",
+          "supports": [
+            "くちばし"
+          ],
+          "objects": [
+            {
+              "noun": "ひさし",
+              "reason": "Q28: 水平な突出はあるが、厚みが大きく建物上部の軒という位置も明確でない。"
+            }
+          ],
+          "proposals": [],
+          "note": "Q27 くちばし: 支持・低。右側に横へ突出し、右端が鋭く細まる。 Q28 ひさし: 不支持。水平な突出はあるが、厚みが大きく建物上部の軒という位置も明確でない。 Q29 翼: 維持・低。縦長の領域の側面から右へ広がり先が細まる。",
+          "answers": [
+            {
+              "question": "Q27",
+              "noun": "くちばし",
+              "stance": "支持",
+              "confidence": "低",
+              "reason": "右側に横へ突出し、右端が鋭く細まる。"
+            },
+            {
+              "question": "Q28",
+              "noun": "ひさし",
+              "stance": "不支持",
+              "confidence": "",
+              "reason": "水平な突出はあるが、厚みが大きく建物上部の軒という位置も明確でない。"
+            },
+            {
+              "question": "Q29",
+              "noun": "翼",
+              "stance": "維持",
+              "confidence": "低",
+              "reason": "縦長の領域の側面から右へ広がり先が細まる。"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "item": "item-09",
+      "regions": [
+        {
+          "id": "P1",
+          "supports": [
+            "船体"
+          ],
+          "objects": [
+            {
+              "noun": "翼",
+              "reason": "Q31: 中央の大部分を占め、左右に広がる翼の付け根が定まらない。"
+            }
+          ],
+          "proposals": [],
+          "note": "Q30 船体: 不支持。下端が一点の深い三角形で、船体の底に相当する幅がない。 Q31 翼: 不支持。中央の大部分を占め、左右に広がる翼の付け根が定まらない。 F1: 不支持の根拠を訂正して低で支持。下辺は一点ではなく短い水平辺であり、item-14 P1 と同様に船体として読める。",
+          "answers": [
+            {
+              "question": "Q30",
+              "noun": "船体",
+              "stance": "支持",
+              "confidence": "低",
+              "reason": "下辺は一点ではなく短い水平辺であり、item-14 P1 と同様に船体として読める。",
+              "initialStance": "不支持",
+              "initialReason": "下端が一点の深い三角形で、船体の底に相当する幅がない。"
+            },
+            {
+              "question": "Q31",
+              "noun": "翼",
+              "stance": "不支持",
+              "confidence": "",
+              "reason": "中央の大部分を占め、左右に広がる翼の付け根が定まらない。"
+            }
+          ],
+          "followup": [
+            {
+              "question": "F1",
+              "noun": "船体",
+              "stance": "支持",
+              "confidence": "低",
+              "reason": "下辺は一点ではなく短い水平辺であり、item-14 P1 と同様に船体として読める。"
+            }
+          ]
+        },
+        {
+          "id": "P2",
+          "supports": [],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "answers": []
+        },
+        {
+          "id": "P3",
+          "supports": [],
+          "objects": [
+            {
+              "noun": "柄",
+              "reason": "F3: 正方形には柄の細長さがなく、形だけでは柄と定めにくい。"
+            }
+          ],
+          "proposals": [],
+          "note": "Q32 柄: 支持・低。大きく広がる上部領域の中央下に短い四角として付く。 Q33 足: 維持・低。大きな上部の下端から四角く垂れ下がる。 F3: 支持を撤回。正方形には柄の細長さがなく、形だけでは柄と定めにくい。",
+          "answers": [
+            {
+              "question": "Q32",
+              "noun": "柄",
+              "stance": "取り下げ",
+              "confidence": "",
+              "reason": "正方形には柄の細長さがなく、形だけでは柄と定めにくい。",
+              "initialStance": "支持",
+              "initialReason": "大きく広がる上部領域の中央下に短い四角として付く。"
+            },
+            {
+              "question": "Q33",
+              "noun": "足",
+              "stance": "維持",
+              "confidence": "低",
+              "reason": "大きな上部の下端から四角く垂れ下がる。"
+            }
+          ],
+          "followup": [
+            {
+              "question": "F3",
+              "noun": "柄",
+              "stance": "取り下げ",
+              "confidence": "",
+              "reason": "正方形には柄の細長さがなく、形だけでは柄と定めにくい。"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "item": "item-10",
+      "regions": [
+        {
+          "id": "P1",
+          "supports": [],
+          "objects": [],
+          "proposals": [],
+          "note": "Q34 スカート: 維持・低。上端の一点から水平な裾へ左右に広がる。",
+          "answers": [
+            {
+              "question": "Q34",
+              "noun": "スカート",
+              "stance": "維持",
+              "confidence": "低",
+              "reason": "上端の一点から水平な裾へ左右に広がる。"
+            }
+          ]
+        },
+        {
+          "id": "P2",
+          "supports": [],
+          "objects": [
+            {
+              "noun": "耳",
+              "reason": "Q35: 太い多角形で、頭から立ち上がる細い耳とは見えにくい。"
+            },
+            {
+              "noun": "頭",
+              "reason": "Q36: 上部の広い斜めの領域で、独立した頭の輪郭を特定しにくい。"
+            }
+          ],
+          "proposals": [],
+          "note": "Q35 耳: 不支持。太い多角形で、頭から立ち上がる細い耳とは見えにくい。 Q36 頭: 不支持。上部の広い斜めの領域で、独立した頭の輪郭を特定しにくい。",
+          "answers": [
+            {
+              "question": "Q35",
+              "noun": "耳",
+              "stance": "不支持",
+              "confidence": "",
+              "reason": "太い多角形で、頭から立ち上がる細い耳とは見えにくい。"
+            },
+            {
+              "question": "Q36",
+              "noun": "頭",
+              "stance": "不支持",
+              "confidence": "",
+              "reason": "上部の広い斜めの領域で、独立した頭の輪郭を特定しにくい。"
+            }
+          ]
+        },
+        {
+          "id": "P3",
+          "supports": [
+            "鼻"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "Q37 鼻: 支持・低。上方の領域の右側から四角く突出している。",
+          "answers": [
+            {
+              "question": "Q37",
+              "noun": "鼻",
+              "stance": "支持",
+              "confidence": "低",
+              "reason": "上方の領域の右側から四角く突出している。"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "item": "item-11",
+      "regions": [
+        {
+          "id": "P1",
+          "supports": [],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "answers": []
+        },
+        {
+          "id": "P2",
+          "supports": [],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "answers": []
+        },
+        {
+          "id": "P3",
+          "supports": [
+            "頭"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "Q38 頭: 支持・低。左端にまとまって付き、その上から細長い領域が伸びる。",
+          "answers": [
+            {
+              "question": "Q38",
+              "noun": "頭",
+              "stance": "支持",
+              "confidence": "低",
+              "reason": "左端にまとまって付き、その上から細長い領域が伸びる。"
+            }
+          ]
+        },
+        {
+          "id": "P4",
+          "supports": [],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "answers": []
+        }
+      ]
+    },
+    {
+      "item": "item-12",
+      "regions": [
+        {
+          "id": "P1",
+          "supports": [
+            "刃"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "Q39 刃: 支持・低。細い柄状領域の先に広い尖った形で接している。",
+          "answers": [
+            {
+              "question": "Q39",
+              "noun": "刃",
+              "stance": "支持",
+              "confidence": "低",
+              "reason": "細い柄状領域の先に広い尖った形で接している。"
+            }
+          ]
+        },
+        {
+          "id": "P2",
+          "supports": [],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "answers": []
+        }
+      ]
+    },
+    {
+      "item": "item-13",
+      "regions": [
+        {
+          "id": "P1",
+          "supports": [],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "answers": []
+        },
+        {
+          "id": "P2",
+          "supports": [],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "answers": []
+        },
+        {
+          "id": "P3",
+          "supports": [
+            "尾"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "Q40 尾: 支持・低。大きな中央部の上端から右上へ細長く延びている。 Q41 刃: 取り下げ。中央領域の斜辺の延長に重なり、独立した刃の手がかりが乏しい。",
+          "answers": [
+            {
+              "question": "Q40",
+              "noun": "尾",
+              "stance": "支持",
+              "confidence": "低",
+              "reason": "大きな中央部の上端から右上へ細長く延びている。"
+            },
+            {
+              "question": "Q41",
+              "noun": "刃",
+              "stance": "取り下げ",
+              "confidence": "",
+              "reason": "中央領域の斜辺の延長に重なり、独立した刃の手がかりが乏しい。"
+            }
+          ]
+        },
+        {
+          "id": "P4",
+          "supports": [],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "answers": []
+        },
+        {
+          "id": "P5",
+          "supports": [
+            "くちばし"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "Q42 くちばし: 支持・低。左端にある小さな三角形が外側へ鋭く尖る。 Q43 ひれ: 取り下げ。左端の小さな突出だけではどのひれかを位置から判断できない。",
+          "answers": [
+            {
+              "question": "Q42",
+              "noun": "くちばし",
+              "stance": "支持",
+              "confidence": "低",
+              "reason": "左端にある小さな三角形が外側へ鋭く尖る。"
+            },
+            {
+              "question": "Q43",
+              "noun": "ひれ",
+              "stance": "取り下げ",
+              "confidence": "",
+              "reason": "左端の小さな突出だけではどのひれかを位置から判断できない。"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "item": "item-14",
+      "regions": [
+        {
+          "id": "P1",
+          "supports": [
+            "船体"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "Q44 船体: 合意名詞として支持・低。水平な上辺から下辺までの広い領域なので船体と呼ぶことに同意する。",
+          "answers": [
+            {
+              "question": "Q44",
+              "noun": "船体",
+              "stance": "合意名詞として支持",
+              "confidence": "低",
+              "reason": "水平な上辺から下辺までの広い領域なので船体と呼ぶことに同意する。"
+            }
+          ]
+        },
+        {
+          "id": "P2",
+          "supports": [
+            "舵",
+            "脚"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "Q45 舵: 支持・低。船体状の領域の右下端から下へ垂れ、舵の位置に付く。 Q46 脚: 支持・低。右下の領域から下方へ三角形に垂れている。 Q47 ひれ: 取り下げ。下向きの突出だけでは腹びれなどを特定する手がかりが乏しい。",
+          "answers": [
+            {
+              "question": "Q45",
+              "noun": "舵",
+              "stance": "支持",
+              "confidence": "低",
+              "reason": "船体状の領域の右下端から下へ垂れ、舵の位置に付く。"
+            },
+            {
+              "question": "Q46",
+              "noun": "脚",
+              "stance": "支持",
+              "confidence": "低",
+              "reason": "右下の領域から下方へ三角形に垂れている。"
+            },
+            {
+              "question": "Q47",
+              "noun": "ひれ",
+              "stance": "取り下げ",
+              "confidence": "",
+              "reason": "下向きの突出だけでは腹びれなどを特定する手がかりが乏しい。"
+            }
+          ]
+        },
+        {
+          "id": "P3",
+          "supports": [
+            "船室"
+          ],
+          "objects": [
+            {
+              "noun": "頭",
+              "reason": "Q48: 上端の正方形だけでは頭と見分ける形の手がかりが乏しい。"
+            }
+          ],
+          "proposals": [],
+          "note": "Q48 頭: 不支持。上端の正方形だけでは頭と見分ける形の手がかりが乏しい。 Q49 船室: 支持・低。船体状の領域の上辺に四角く載っている。 Q50 煙突: 維持・低。水平な上辺から短く四角に立ち上がる。",
+          "answers": [
+            {
+              "question": "Q48",
+              "noun": "頭",
+              "stance": "不支持",
+              "confidence": "",
+              "reason": "上端の正方形だけでは頭と見分ける形の手がかりが乏しい。"
+            },
+            {
+              "question": "Q49",
+              "noun": "船室",
+              "stance": "支持",
+              "confidence": "低",
+              "reason": "船体状の領域の上辺に四角く載っている。"
+            },
+            {
+              "question": "Q50",
+              "noun": "煙突",
+              "stance": "維持",
+              "confidence": "低",
+              "reason": "水平な上辺から短く四角に立ち上がる。"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "item": "item-15",
+      "regions": [
+        {
+          "id": "P1",
+          "supports": [],
+          "objects": [
+            {
+              "noun": "くちばし",
+              "reason": "Q51: 三角形の下向き頂点が他領域に接し、独立したくちばしの先に見えにくい。"
+            }
+          ],
+          "proposals": [],
+          "note": "Q51 くちばし: 不支持。三角形の下向き頂点が他領域に接し、独立したくちばしの先に見えにくい。 Q52 歯: 維持・低。右側の外縁に並ぶ尖りの一つとして読める。",
+          "answers": [
+            {
+              "question": "Q51",
+              "noun": "くちばし",
+              "stance": "不支持",
+              "confidence": "",
+              "reason": "三角形の下向き頂点が他領域に接し、独立したくちばしの先に見えにくい。"
+            },
+            {
+              "question": "Q52",
+              "noun": "歯",
+              "stance": "維持",
+              "confidence": "低",
+              "reason": "右側の外縁に並ぶ尖りの一つとして読める。"
+            }
+          ]
+        },
+        {
+          "id": "P2",
+          "supports": [],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "answers": []
+        },
+        {
+          "id": "P3",
+          "supports": [],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "answers": []
+        },
+        {
+          "id": "P4",
+          "supports": [],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "answers": []
+        },
+        {
+          "id": "P5",
+          "supports": [],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "answers": []
+        }
+      ]
+    },
+    {
+      "item": "item-16",
+      "regions": [
+        {
+          "id": "P1",
+          "supports": [],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "answers": []
+        },
+        {
+          "id": "P2",
+          "supports": [],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "answers": []
+        },
+        {
+          "id": "P3",
+          "supports": [],
+          "objects": [
+            {
+              "noun": "尾",
+              "reason": "Q53: 左端に付くが正方形で、細く延びる尾の手がかりがない。"
+            }
+          ],
+          "proposals": [],
+          "note": "Q53 尾: 不支持。左端に付くが正方形で、細く延びる尾の手がかりがない。",
+          "answers": [
+            {
+              "question": "Q53",
+              "noun": "尾",
+              "stance": "不支持",
+              "confidence": "",
+              "reason": "左端に付くが正方形で、細く延びる尾の手がかりがない。"
+            }
+          ]
+        },
+        {
+          "id": "P4",
+          "supports": [
+            "翼",
+            "耳"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "Q54 翼: 合意名詞として支持・低。上方へ上げた翼と読め、羽より翼の方が範囲を明示できる。 Q55 耳: 支持・低。上端から右上へ細長く立ち上がる。",
+          "answers": [
+            {
+              "question": "Q54",
+              "noun": "翼",
+              "stance": "合意名詞として支持",
+              "confidence": "低",
+              "reason": "上方へ上げた翼と読め、羽より翼の方が範囲を明示できる。"
+            },
+            {
+              "question": "Q55",
+              "noun": "耳",
+              "stance": "支持",
+              "confidence": "低",
+              "reason": "上端から右上へ細長く立ち上がる。"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "item": "item-17",
+      "regions": [
+        {
+          "id": "P1",
+          "supports": [],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "answers": []
+        },
+        {
+          "id": "P2",
+          "supports": [
+            "鼻",
+            "頭"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "Q56 鼻: 支持・低。上寄りの右側に小さな四角として突出する。 Q57 頭: 支持・低。上寄りの側面にまとまって張り出すが、四角形だけなので確信は低い。",
+          "answers": [
+            {
+              "question": "Q56",
+              "noun": "鼻",
+              "stance": "支持",
+              "confidence": "低",
+              "reason": "上寄りの右側に小さな四角として突出する。"
+            },
+            {
+              "question": "Q57",
+              "noun": "頭",
+              "stance": "支持",
+              "confidence": "低",
+              "reason": "上寄りの側面にまとまって張り出すが、四角形だけなので確信は低い。"
+            }
+          ]
+        },
+        {
+          "id": "P3",
+          "supports": [
+            "足"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "Q58 足: 支持・低。下端にあり右へ張り出す小三角形である。 Q59 ひれ: 取り下げ。最下端の突出にひれの種類を示す位置の手がかりがない。",
+          "answers": [
+            {
+              "question": "Q58",
+              "noun": "足",
+              "stance": "支持",
+              "confidence": "低",
+              "reason": "下端にあり右へ張り出す小三角形である。"
+            },
+            {
+              "question": "Q59",
+              "noun": "ひれ",
+              "stance": "取り下げ",
+              "confidence": "",
+              "reason": "最下端の突出にひれの種類を示す位置の手がかりがない。"
+            }
+          ]
+        },
+        {
+          "id": "P4",
+          "supports": [],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "answers": []
+        },
+        {
+          "id": "P5",
+          "supports": [
+            "尾"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "Q60 尾: 支持・低。左端から斜め左下へ長く伸びる。 Q61 脚: 維持・低。左下へ伸び、図形の下端まで届いている。",
+          "answers": [
+            {
+              "question": "Q60",
+              "noun": "尾",
+              "stance": "支持",
+              "confidence": "低",
+              "reason": "左端から斜め左下へ長く伸びる。"
+            },
+            {
+              "question": "Q61",
+              "noun": "脚",
+              "stance": "維持",
+              "confidence": "低",
+              "reason": "左下へ伸び、図形の下端まで届いている。"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "item": "item-18",
+      "regions": [
+        {
+          "id": "P1",
+          "supports": [],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "answers": []
+        },
+        {
+          "id": "P2",
+          "supports": [],
+          "objects": [
+            {
+              "noun": "屋根",
+              "reason": "Q62: 大きく斜めに伸びる領域で、左右へ覆う屋根の形が明瞭でない。"
+            }
+          ],
+          "proposals": [],
+          "note": "Q62 屋根: 不支持。大きく斜めに伸びる領域で、左右へ覆う屋根の形が明瞭でない。",
+          "answers": [
+            {
+              "question": "Q62",
+              "noun": "屋根",
+              "stance": "不支持",
+              "confidence": "",
+              "reason": "大きく斜めに伸びる領域で、左右へ覆う屋根の形が明瞭でない。"
+            }
+          ]
+        },
+        {
+          "id": "P3",
+          "supports": [],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "answers": []
+        },
+        {
+          "id": "P4",
+          "supports": [],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "answers": []
+        }
+      ]
+    },
+    {
+      "item": "item-19",
+      "regions": [
+        {
+          "id": "P1",
+          "supports": [],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "answers": []
+        },
+        {
+          "id": "P2",
+          "supports": [],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "answers": []
+        },
+        {
+          "id": "P3",
+          "supports": [],
+          "objects": [
+            {
+              "noun": "鼻",
+              "reason": "Q63: 右辺を広く占める大きな領域で鼻先としては大きすぎる。"
+            }
+          ],
+          "proposals": [],
+          "note": "Q63 鼻: 不支持。右辺を広く占める大きな領域で鼻先としては大きすぎる。",
+          "answers": [
+            {
+              "question": "Q63",
+              "noun": "鼻",
+              "stance": "不支持",
+              "confidence": "",
+              "reason": "右辺を広く占める大きな領域で鼻先としては大きすぎる。"
+            }
+          ]
+        },
+        {
+          "id": "P4",
+          "supports": [],
+          "objects": [
+            {
+              "noun": "首",
+              "reason": "Q64: 左端で途切れており、先の頭につながる首とは判断しにくい。"
+            },
+            {
+              "noun": "尾",
+              "reason": "Q65: 左端にあるが幅広い台形で、尾が延びる形は弱い。"
+            }
+          ],
+          "proposals": [],
+          "note": "Q64 首: 不支持。左端で途切れており、先の頭につながる首とは判断しにくい。 Q65 尾: 不支持。左端にあるが幅広い台形で、尾が延びる形は弱い。",
+          "answers": [
+            {
+              "question": "Q64",
+              "noun": "首",
+              "stance": "不支持",
+              "confidence": "",
+              "reason": "左端で途切れており、先の頭につながる首とは判断しにくい。"
+            },
+            {
+              "question": "Q65",
+              "noun": "尾",
+              "stance": "不支持",
+              "confidence": "",
+              "reason": "左端にあるが幅広い台形で、尾が延びる形は弱い。"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "item": "item-20",
+      "regions": [
+        {
+          "id": "P1",
+          "supports": [],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "answers": []
+        },
+        {
+          "id": "P2",
+          "supports": [
+            "尾"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "Q66 尾: 支持・低。大きな領域の左下端から左へ小さく尖っている。 Q67 ひれ: 取り下げ。左下端という位置だけでは、ひれの種類を決める根拠がない。",
+          "answers": [
+            {
+              "question": "Q66",
+              "noun": "尾",
+              "stance": "支持",
+              "confidence": "低",
+              "reason": "大きな領域の左下端から左へ小さく尖っている。"
+            },
+            {
+              "question": "Q67",
+              "noun": "ひれ",
+              "stance": "取り下げ",
+              "confidence": "",
+              "reason": "左下端という位置だけでは、ひれの種類を決める根拠がない。"
+            }
+          ]
+        },
+        {
+          "id": "P3",
+          "supports": [
+            "足"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "Q68 足: 支持・低。大きな領域の下端から下へ小さく垂れている。 Q69 ひれ: 取り下げ。真下への小さな突出に腹びれだと特定する手がかりが乏しい。",
+          "answers": [
+            {
+              "question": "Q68",
+              "noun": "足",
+              "stance": "支持",
+              "confidence": "低",
+              "reason": "大きな領域の下端から下へ小さく垂れている。"
+            },
+            {
+              "question": "Q69",
+              "noun": "ひれ",
+              "stance": "取り下げ",
+              "confidence": "",
+              "reason": "真下への小さな突出に腹びれだと特定する手がかりが乏しい。"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "item": "item-21",
+      "regions": [
+        {
+          "id": "P1",
+          "supports": [],
+          "objects": [
+            {
+              "noun": "背びれ",
+              "reason": "Q70: 中央の大半を占めており、背に付くひれと呼ぶには大きい。"
+            }
+          ],
+          "proposals": [],
+          "note": "Q70 背びれ: 不支持。中央の大半を占めており、背に付くひれと呼ぶには大きい。",
+          "answers": [
+            {
+              "question": "Q70",
+              "noun": "背びれ",
+              "stance": "不支持",
+              "confidence": "",
+              "reason": "中央の大半を占めており、背に付くひれと呼ぶには大きい。"
+            }
+          ]
+        },
+        {
+          "id": "P2",
+          "supports": [],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "answers": []
+        },
+        {
+          "id": "P3",
+          "supports": [],
+          "objects": [
+            {
+              "noun": "尾",
+              "reason": "Q71: 右端の正方形に尾として細長く延びる形がない。"
+            }
+          ],
+          "proposals": [],
+          "note": "Q71 尾: 不支持。右端の正方形に尾として細長く延びる形がない。",
+          "answers": [
+            {
+              "question": "Q71",
+              "noun": "尾",
+              "stance": "不支持",
+              "confidence": "",
+              "reason": "右端の正方形に尾として細長く延びる形がない。"
+            }
+          ]
+        },
+        {
+          "id": "P4",
+          "supports": [],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "answers": []
+        },
+        {
+          "id": "P5",
+          "supports": [
+            "くちばし"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "Q72 くちばし: 支持・低。左端で小さな三角形が左へ尖っている。 Q73 ひれ: 取り下げ。側面の小三角形だけでは、ひれの位置関係を定めにくい。",
+          "answers": [
+            {
+              "question": "Q72",
+              "noun": "くちばし",
+              "stance": "支持",
+              "confidence": "低",
+              "reason": "左端で小さな三角形が左へ尖っている。"
+            },
+            {
+              "question": "Q73",
+              "noun": "ひれ",
+              "stance": "取り下げ",
+              "confidence": "",
+              "reason": "側面の小三角形だけでは、ひれの位置関係を定めにくい。"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "item": "item-22",
+      "regions": [
+        {
+          "id": "P1",
+          "supports": [],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "answers": []
+        },
+        {
+          "id": "P2",
+          "supports": [],
+          "objects": [
+            {
+              "noun": "膝",
+              "reason": "F4: 側面の三角形だけでは、上下の脚の関節として特定する手がかりが弱い。"
+            }
+          ],
+          "proposals": [],
+          "note": "Q74 膝: 支持・低。斜めに続く上部と下部の間で右へ角張って張り出す。 Q75 ひれ: 取り下げ。右側の突出だけでは、具体的なひれの位置を定められない。 F4: 支持を撤回。側面の三角形だけでは、上下の脚の関節として特定する手がかりが弱い。",
+          "answers": [
+            {
+              "question": "Q74",
+              "noun": "膝",
+              "stance": "取り下げ",
+              "confidence": "",
+              "reason": "側面の三角形だけでは、上下の脚の関節として特定する手がかりが弱い。",
+              "initialStance": "支持",
+              "initialReason": "斜めに続く上部と下部の間で右へ角張って張り出す。"
+            },
+            {
+              "question": "Q75",
+              "noun": "ひれ",
+              "stance": "取り下げ",
+              "confidence": "",
+              "reason": "右側の突出だけでは、具体的なひれの位置を定められない。"
+            }
+          ],
+          "followup": [
+            {
+              "question": "F4",
+              "noun": "膝",
+              "stance": "取り下げ",
+              "confidence": "",
+              "reason": "側面の三角形だけでは、上下の脚の関節として特定する手がかりが弱い。"
+            }
+          ]
+        },
+        {
+          "id": "P3",
+          "supports": [
+            "尾"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "Q76 尾: 支持・低。下部から右下へ細長く斜めに延びる。",
+          "answers": [
+            {
+              "question": "Q76",
+              "noun": "尾",
+              "stance": "支持",
+              "confidence": "低",
+              "reason": "下部から右下へ細長く斜めに延びる。"
+            }
+          ]
+        },
+        {
+          "id": "P4",
+          "supports": [
+            "頭"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "Q77 頭: 支持・低。上左端に小さくまとまって載っている。 Q78 煙突: 取り下げ。載っている下側の三角形に屋根や甲板の手がかりがない。",
+          "answers": [
+            {
+              "question": "Q77",
+              "noun": "頭",
+              "stance": "支持",
+              "confidence": "低",
+              "reason": "上左端に小さくまとまって載っている。"
+            },
+            {
+              "question": "Q78",
+              "noun": "煙突",
+              "stance": "取り下げ",
+              "confidence": "",
+              "reason": "載っている下側の三角形に屋根や甲板の手がかりがない。"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "item": "item-23",
+      "regions": [
+        {
+          "id": "P1",
+          "supports": [
+            "矢じり"
+          ],
+          "objects": [
+            {
+              "noun": "くちばし",
+              "reason": "Q80: 領域が大きく広がり、頭から出る小さなくちばしとしては大きすぎる。"
+            }
+          ],
+          "proposals": [],
+          "note": "Q79 矢じり: 支持・低。広い付け根から右の鋭い一点へ対称に狭まる。 Q80 くちばし: 不支持。領域が大きく広がり、頭から出る小さなくちばしとしては大きすぎる。 Q81 ひれ: 取り下げ。外側へ細く尖る大きな三角形で、尾びれや他のひれの位置を定めにくい。",
+          "answers": [
+            {
+              "question": "Q79",
+              "noun": "矢じり",
+              "stance": "支持",
+              "confidence": "低",
+              "reason": "広い付け根から右の鋭い一点へ対称に狭まる。"
+            },
+            {
+              "question": "Q80",
+              "noun": "くちばし",
+              "stance": "不支持",
+              "confidence": "",
+              "reason": "領域が大きく広がり、頭から出る小さなくちばしとしては大きすぎる。"
+            },
+            {
+              "question": "Q81",
+              "noun": "ひれ",
+              "stance": "取り下げ",
+              "confidence": "",
+              "reason": "外側へ細く尖る大きな三角形で、尾びれや他のひれの位置を定めにくい。"
+            }
+          ]
+        },
+        {
+          "id": "P2",
+          "supports": [],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "answers": []
+        },
+        {
+          "id": "P3",
+          "supports": [],
+          "objects": [
+            {
+              "noun": "尾",
+              "reason": "Q82: 左端の正方形に細長い尾の特徴が見えない。"
+            }
+          ],
+          "proposals": [],
+          "note": "Q82 尾: 不支持。左端の正方形に細長い尾の特徴が見えない。",
+          "answers": [
+            {
+              "question": "Q82",
+              "noun": "尾",
+              "stance": "不支持",
+              "confidence": "",
+              "reason": "左端の正方形に細長い尾の特徴が見えない。"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "item": "item-24",
+      "regions": [
+        {
+          "id": "P1",
+          "supports": [],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "answers": []
+        },
+        {
+          "id": "P2",
+          "supports": [
+            "くちばし"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "Q83 くちばし: 支持・低。右端へ水平に突出し、先が斜めに細まる。",
+          "answers": [
+            {
+              "question": "Q83",
+              "noun": "くちばし",
+              "stance": "支持",
+              "confidence": "低",
+              "reason": "右端へ水平に突出し、先が斜めに細まる。"
+            }
+          ]
+        },
+        {
+          "id": "P3",
+          "supports": [
+            "足"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "Q84 足: 支持・低。下端から下向きに小さく突出する。 Q85 ひれ: 取り下げ。下向きの小三角形だけでは腹びれと判断する手がかりが乏しい。",
+          "answers": [
+            {
+              "question": "Q84",
+              "noun": "足",
+              "stance": "支持",
+              "confidence": "低",
+              "reason": "下端から下向きに小さく突出する。"
+            },
+            {
+              "question": "Q85",
+              "noun": "ひれ",
+              "stance": "取り下げ",
+              "confidence": "",
+              "reason": "下向きの小三角形だけでは腹びれと判断する手がかりが乏しい。"
+            }
+          ]
+        },
+        {
+          "id": "P4",
+          "supports": [],
+          "objects": [
+            {
+              "noun": "翼",
+              "reason": "Q86: 側面に付く正方形だが翼らしい広がりや先細りが見えない。"
+            },
+            {
+              "noun": "尾",
+              "reason": "Q87: 左端の正方形が短く、尾として伸びる形が見えない。"
+            }
+          ],
+          "proposals": [],
+          "note": "Q86 翼: 不支持。側面に付く正方形だが翼らしい広がりや先細りが見えない。 Q87 尾: 不支持。左端の正方形が短く、尾として伸びる形が見えない。",
+          "answers": [
+            {
+              "question": "Q86",
+              "noun": "翼",
+              "stance": "不支持",
+              "confidence": "",
+              "reason": "側面に付く正方形だが翼らしい広がりや先細りが見えない。"
+            },
+            {
+              "question": "Q87",
+              "noun": "尾",
+              "stance": "不支持",
+              "confidence": "",
+              "reason": "左端の正方形が短く、尾として伸びる形が見えない。"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "item": "item-25",
+      "regions": [
+        {
+          "id": "P1",
+          "supports": [],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "answers": []
+        },
+        {
+          "id": "P2",
+          "supports": [],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "answers": []
+        },
+        {
+          "id": "P3",
+          "supports": [],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "answers": []
+        },
+        {
+          "id": "P4",
+          "supports": [
+            "尾"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "Q88 尾: 合意名詞として支持・低。左上へ斜めに伸びる突出を尾と呼び、尾羽は限定的な読みとする。",
+          "answers": [
+            {
+              "question": "Q88",
+              "noun": "尾",
+              "stance": "合意名詞として支持",
+              "confidence": "低",
+              "reason": "左上へ斜めに伸びる突出を尾と呼び、尾羽は限定的な読みとする。"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "item": "item-26",
+      "regions": [
+        {
+          "id": "P1",
+          "supports": [
+            "頭"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "Q89 頭: 支持・低。右上にまとまった多角形として位置し、下側の大きな領域と接する。",
+          "answers": [
+            {
+              "question": "Q89",
+              "noun": "頭",
+              "stance": "支持",
+              "confidence": "低",
+              "reason": "右上にまとまった多角形として位置し、下側の大きな領域と接する。"
+            }
+          ]
+        },
+        {
+          "id": "P2",
+          "supports": [],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "answers": []
+        },
+        {
+          "id": "P3",
+          "supports": [
+            "尾"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "Q90 尾: 支持・低。左端で小さく上向きに立つ三角形である。 Q91 ひれ: 取り下げ。最左端に寄り、背の途中に付くひれとしての位置が弱い。",
+          "answers": [
+            {
+              "question": "Q90",
+              "noun": "尾",
+              "stance": "支持",
+              "confidence": "低",
+              "reason": "左端で小さく上向きに立つ三角形である。"
+            },
+            {
+              "question": "Q91",
+              "noun": "ひれ",
+              "stance": "取り下げ",
+              "confidence": "",
+              "reason": "最左端に寄り、背の途中に付くひれとしての位置が弱い。"
+            }
+          ]
+        },
+        {
+          "id": "P4",
+          "supports": [],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "answers": []
+        }
+      ]
+    },
+    {
+      "item": "item-27",
+      "regions": [
+        {
+          "id": "P1",
+          "supports": [],
+          "objects": [
+            {
+              "noun": "くちばし",
+              "reason": "Q92: 三角形の下向き頂点は他領域に接し、くちばしの独立した先には見えにくい。"
+            }
+          ],
+          "proposals": [],
+          "note": "Q92 くちばし: 不支持。三角形の下向き頂点は他領域に接し、くちばしの独立した先には見えにくい。 Q93 歯: 維持・低。右側に並ぶ鋭い外縁の一つとして読める。",
+          "answers": [
+            {
+              "question": "Q92",
+              "noun": "くちばし",
+              "stance": "不支持",
+              "confidence": "",
+              "reason": "三角形の下向き頂点は他領域に接し、くちばしの独立した先には見えにくい。"
+            },
+            {
+              "question": "Q93",
+              "noun": "歯",
+              "stance": "維持",
+              "confidence": "低",
+              "reason": "右側に並ぶ鋭い外縁の一つとして読める。"
+            }
+          ]
+        },
+        {
+          "id": "P2",
+          "supports": [],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "answers": []
+        },
+        {
+          "id": "P3",
+          "supports": [],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "answers": []
+        },
+        {
+          "id": "P4",
+          "supports": [],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "answers": []
+        },
+        {
+          "id": "P5",
+          "supports": [
+            "尾"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "Q94 尾: 支持・低。中央左側から左下へ細長く垂れる。 Q95 脚: 取り下げ。本体の側面中ほどから伸び、図形の最下端には届かない。",
+          "answers": [
+            {
+              "question": "Q94",
+              "noun": "尾",
+              "stance": "支持",
+              "confidence": "低",
+              "reason": "中央左側から左下へ細長く垂れる。"
+            },
+            {
+              "question": "Q95",
+              "noun": "脚",
+              "stance": "取り下げ",
+              "confidence": "",
+              "reason": "本体の側面中ほどから伸び、図形の最下端には届かない。"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "item": "item-28",
+      "regions": [
+        {
+          "id": "P1",
+          "supports": [],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "answers": []
+        },
+        {
+          "id": "P2",
+          "supports": [
+            "尾",
+            "翼"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "Q96 尾: 支持・低。右上端から斜め上へ細長く延びている。 Q97 翼: 合意名詞として支持・低。右上へ持ち上がる帯状の形を翼と呼ぶことに同意する。",
+          "answers": [
+            {
+              "question": "Q96",
+              "noun": "尾",
+              "stance": "支持",
+              "confidence": "低",
+              "reason": "右上端から斜め上へ細長く延びている。"
+            },
+            {
+              "question": "Q97",
+              "noun": "翼",
+              "stance": "合意名詞として支持",
+              "confidence": "低",
+              "reason": "右上へ持ち上がる帯状の形を翼と呼ぶことに同意する。"
+            }
+          ]
+        },
+        {
+          "id": "P3",
+          "supports": [],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "answers": []
+        }
+      ]
+    },
+    {
+      "item": "item-29",
+      "regions": [
+        {
+          "id": "P1",
+          "supports": [],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "answers": []
+        },
+        {
+          "id": "P2",
+          "supports": [
+            "耳",
+            "背びれ"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "Q98 耳: 支持・低。上部に付く三角形が上へ鋭く立ち上がる。 Q99 背びれ: 合意名詞として支持・低。上端に立つ三角形であり、ひれを背びれと具体化できる。",
+          "answers": [
+            {
+              "question": "Q98",
+              "noun": "耳",
+              "stance": "支持",
+              "confidence": "低",
+              "reason": "上部に付く三角形が上へ鋭く立ち上がる。"
+            },
+            {
+              "question": "Q99",
+              "noun": "背びれ",
+              "stance": "合意名詞として支持",
+              "confidence": "低",
+              "reason": "上端に立つ三角形であり、ひれを背びれと具体化できる。"
+            }
+          ]
+        },
+        {
+          "id": "P3",
+          "supports": [],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "answers": []
+        },
+        {
+          "id": "P4",
+          "supports": [],
+          "objects": [
+            {
+              "noun": "耳",
+              "reason": "Q100: 上に位置するが正方形で、耳の細長さや尖りが見えない。"
+            }
+          ],
+          "proposals": [],
+          "note": "Q100 耳: 不支持。上に位置するが正方形で、耳の細長さや尖りが見えない。 Q101 煙突: 取り下げ。四角が載る下の領域に屋根や甲板の手がかりが乏しい。",
+          "answers": [
+            {
+              "question": "Q100",
+              "noun": "耳",
+              "stance": "不支持",
+              "confidence": "",
+              "reason": "上に位置するが正方形で、耳の細長さや尖りが見えない。"
+            },
+            {
+              "question": "Q101",
+              "noun": "煙突",
+              "stance": "取り下げ",
+              "confidence": "",
+              "reason": "四角が載る下の領域に屋根や甲板の手がかりが乏しい。"
+            }
+          ]
+        },
+        {
+          "id": "P5",
+          "supports": [
+            "尾"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "Q102 尾: 支持・低。左側から左下へ細長く伸びている。 Q103 脚: 取り下げ。中央の側面から伸びるが図形の最下端まで届かない。",
+          "answers": [
+            {
+              "question": "Q102",
+              "noun": "尾",
+              "stance": "支持",
+              "confidence": "低",
+              "reason": "左側から左下へ細長く伸びている。"
+            },
+            {
+              "question": "Q103",
+              "noun": "脚",
+              "stance": "取り下げ",
+              "confidence": "",
+              "reason": "中央の側面から伸びるが図形の最下端まで届かない。"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "item": "item-30",
+      "regions": [
+        {
+          "id": "P1",
+          "supports": [],
+          "objects": [
+            {
+              "noun": "鼻",
+              "reason": "Q104: 右下の細長い多角形は大きく、鼻先としての位置が定まりにくい。"
+            }
+          ],
+          "proposals": [],
+          "note": "Q104 鼻: 不支持。右下の細長い多角形は大きく、鼻先としての位置が定まりにくい。",
+          "answers": [
+            {
+              "question": "Q104",
+              "noun": "鼻",
+              "stance": "不支持",
+              "confidence": "",
+              "reason": "右下の細長い多角形は大きく、鼻先としての位置が定まりにくい。"
+            }
+          ]
+        },
+        {
+          "id": "P2",
+          "supports": [],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "answers": []
+        },
+        {
+          "id": "P3",
+          "supports": [],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "answers": []
+        },
+        {
+          "id": "P4",
+          "supports": [],
+          "objects": [
+            {
+              "noun": "首",
+              "reason": "Q105: 左端に伸びるがその先に頭に当たる領域がない。"
+            },
+            {
+              "noun": "尾",
+              "reason": "Q106: 左端の幅広い台形は短く、尾が伸びる特徴に乏しい。"
+            }
+          ],
+          "proposals": [],
+          "note": "Q105 首: 不支持。左端に伸びるがその先に頭に当たる領域がない。 Q106 尾: 不支持。左端の幅広い台形は短く、尾が伸びる特徴に乏しい。",
+          "answers": [
+            {
+              "question": "Q105",
+              "noun": "首",
+              "stance": "不支持",
+              "confidence": "",
+              "reason": "左端に伸びるがその先に頭に当たる領域がない。"
+            },
+            {
+              "question": "Q106",
+              "noun": "尾",
+              "stance": "不支持",
+              "confidence": "",
+              "reason": "左端の幅広い台形は短く、尾が伸びる特徴に乏しい。"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

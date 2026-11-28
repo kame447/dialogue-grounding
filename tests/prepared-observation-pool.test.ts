@@ -14,6 +14,12 @@ import { validateReceptionProtocolV3, receptionProtocolSha256 } from '../dialogu
 import { validateParticipantModelPin } from '../dialogue-model/runtime/v2/participant-model-pin.ts';
 import { PARTICIPANT_PRODUCTION_PROFILE } from '../dialogue-model/runtime/web/participant-usage-policy.ts';
 import type { ParticipantService } from '../workers/tangram-experiment/src/participant-runtime.ts';
+import { overrideRotationMemorySource } from '../workers/tangram-experiment/src/rotation-memory-source.ts';
+import { projectOwnRotationMemory, rotationMemoryPin } from '../dialogue-model/runtime/stimuli/rotation-memory.ts';
+
+// This file exercises the stock of prepared Terra memos that earlier receptions claim. A new reception freezes the rotation-memory
+// bundle instead and claims no stock (tests/rotation-memory-*.test.ts), so here the deploy is one without a bundle.
+overrideRotationMemorySource(undefined);
 
 const now = '2026-11-28T00:00:00.000Z';
 const pin = validateParticipantModelPin({
@@ -310,4 +316,16 @@ test('a preparation that was running for three figures stops when the setting be
   assert.equal((await f.service.status()).supported, false);
   const active = await f.storage.get<{ errorCode: string | null }>(PREPARED_OBSERVATION_ACTIVE);
   assert.equal(active?.errorCode, 'configuration_changed');
+});
+
+test('a deploy with the rotation-memory bundle prepares nothing: a new reception claims no stock, so there is nothing to wait for', async () => {
+  const previous = overrideRotationMemorySource({ pin: rotationMemoryPin, project: projectOwnRotationMemory });
+  try {
+    const f = coordinator();
+    assert.deepEqual(await f.service.status(), { supported: false, protocolRevision: 1, targetPerOrder: PREPARED_OBSERVATION_TARGET, orders: [], errorCode: null });
+    assert.deepEqual(await f.service.prepare({ expectedProtocolRevision: 1 }), { ok: false, error: 'unconfigured' });
+    await f.service.alarm();
+    assert.equal(f.control.posts, 0, 'no observation is spent on stock nobody claims');
+    assert.equal(f.alarms.length, 0);
+  } finally { overrideRotationMemorySource(previous); }
 });

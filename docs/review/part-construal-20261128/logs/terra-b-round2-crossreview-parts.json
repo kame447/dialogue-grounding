@@ -1,0 +1,2959 @@
+{
+  "observer": "CherryHopper",
+  "reviewer": "CherryHopper",
+  "model": "GPT-6（詳細ID不明）",
+  "readOpusRound1": true,
+  "viewedImagesAgain": true,
+  "unification": {
+    "C1": "条件付き同意。「足」は広義のあしとして使えるが、脚部と足先は厳密な同義ではないので各根拠に位置を残す。",
+    "C2": "条件付き同意。船体と船底は厳密な同義ではないが、item-10 P1・item-27 P3 はいずれも船体の輪郭として支持する。",
+    "C3": "同意。item-04 P4 は耳とし、右下へ垂れる位置を根拠に残す。"
+  },
+  "items": [
+    {
+      "item": "item-01",
+      "regions": [
+        {
+          "id": "P1",
+          "opusVerdicts": [
+            {
+              "noun": "腕",
+              "verdict": "支持",
+              "confidence": "低",
+              "reason": "再確認した結果、斜めの本体の右下の辺から水平に右へ突き出す棒状の台形で、横に伸ばした腕のように見える。図形の下寄りから出ており、先端が角ばって手の形がない。"
+            },
+            {
+              "noun": "尾",
+              "verdict": "支持",
+              "confidence": "低",
+              "reason": "再確認した結果、本体の右側へ水平に突き出た棒で、横に張った尾とも取れる。尾にしては太く短く、付け根が本体の途中にある。"
+            }
+          ],
+          "terraFinal": [
+            {
+              "noun": "足",
+              "status": "維持",
+              "confidence": "低",
+              "reason": "右に張り出し、底辺が水平である。足指や関節はない。"
+            }
+          ],
+          "supports": [
+            "腕",
+            "尾"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "comment": ""
+        },
+        {
+          "id": "P2",
+          "opusVerdicts": [],
+          "terraFinal": [],
+          "supports": [],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "comment": ""
+        },
+        {
+          "id": "P3",
+          "opusVerdicts": [],
+          "terraFinal": [],
+          "supports": [],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "comment": ""
+        },
+        {
+          "id": "P4",
+          "opusVerdicts": [
+            {
+              "noun": "耳",
+              "verdict": "支持",
+              "confidence": "低",
+              "reason": "再確認した結果、上部から左上へ細長く伸び先が尖る。先端の片側が縦に切れている。"
+            },
+            {
+              "noun": "ツノ",
+              "verdict": "支持",
+              "confidence": "低",
+              "reason": "再確認した結果、上端から斜めに突き出す細長い形で、つのにも見える。幅が一定で、つのらしい先細りがない。"
+            }
+          ],
+          "terraFinal": [
+            {
+              "noun": "耳",
+              "status": "維持",
+              "confidence": "低",
+              "reason": "上部から左上へ細長く伸び先が尖る。先端の片側が縦に切れている。"
+            }
+          ],
+          "supports": [
+            "耳",
+            "ツノ"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "comment": ""
+        }
+      ]
+    },
+    {
+      "item": "item-02",
+      "regions": [
+        {
+          "id": "P1",
+          "opusVerdicts": [],
+          "terraFinal": [
+            {
+              "noun": "船底",
+              "status": "撤回",
+              "confidence": "低",
+              "reason": "下向きのV字が深く、領域全体を船底と見る根拠が弱いため撤回する。"
+            }
+          ],
+          "supports": [],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "comment": ""
+        },
+        {
+          "id": "P2",
+          "opusVerdicts": [
+            {
+              "noun": "屋根",
+              "verdict": "支持",
+              "confidence": "中",
+              "reason": "再確認した結果、上辺が短く左右の斜辺が下方に開く。上の平坦な部分が広い。"
+            },
+            {
+              "noun": "つば",
+              "verdict": "支持",
+              "confidence": "低",
+              "reason": "再確認した結果、横に広い台形の上に小さな正方形が載り、帽子のつばと山の関係に見える。つばにしては厚く、斜めの縁が帽子らしくない。"
+            }
+          ],
+          "terraFinal": [
+            {
+              "noun": "屋根",
+              "status": "維持",
+              "confidence": "中",
+              "reason": "上辺が短く左右の斜辺が下方に開く。上の平坦な部分が広い。"
+            }
+          ],
+          "supports": [
+            "屋根",
+            "つば"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "comment": ""
+        },
+        {
+          "id": "P3",
+          "opusVerdicts": [
+            {
+              "noun": "煙突",
+              "verdict": "支持",
+              "confidence": "低",
+              "reason": "再確認した結果、横長の領域の上から四角く垂直に立つ。高さと幅が同程度で短い。"
+            }
+          ],
+          "terraFinal": [
+            {
+              "noun": "煙突",
+              "status": "維持",
+              "confidence": "低",
+              "reason": "横長の領域の上から四角く垂直に立つ。高さと幅が同程度で短い。"
+            }
+          ],
+          "supports": [
+            "煙突"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "comment": ""
+        }
+      ]
+    },
+    {
+      "item": "item-03",
+      "regions": [
+        {
+          "id": "P1",
+          "opusVerdicts": [],
+          "terraFinal": [],
+          "supports": [],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "comment": ""
+        },
+        {
+          "id": "P2",
+          "opusVerdicts": [
+            {
+              "noun": "脚",
+              "verdict": "支持",
+              "confidence": "低",
+              "reason": "再確認した結果、本体の底辺の下に垂れる下向きの小さな三角形で、胴の下に出た脚のように見える。一般的な語で、先細りの三角形に足先の形がない。"
+            }
+          ],
+          "terraFinal": [
+            {
+              "noun": "ひれ",
+              "status": "維持",
+              "confidence": "低",
+              "reason": "大きな領域の下辺から三角形が下に垂れる。左右対称で単純な輪郭である。"
+            }
+          ],
+          "supports": [
+            "脚"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "comment": ""
+        },
+        {
+          "id": "P3",
+          "opusVerdicts": [
+            {
+              "noun": "尾",
+              "verdict": "支持",
+              "confidence": "低",
+              "reason": "再確認した結果、大きな領域から左下に細く伸びる。先が縦に切れている。"
+            },
+            {
+              "noun": "後ろ脚",
+              "verdict": "支持",
+              "confidence": "低",
+              "reason": "再確認した結果、左下へ伸びて図形の下端に届くため、体を支える後ろ脚とも取れる。斜めの帯で、関節や足先の形がない。"
+            }
+          ],
+          "terraFinal": [
+            {
+              "noun": "尾",
+              "status": "維持",
+              "confidence": "低",
+              "reason": "大きな領域から左下に細く伸びる。先が縦に切れている。"
+            }
+          ],
+          "supports": [
+            "尾",
+            "後ろ脚"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "comment": ""
+        },
+        {
+          "id": "P4",
+          "opusVerdicts": [
+            {
+              "noun": "頭",
+              "verdict": "支持",
+              "confidence": "低",
+              "reason": "再確認した結果、斜め上に伸びる領域の右上端に四角く付く。顔の向きや特徴がない。"
+            }
+          ],
+          "terraFinal": [
+            {
+              "noun": "頭",
+              "status": "維持",
+              "confidence": "低",
+              "reason": "斜め上に伸びる領域の右上端に四角く付く。顔の向きや特徴がない。"
+            }
+          ],
+          "supports": [
+            "頭"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "comment": ""
+        }
+      ]
+    },
+    {
+      "item": "item-04",
+      "regions": [
+        {
+          "id": "P1",
+          "opusVerdicts": [],
+          "terraFinal": [],
+          "supports": [],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "comment": ""
+        },
+        {
+          "id": "P2",
+          "opusVerdicts": [
+            {
+              "noun": "尾",
+              "verdict": "不支持",
+              "confidence": "低",
+              "reason": "横に出る正方形は短く太く、尾らしい細長さや先細りがない。"
+            }
+          ],
+          "terraFinal": [
+            {
+              "noun": "取っ手",
+              "status": "撤回",
+              "confidence": "低",
+              "reason": "穴や握る部分がなく短い四角だけでは取っ手と見定めにくいため撤回する。"
+            }
+          ],
+          "supports": [],
+          "objects": [
+            {
+              "noun": "尾",
+              "reason": "横に出る正方形は短く太く、尾らしい細長さや先細りがない。"
+            }
+          ],
+          "proposals": [],
+          "note": "",
+          "comment": ""
+        },
+        {
+          "id": "P3",
+          "opusVerdicts": [
+            {
+              "noun": "頭",
+              "verdict": "支持",
+              "confidence": "低",
+              "reason": "再確認した結果、大きな領域の上端に小さな四角が付く。顔の特徴がない。"
+            }
+          ],
+          "terraFinal": [
+            {
+              "noun": "頭",
+              "status": "維持",
+              "confidence": "低",
+              "reason": "大きな領域の上端に小さな四角が付く。顔の特徴がない。"
+            }
+          ],
+          "supports": [
+            "頭"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "comment": ""
+        },
+        {
+          "id": "P4",
+          "opusVerdicts": [
+            {
+              "noun": "垂れ耳",
+              "verdict": "支持",
+              "confidence": "低",
+              "reason": "再確認した結果、上の四角の右側から細長く右下へ垂れる。先端が垂直に切れている。"
+            },
+            {
+              "noun": "くちばし",
+              "verdict": "支持",
+              "confidence": "低",
+              "reason": "再確認した結果、頭のような正方形から右下へ斜めに突き出る細い帯で、下向きのくちばしとも取れる。幅が一定で先細りがない。"
+            }
+          ],
+          "terraFinal": [
+            {
+              "noun": "耳",
+              "status": "維持",
+              "confidence": "低",
+              "reason": "上の四角の右側から細長く右下へ垂れる。先端が垂直に切れている。"
+            }
+          ],
+          "supports": [
+            "垂れ耳",
+            "くちばし"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "comment": ""
+        }
+      ]
+    },
+    {
+      "item": "item-05",
+      "regions": [
+        {
+          "id": "P1",
+          "opusVerdicts": [],
+          "terraFinal": [],
+          "supports": [],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "comment": ""
+        },
+        {
+          "id": "P2",
+          "opusVerdicts": [
+            {
+              "noun": "耳",
+              "verdict": "支持",
+              "confidence": "低",
+              "reason": "再確認した結果、大きな領域の左上に三角形が上向きに立つ。幅が広く内側の形はない。"
+            },
+            {
+              "noun": "とさか",
+              "verdict": "支持",
+              "confidence": "低",
+              "reason": "再確認した結果、塊の上端に立つ尖った小片で、左向きのくちばし状の三角形の上にあるため、とさかとも取れる。とさかにしては単純な三角形で、ぎざぎざがない。"
+            }
+          ],
+          "terraFinal": [
+            {
+              "noun": "耳",
+              "status": "維持",
+              "confidence": "低",
+              "reason": "大きな領域の左上に三角形が上向きに立つ。幅が広く内側の形はない。"
+            }
+          ],
+          "supports": [
+            "耳",
+            "とさか"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "comment": ""
+        },
+        {
+          "id": "P3",
+          "opusVerdicts": [
+            {
+              "noun": "くちばし",
+              "verdict": "支持",
+              "confidence": "低",
+              "reason": "再確認した結果、大きな領域の左側から三角形が左へ出る。口の線はない。"
+            },
+            {
+              "noun": "鼻",
+              "verdict": "支持",
+              "confidence": "低",
+              "reason": "再確認した結果、塊の左側に突き出た尖りで、横向きの顔の鼻先とも取れる。鼻にしては鋭く三角形すぎる。"
+            }
+          ],
+          "terraFinal": [
+            {
+              "noun": "くちばし",
+              "status": "維持",
+              "confidence": "低",
+              "reason": "大きな領域の左側から三角形が左へ出る。口の線はない。"
+            }
+          ],
+          "supports": [
+            "くちばし",
+            "鼻"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "comment": ""
+        }
+      ]
+    },
+    {
+      "item": "item-06",
+      "regions": [
+        {
+          "id": "P1",
+          "opusVerdicts": [
+            {
+              "noun": "足",
+              "verdict": "支持",
+              "confidence": "低",
+              "reason": "再確認した結果、大きな五角形の下辺から下へ尖って垂れる三角形で、体の下に出た足のように見える。一般的な語で、右にずれて付き、指や足先の形がない。"
+            }
+          ],
+          "terraFinal": [
+            {
+              "noun": "ひれ",
+              "status": "維持",
+              "confidence": "低",
+              "reason": "広い領域の下辺から三角形が下向きに出る。左右対称で単純な輪郭である。"
+            }
+          ],
+          "supports": [
+            "足"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "comment": ""
+        },
+        {
+          "id": "P2",
+          "opusVerdicts": [],
+          "terraFinal": [],
+          "supports": [],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "comment": ""
+        },
+        {
+          "id": "P3",
+          "opusVerdicts": [
+            {
+              "noun": "首",
+              "verdict": "支持",
+              "confidence": "低",
+              "reason": "再確認した結果、大きな領域の左上から四角い部分が上に伸びる。幅と高さが同程度で短い。"
+            }
+          ],
+          "terraFinal": [
+            {
+              "noun": "首",
+              "status": "維持",
+              "confidence": "低",
+              "reason": "大きな領域の左上から四角い部分が上に伸びる。幅と高さが同程度で短い。"
+            }
+          ],
+          "supports": [
+            "首"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "comment": ""
+        },
+        {
+          "id": "P4",
+          "opusVerdicts": [
+            {
+              "noun": "くちばし",
+              "verdict": "支持",
+              "confidence": "低",
+              "reason": "再確認した結果、上端の細い領域が右上へ斜めに突き出る。幅が均一で先が細くならない。"
+            },
+            {
+              "noun": "頭",
+              "verdict": "不支持",
+              "confidence": "低",
+              "reason": "上端の帯は細長く、頭としてのまとまりや顔の手掛かりが乏しい。"
+            }
+          ],
+          "terraFinal": [
+            {
+              "noun": "くちばし",
+              "status": "維持",
+              "confidence": "低",
+              "reason": "上端の細い領域が右上へ斜めに突き出る。幅が均一で先が細くならない。"
+            }
+          ],
+          "supports": [
+            "くちばし"
+          ],
+          "objects": [
+            {
+              "noun": "頭",
+              "reason": "上端の帯は細長く、頭としてのまとまりや顔の手掛かりが乏しい。"
+            }
+          ],
+          "proposals": [],
+          "note": "",
+          "comment": ""
+        }
+      ]
+    },
+    {
+      "item": "item-07",
+      "regions": [
+        {
+          "id": "P1",
+          "opusVerdicts": [],
+          "terraFinal": [
+            {
+              "noun": "屋根",
+              "status": "維持",
+              "confidence": "中",
+              "reason": "水平な下辺から頂点へ左右の斜辺が上がる。建物の他の細部はない。"
+            }
+          ],
+          "supports": [],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "comment": ""
+        },
+        {
+          "id": "P2",
+          "opusVerdicts": [
+            {
+              "noun": "幹",
+              "verdict": "支持",
+              "confidence": "低",
+              "reason": "再確認した結果、幅広い三角形の下から四角く垂直に下がる。短く太い。"
+            },
+            {
+              "noun": "脚",
+              "verdict": "支持",
+              "confidence": "低",
+              "reason": "再確認した結果、本体の下に左下の三角形と並んで出ているため、2本の脚の片方とも取れる。一般的な語で、正方形で太く短い。"
+            }
+          ],
+          "terraFinal": [
+            {
+              "noun": "幹",
+              "status": "維持",
+              "confidence": "低",
+              "reason": "幅広い三角形の下から四角く垂直に下がる。短く太い。"
+            }
+          ],
+          "supports": [
+            "幹",
+            "脚"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "comment": ""
+        },
+        {
+          "id": "P3",
+          "opusVerdicts": [
+            {
+              "noun": "足",
+              "verdict": "支持",
+              "confidence": "低",
+              "reason": "再確認した結果、大きな三角形の左下の角の下に付き、下へ尖る小さな三角形で、体の下の足のように見える。一般的な語で、ごく小さく足らしい形に乏しい。"
+            }
+          ],
+          "terraFinal": [
+            {
+              "noun": "牙",
+              "status": "撤回",
+              "confidence": "低",
+              "reason": "口やあごに対応する位置の根拠が見当たらず、牙は撤回する。"
+            }
+          ],
+          "supports": [
+            "足"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "comment": ""
+        },
+        {
+          "id": "P4",
+          "opusVerdicts": [
+            {
+              "noun": "枝",
+              "verdict": "不支持",
+              "confidence": "低",
+              "reason": "広い三角形で、枝らしい細長い軸や分岐が見えない。"
+            },
+            {
+              "noun": "翼",
+              "verdict": "支持",
+              "confidence": "低",
+              "reason": "再確認した結果、大きな領域の左上に左へ広がる三角形が接する。羽の細部がない。"
+            }
+          ],
+          "terraFinal": [
+            {
+              "noun": "翼",
+              "status": "維持",
+              "confidence": "低",
+              "reason": "大きな領域の左上に左へ広がる三角形が接する。羽の細部がない。"
+            }
+          ],
+          "supports": [
+            "翼"
+          ],
+          "objects": [
+            {
+              "noun": "枝",
+              "reason": "広い三角形で、枝らしい細長い軸や分岐が見えない。"
+            }
+          ],
+          "proposals": [],
+          "note": "",
+          "comment": ""
+        },
+        {
+          "id": "P5",
+          "opusVerdicts": [
+            {
+              "noun": "枝",
+              "verdict": "支持",
+              "confidence": "低",
+              "reason": "再確認した結果、左上の端で斜めに伸びる帯が下の三角形と段をつくり、最上段の枝のように見える。帯状で枝の広がりがなく、図形の右の長い斜辺と一続きである。"
+            },
+            {
+              "noun": "尾羽",
+              "verdict": "支持",
+              "confidence": "低",
+              "reason": "再確認した結果、図形の左上へ斜めに跳ね上がる帯で、立てた尾羽とも取れる。頭にあたる部分が反対側に見当たらない。"
+            }
+          ],
+          "terraFinal": [
+            {
+              "noun": "耳",
+              "status": "維持",
+              "confidence": "低",
+              "reason": "接続部から左上へ細長く伸び先が尖る。耳の内側はない。"
+            }
+          ],
+          "supports": [
+            "枝",
+            "尾羽"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "comment": ""
+        }
+      ]
+    },
+    {
+      "item": "item-08",
+      "regions": [
+        {
+          "id": "P1",
+          "opusVerdicts": [
+            {
+              "noun": "帆",
+              "verdict": "支持",
+              "confidence": "中",
+              "reason": "再確認した結果、垂直辺と水平辺に挟まれた大きな三角形が上に尖る。帆柱や船底は示されていない。"
+            },
+            {
+              "noun": "背びれ",
+              "verdict": "支持",
+              "confidence": "低",
+              "reason": "再確認した結果、垂直な辺と斜めの辺で上に尖る大きな三角形で、立った背びれとも取れる。背びれにしては大きく、根元の体がない。"
+            }
+          ],
+          "terraFinal": [
+            {
+              "noun": "帆",
+              "status": "維持",
+              "confidence": "中",
+              "reason": "垂直辺と水平辺に挟まれた大きな三角形が上に尖る。帆柱や船底は示されていない。"
+            }
+          ],
+          "supports": [
+            "帆",
+            "背びれ"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "comment": ""
+        },
+        {
+          "id": "P2",
+          "opusVerdicts": [
+            {
+              "noun": "脚",
+              "verdict": "支持",
+              "confidence": "低",
+              "reason": "再確認した結果、大きな三角形の下から左下の正方形へ斜めに下る細い帯で、体と足をつなぐ脚のように見える。一般的な語で、関節の折れがない。"
+            }
+          ],
+          "terraFinal": [
+            {
+              "noun": "茎",
+              "status": "維持",
+              "confidence": "低",
+              "reason": "中央の接点から左下へ細く伸び下の四角につながる。幅が広く直線的である。"
+            }
+          ],
+          "supports": [
+            "脚"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "comment": ""
+        },
+        {
+          "id": "P3",
+          "opusVerdicts": [
+            {
+              "noun": "足",
+              "verdict": "支持",
+              "confidence": "低",
+              "reason": "再確認した結果、脚のような斜めの帯の下端に付き、図形の最下部にある正方形で、足のように見える。一般的な語で、つま先の向きがない。"
+            }
+          ],
+          "terraFinal": [],
+          "supports": [
+            "足"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "comment": ""
+        },
+        {
+          "id": "P4",
+          "opusVerdicts": [
+            {
+              "noun": "腕",
+              "verdict": "支持",
+              "confidence": "低",
+              "reason": "再確認した結果、大きな三角形の左辺から左上へ斜めに伸びる帯で、上げた腕のように見える。手にあたる末端の形がなく、水平に切れている。"
+            },
+            {
+              "noun": "翼",
+              "verdict": "支持",
+              "confidence": "低",
+              "reason": "再確認した結果、本体の左側から斜め上へ張り出す帯で、広げた翼とも取れる。翼にしては細く、先が尖らない。"
+            }
+          ],
+          "terraFinal": [
+            {
+              "noun": "葉",
+              "status": "維持",
+              "confidence": "中",
+              "reason": "接続部から左上へ細長く伸び先端が尖る。平行な直線の辺で葉脈はない。"
+            }
+          ],
+          "supports": [
+            "腕",
+            "翼"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "comment": ""
+        }
+      ]
+    },
+    {
+      "item": "item-09",
+      "regions": [
+        {
+          "id": "P1",
+          "opusVerdicts": [],
+          "terraFinal": [],
+          "supports": [],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "comment": ""
+        },
+        {
+          "id": "P2",
+          "opusVerdicts": [
+            {
+              "noun": "脚",
+              "verdict": "支持",
+              "confidence": "低",
+              "reason": "再確認した結果、大きな領域の下辺から右下へ垂れ下端が水平である。足先や関節はない。"
+            }
+          ],
+          "terraFinal": [
+            {
+              "noun": "足",
+              "status": "維持",
+              "confidence": "低",
+              "reason": "大きな領域の下辺から右下へ垂れ下端が水平である。足先や関節はない。"
+            }
+          ],
+          "supports": [
+            "脚"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "comment": ""
+        },
+        {
+          "id": "P3",
+          "opusVerdicts": [
+            {
+              "noun": "尾",
+              "verdict": "支持",
+              "confidence": "低",
+              "reason": "再確認した結果、大きな領域の右下から細長く斜めに伸びる。先端は斜めに切られている。"
+            },
+            {
+              "noun": "後ろ脚",
+              "verdict": "支持",
+              "confidence": "低",
+              "reason": "再確認した結果、図形の右下で下端に届く斜めの帯で、伸ばした後ろ脚とも取れる。脚にしては寝すぎていて、足先の形がない。"
+            }
+          ],
+          "terraFinal": [
+            {
+              "noun": "尾",
+              "status": "維持",
+              "confidence": "低",
+              "reason": "大きな領域の右下から細長く斜めに伸びる。先端は斜めに切られている。"
+            }
+          ],
+          "supports": [
+            "尾",
+            "後ろ脚"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "comment": ""
+        },
+        {
+          "id": "P4",
+          "opusVerdicts": [
+            {
+              "noun": "くちばし",
+              "verdict": "支持",
+              "confidence": "低",
+              "reason": "再確認した結果、上部の接続点から三角形が左に出る。下向きの幅が広い。"
+            },
+            {
+              "noun": "鼻",
+              "verdict": "支持",
+              "confidence": "低",
+              "reason": "再確認した結果、頭の位置から左へ尖って突き出しており、横向きの顔の鼻とも取れる。鼻にしては大きく鋭い。"
+            }
+          ],
+          "terraFinal": [
+            {
+              "noun": "くちばし",
+              "status": "維持",
+              "confidence": "低",
+              "reason": "上部の接続点から三角形が左に出る。下向きの幅が広い。"
+            }
+          ],
+          "supports": [
+            "くちばし",
+            "鼻"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "comment": ""
+        },
+        {
+          "id": "P5",
+          "opusVerdicts": [
+            {
+              "noun": "耳",
+              "verdict": "支持",
+              "confidence": "低",
+              "reason": "再確認した結果、上部の接続点から小さな三角形が上へ尖る。耳の内側はない。"
+            },
+            {
+              "noun": "とさか",
+              "verdict": "支持",
+              "confidence": "低",
+              "reason": "再確認した結果、くちばし状の三角形の上に立つ尖りで、とさかとも取れる。とさかにしては単純な三角形である。"
+            }
+          ],
+          "terraFinal": [
+            {
+              "noun": "耳",
+              "status": "維持",
+              "confidence": "低",
+              "reason": "上部の接続点から小さな三角形が上へ尖る。耳の内側はない。"
+            }
+          ],
+          "supports": [
+            "耳",
+            "とさか"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "comment": ""
+        }
+      ]
+    },
+    {
+      "item": "item-10",
+      "regions": [
+        {
+          "id": "P1",
+          "opusVerdicts": [
+            {
+              "noun": "船体",
+              "verdict": "支持",
+              "confidence": "中",
+              "reason": "再確認した結果、上辺が長く下辺が短く下に絞られている。左右の斜辺が急である。"
+            }
+          ],
+          "terraFinal": [
+            {
+              "noun": "船底",
+              "status": "維持",
+              "confidence": "中",
+              "reason": "上辺が長く下辺が短く下に絞られている。左右の斜辺が急である。"
+            }
+          ],
+          "supports": [
+            "船体"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "comment": ""
+        },
+        {
+          "id": "P2",
+          "opusVerdicts": [
+            {
+              "noun": "屋根",
+              "verdict": "支持",
+              "confidence": "低",
+              "reason": "再確認した結果、水平な長い下辺から頂点へ斜辺が上がる。一方の斜面が隣の領域と接している。"
+            }
+          ],
+          "terraFinal": [
+            {
+              "noun": "屋根",
+              "status": "維持",
+              "confidence": "中",
+              "reason": "水平な長い下辺から頂点へ斜辺が上がる。一方の斜面が隣の領域と接している。"
+            }
+          ],
+          "supports": [
+            "屋根"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "comment": ""
+        },
+        {
+          "id": "P3",
+          "opusVerdicts": [],
+          "terraFinal": [],
+          "supports": [],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "comment": ""
+        },
+        {
+          "id": "P4",
+          "opusVerdicts": [
+            {
+              "noun": "煙突",
+              "verdict": "支持",
+              "confidence": "低",
+              "reason": "再確認した結果、大きな三角形の上方に縦長の四角形が立つ。下端が斜めに切れている。"
+            }
+          ],
+          "terraFinal": [
+            {
+              "noun": "煙突",
+              "status": "維持",
+              "confidence": "低",
+              "reason": "大きな三角形の上方に縦長の四角形が立つ。下端が斜めに切れている。"
+            }
+          ],
+          "supports": [
+            "煙突"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "comment": ""
+        }
+      ]
+    },
+    {
+      "item": "item-11",
+      "regions": [
+        {
+          "id": "P1",
+          "opusVerdicts": [
+            {
+              "noun": "足",
+              "verdict": "支持",
+              "confidence": "低",
+              "reason": "再確認した結果、斜めの本体の右下に付き、底辺が平らで右へ尖る五角形で、前へ向けた足のように見える。一般的な語で、足にしては大きい。"
+            }
+          ],
+          "terraFinal": [],
+          "supports": [
+            "足"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "comment": ""
+        },
+        {
+          "id": "P2",
+          "opusVerdicts": [],
+          "terraFinal": [],
+          "supports": [],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "comment": ""
+        },
+        {
+          "id": "P3",
+          "opusVerdicts": [
+            {
+              "noun": "くちばし",
+              "verdict": "支持",
+              "confidence": "低",
+              "reason": "再確認した結果、細長い領域の右上端から小さな三角形が右に伸びる。口の境目がない。"
+            }
+          ],
+          "terraFinal": [
+            {
+              "noun": "くちばし",
+              "status": "維持",
+              "confidence": "低",
+              "reason": "細長い領域の右上端から小さな三角形が右に伸びる。口の境目がない。"
+            }
+          ],
+          "supports": [
+            "くちばし"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "comment": ""
+        },
+        {
+          "id": "P4",
+          "opusVerdicts": [
+            {
+              "noun": "尾",
+              "verdict": "支持",
+              "confidence": "低",
+              "reason": "再確認した結果、中心部の左下から細長く左上へ張り出す。先が縦に切れている。"
+            }
+          ],
+          "terraFinal": [
+            {
+              "noun": "尾",
+              "status": "維持",
+              "confidence": "低",
+              "reason": "中心部の左下から細長く左上へ張り出す。先が縦に切れている。"
+            }
+          ],
+          "supports": [
+            "尾"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "comment": ""
+        }
+      ]
+    },
+    {
+      "item": "item-12",
+      "regions": [
+        {
+          "id": "P1",
+          "opusVerdicts": [],
+          "terraFinal": [],
+          "supports": [],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "comment": ""
+        },
+        {
+          "id": "P2",
+          "opusVerdicts": [
+            {
+              "noun": "腕",
+              "verdict": "支持",
+              "confidence": "低",
+              "reason": "再確認した結果、本体の左側中ほどから横に出る小さな正方形で、横に出した腕のように見える。正方形で短く、腕らしい細長さがない。"
+            },
+            {
+              "noun": "尾",
+              "verdict": "不支持",
+              "confidence": "低",
+              "reason": "短い正方形で、尾としての細長さや先細りに乏しい。"
+            }
+          ],
+          "terraFinal": [
+            {
+              "noun": "取っ手",
+              "status": "撤回",
+              "confidence": "低",
+              "reason": "穴や握る部分がなく短い四角だけでは取っ手と見定めにくいため撤回する。"
+            }
+          ],
+          "supports": [
+            "腕"
+          ],
+          "objects": [
+            {
+              "noun": "尾",
+              "reason": "短い正方形で、尾としての細長さや先細りに乏しい。"
+            }
+          ],
+          "proposals": [],
+          "note": "",
+          "comment": ""
+        },
+        {
+          "id": "P3",
+          "opusVerdicts": [
+            {
+              "noun": "頭",
+              "verdict": "支持",
+              "confidence": "低",
+              "reason": "再確認した結果、大きな領域の上に小さな四角が乗る。顔の特徴が見えない。"
+            }
+          ],
+          "terraFinal": [
+            {
+              "noun": "頭",
+              "status": "維持",
+              "confidence": "低",
+              "reason": "大きな領域の上に小さな四角が乗る。顔の特徴が見えない。"
+            }
+          ],
+          "supports": [
+            "頭"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "comment": ""
+        },
+        {
+          "id": "P4",
+          "opusVerdicts": [
+            {
+              "noun": "脚",
+              "verdict": "支持",
+              "confidence": "低",
+              "reason": "再確認した結果、大きな領域の右側から細長く右下へ下がる。足先や関節がない。"
+            },
+            {
+              "noun": "尾",
+              "verdict": "支持",
+              "confidence": "低",
+              "reason": "再確認した結果、本体の側面から斜め下へ垂れる帯で、垂らした尾とも取れる。根元が本体の中ほどにあり、尾にしては太い。"
+            }
+          ],
+          "terraFinal": [
+            {
+              "noun": "足",
+              "status": "維持",
+              "confidence": "低",
+              "reason": "大きな領域の右側から細長く右下へ下がる。足先や関節がない。"
+            }
+          ],
+          "supports": [
+            "脚",
+            "尾"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "comment": ""
+        }
+      ]
+    },
+    {
+      "item": "item-13",
+      "regions": [
+        {
+          "id": "P1",
+          "opusVerdicts": [],
+          "terraFinal": [
+            {
+              "noun": "翼",
+              "status": "維持",
+              "confidence": "低",
+              "reason": "中央の接続点から右へ幅広い三角形が広がる。羽の細部がない。"
+            }
+          ],
+          "supports": [],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "comment": ""
+        },
+        {
+          "id": "P2",
+          "opusVerdicts": [],
+          "terraFinal": [],
+          "supports": [],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "comment": ""
+        },
+        {
+          "id": "P3",
+          "opusVerdicts": [
+            {
+              "noun": "足",
+              "verdict": "支持",
+              "confidence": "低",
+              "reason": "再確認した結果、図形の最下部で本体の下に付く正方形で、足のように見える。一般的な語で、1つだけで向きもない。"
+            },
+            {
+              "noun": "台座",
+              "verdict": "支持",
+              "confidence": "低",
+              "reason": "再確認した結果、上に広がる本体を下から支える位置の正方形で、台座とも取れる。台座にしては小さく、本体の左端の下にある。"
+            }
+          ],
+          "terraFinal": [],
+          "supports": [
+            "足",
+            "台座"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "comment": ""
+        },
+        {
+          "id": "P4",
+          "opusVerdicts": [
+            {
+              "noun": "翼",
+              "verdict": "支持",
+              "confidence": "低",
+              "reason": "再確認した結果、本体の左辺から左上へ斜めに張り出す帯で、広げた翼のように見える。翼にしては細く、先が水平に切れている。"
+            },
+            {
+              "noun": "腕",
+              "verdict": "支持",
+              "confidence": "低",
+              "reason": "再確認した結果、本体の左側から斜め上へ伸びる帯で、上げた腕とも取れる。手にあたる末端の形がない。"
+            }
+          ],
+          "terraFinal": [
+            {
+              "noun": "葉",
+              "status": "維持",
+              "confidence": "中",
+              "reason": "中央から左上へ細長く張り出し先が尖る。直線の辺で葉脈はない。"
+            }
+          ],
+          "supports": [
+            "翼",
+            "腕"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "comment": ""
+        },
+        {
+          "id": "P5",
+          "opusVerdicts": [
+            {
+              "noun": "耳",
+              "verdict": "支持",
+              "confidence": "低",
+              "reason": "再確認した結果、本体の水平な上辺の左端に立ち、上へ鋭く尖る小さな三角形で、立った耳のように見える。対になる耳がなく、片方しかない。"
+            },
+            {
+              "noun": "とさか",
+              "verdict": "支持",
+              "confidence": "低",
+              "reason": "再確認した結果、本体の上端に立つ尖りで、とさかとも取れる。とさかにしては単純な三角形である。"
+            }
+          ],
+          "terraFinal": [
+            {
+              "noun": "ひれ",
+              "status": "維持",
+              "confidence": "低",
+              "reason": "短い底辺から小さな三角形が上に尖る。魚の輪郭との接続は明瞭でない。"
+            }
+          ],
+          "supports": [
+            "耳",
+            "とさか"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "comment": ""
+        }
+      ]
+    },
+    {
+      "item": "item-14",
+      "regions": [
+        {
+          "id": "P1",
+          "opusVerdicts": [
+            {
+              "noun": "尾びれ",
+              "verdict": "支持",
+              "confidence": "低",
+              "reason": "再確認した結果、左側の狭い接続部から右に上下へ大きく広がる。後縁が直線で切れ込みがない。"
+            },
+            {
+              "noun": "ラッパの朝顔",
+              "verdict": "支持",
+              "confidence": "低",
+              "reason": "再確認した結果、細い左端に小さな正方形が付き、そこから右へ大きく開く形で、ラッパの開いた口のように見える。上下の縁が直線で、ラッパらしい曲線の広がりがない。"
+            }
+          ],
+          "terraFinal": [
+            {
+              "noun": "尾びれ",
+              "status": "維持",
+              "confidence": "中",
+              "reason": "左側の狭い接続部から右に上下へ大きく広がる。後縁が直線で切れ込みがない。"
+            }
+          ],
+          "supports": [
+            "尾びれ",
+            "ラッパの朝顔"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "comment": ""
+        },
+        {
+          "id": "P2",
+          "opusVerdicts": [],
+          "terraFinal": [
+            {
+              "noun": "ひれ",
+              "status": "維持",
+              "confidence": "低",
+              "reason": "左側の接続部から三角形が左下へ広がる。向きが水平に近い。"
+            }
+          ],
+          "supports": [],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "comment": ""
+        },
+        {
+          "id": "P3",
+          "opusVerdicts": [
+            {
+              "noun": "吹き口",
+              "verdict": "不支持",
+              "confidence": "低",
+              "reason": "左端の四角は太く、唇を当てる細い吹き口と断定できる形がない。"
+            }
+          ],
+          "terraFinal": [],
+          "supports": [],
+          "objects": [
+            {
+              "noun": "吹き口",
+              "reason": "左端の四角は太く、唇を当てる細い吹き口と断定できる形がない。"
+            }
+          ],
+          "proposals": [],
+          "note": "",
+          "comment": ""
+        }
+      ]
+    },
+    {
+      "item": "item-15",
+      "regions": [
+        {
+          "id": "P1",
+          "opusVerdicts": [],
+          "terraFinal": [],
+          "supports": [],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "comment": ""
+        },
+        {
+          "id": "P2",
+          "opusVerdicts": [
+            {
+              "noun": "脚",
+              "verdict": "支持",
+              "confidence": "低",
+              "reason": "再確認した結果、大きな上部領域から右下へ細長く垂れる。足先や関節の区別がない。"
+            },
+            {
+              "noun": "尾",
+              "verdict": "支持",
+              "confidence": "低",
+              "reason": "再確認した結果、本体の右下から斜めに垂れる帯で、尾とも取れる。尾にしては太く、根元が本体の下面にある。"
+            }
+          ],
+          "terraFinal": [
+            {
+              "noun": "足",
+              "status": "維持",
+              "confidence": "低",
+              "reason": "大きな上部領域から右下へ細長く垂れる。足先や関節の区別がない。"
+            }
+          ],
+          "supports": [
+            "脚",
+            "尾"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "comment": ""
+        },
+        {
+          "id": "P3",
+          "opusVerdicts": [
+            {
+              "noun": "脚",
+              "verdict": "支持",
+              "confidence": "低",
+              "reason": "再確認した結果、大きな上部領域の下面から四角く下へ出る。短く足先の形がない。"
+            }
+          ],
+          "terraFinal": [
+            {
+              "noun": "足",
+              "status": "維持",
+              "confidence": "低",
+              "reason": "大きな上部領域の下面から四角く下へ出る。短く足先の形がない。"
+            }
+          ],
+          "supports": [
+            "脚"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "comment": ""
+        }
+      ]
+    },
+    {
+      "item": "item-16",
+      "regions": [
+        {
+          "id": "P1",
+          "opusVerdicts": [
+            {
+              "noun": "看板",
+              "verdict": "不支持",
+              "confidence": "低",
+              "reason": "右向きの板には見えるが、看板は物全体の名であり具体的な部分名としては採らない。"
+            }
+          ],
+          "terraFinal": [],
+          "supports": [],
+          "objects": [
+            {
+              "noun": "看板",
+              "reason": "右向きの板には見えるが、看板は物全体の名であり具体的な部分名としては採らない。"
+            }
+          ],
+          "proposals": [],
+          "note": "",
+          "comment": ""
+        },
+        {
+          "id": "P2",
+          "opusVerdicts": [
+            {
+              "noun": "支柱",
+              "verdict": "支持",
+              "confidence": "低",
+              "reason": "再確認した結果、横長の板の下面から垂直に下りる柱状の台形で、下端が斜めに尖り、看板を支える杭のような支柱に見える。板の中央ではなく左寄りに付いている。"
+            },
+            {
+              "noun": "柄",
+              "verdict": "支持",
+              "confidence": "低",
+              "reason": "再確認した結果、横長の頭のような塊の下に付く縦の棒で、金づちの柄とも取れる。柄にしては短く太い。"
+            }
+          ],
+          "terraFinal": [
+            {
+              "noun": "ひれ",
+              "status": "撤回",
+              "confidence": "低",
+              "reason": "幅がほぼ一定の柱状で、ひれとしての根拠が弱いため撤回する。"
+            }
+          ],
+          "supports": [
+            "支柱",
+            "柄"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "comment": ""
+        }
+      ]
+    },
+    {
+      "item": "item-17",
+      "regions": [
+        {
+          "id": "P1",
+          "opusVerdicts": [
+            {
+              "noun": "看板",
+              "verdict": "不支持",
+              "confidence": "低",
+              "reason": "右向きの板には見えるが、看板は物全体の名であり具体的な部分名としては採らない。"
+            }
+          ],
+          "terraFinal": [],
+          "supports": [],
+          "objects": [
+            {
+              "noun": "看板",
+              "reason": "右向きの板には見えるが、看板は物全体の名であり具体的な部分名としては採らない。"
+            }
+          ],
+          "proposals": [],
+          "note": "",
+          "comment": ""
+        },
+        {
+          "id": "P2",
+          "opusVerdicts": [
+            {
+              "noun": "支柱",
+              "verdict": "支持",
+              "confidence": "低",
+              "reason": "再確認した結果、五角形の左下から垂直に下りる柱状の台形で、下端が斜めに尖り、上の正方形と一直線に並んで支柱のように見える。板の中央ではなく左端に付いている。"
+            }
+          ],
+          "terraFinal": [
+            {
+              "noun": "ひれ",
+              "status": "撤回",
+              "confidence": "低",
+              "reason": "幅がほぼ一定の柱状で、ひれとしての根拠が弱いため撤回する。"
+            }
+          ],
+          "supports": [
+            "支柱"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "comment": ""
+        },
+        {
+          "id": "P3",
+          "opusVerdicts": [
+            {
+              "noun": "旗",
+              "verdict": "不支持",
+              "confidence": "低",
+              "reason": "小さな三角形は旗にも見えるが、旗は物全体の名であり具体的な部分名としては採らない。"
+            }
+          ],
+          "terraFinal": [
+            {
+              "noun": "尾びれ",
+              "status": "撤回",
+              "confidence": "低",
+              "reason": "本体側の垂直辺が広く外側が尖る形は尾びれとして向きが合わず撤回する。"
+            }
+          ],
+          "supports": [],
+          "objects": [
+            {
+              "noun": "旗",
+              "reason": "小さな三角形は旗にも見えるが、旗は物全体の名であり具体的な部分名としては採らない。"
+            }
+          ],
+          "proposals": [],
+          "note": "",
+          "comment": ""
+        },
+        {
+          "id": "P4",
+          "opusVerdicts": [
+            {
+              "noun": "支柱",
+              "verdict": "支持",
+              "confidence": "低",
+              "reason": "再確認した結果、五角形の上辺左端から上へ出る正方形で、下の柱と一直線に並び、看板の上に突き出た支柱の上部のように見える。下の柱とは五角形で隔てられ、単独では正方形にすぎない。"
+            },
+            {
+              "noun": "頭",
+              "verdict": "支持",
+              "confidence": "低",
+              "reason": "再確認した結果、図形の最上部に載る正方形で、頭とも取れる。一般的な語で、中心から左にずれている。"
+            }
+          ],
+          "terraFinal": [
+            {
+              "noun": "煙突",
+              "status": "維持",
+              "confidence": "低",
+              "reason": "大きな領域の上辺から垂直に四角く立つ。幅に対して短い。"
+            }
+          ],
+          "supports": [
+            "支柱",
+            "頭"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "comment": ""
+        }
+      ]
+    },
+    {
+      "item": "item-18",
+      "regions": [
+        {
+          "id": "P1",
+          "opusVerdicts": [],
+          "terraFinal": [],
+          "supports": [],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "comment": ""
+        },
+        {
+          "id": "P2",
+          "opusVerdicts": [
+            {
+              "noun": "首",
+              "verdict": "支持",
+              "confidence": "低",
+              "reason": "再確認した結果、大きな三角形の右上から上へ縦に長く伸びる帯で、上端が尖り、細長い首のように見える。首にしては太く、図形の3分の1以上を占める。"
+            }
+          ],
+          "terraFinal": [],
+          "supports": [
+            "首"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "comment": ""
+        },
+        {
+          "id": "P3",
+          "opusVerdicts": [
+            {
+              "noun": "くちばし",
+              "verdict": "不支持",
+              "confidence": "低",
+              "reason": "横に出る正方形は短く先細りがなく、くちばしに見立てる根拠が弱い。"
+            },
+            {
+              "noun": "鼻",
+              "verdict": "支持",
+              "confidence": "低",
+              "reason": "再確認した結果、頭の位置から横に出た塊で、突き出た鼻づらとも取れる。正方形で、鼻らしい丸みや先細りがない。"
+            }
+          ],
+          "terraFinal": [
+            {
+              "noun": "取っ手",
+              "status": "撤回",
+              "confidence": "低",
+              "reason": "穴や握る部分がない正方形であり、取っ手の根拠が弱いため撤回する。"
+            }
+          ],
+          "supports": [
+            "鼻"
+          ],
+          "objects": [
+            {
+              "noun": "くちばし",
+              "reason": "横に出る正方形は短く先細りがなく、くちばしに見立てる根拠が弱い。"
+            }
+          ],
+          "proposals": [],
+          "note": "",
+          "comment": ""
+        }
+      ]
+    },
+    {
+      "item": "item-19",
+      "regions": [
+        {
+          "id": "P1",
+          "opusVerdicts": [
+            {
+              "noun": "帆",
+              "verdict": "支持",
+              "confidence": "低",
+              "reason": "再確認した結果、縦に長く上に尖り右辺が垂直に伸びる。下側が尖り船底との接続が明瞭でない。"
+            }
+          ],
+          "terraFinal": [
+            {
+              "noun": "帆",
+              "status": "維持",
+              "confidence": "中",
+              "reason": "縦に長く上に尖り右辺が垂直に伸びる。下側が尖り船底との接続が明瞭でない。"
+            }
+          ],
+          "supports": [
+            "帆"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "comment": ""
+        },
+        {
+          "id": "P2",
+          "opusVerdicts": [],
+          "terraFinal": [
+            {
+              "noun": "ひれ",
+              "status": "維持",
+              "confidence": "低",
+              "reason": "大きな領域の左下から三角形が左へ広がる。周囲が魚らしい形とは限らない。"
+            }
+          ],
+          "supports": [],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "comment": ""
+        },
+        {
+          "id": "P3",
+          "opusVerdicts": [
+            {
+              "noun": "足",
+              "verdict": "支持",
+              "confidence": "低",
+              "reason": "再確認した結果、縦に伸びる領域の右下に四角く横へ付く。足指や関節の区別がない。"
+            }
+          ],
+          "terraFinal": [
+            {
+              "noun": "足",
+              "status": "維持",
+              "confidence": "低",
+              "reason": "縦に伸びる領域の右下に四角く横へ付く。足指や関節の区別がない。"
+            }
+          ],
+          "supports": [
+            "足"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "comment": ""
+        }
+      ]
+    },
+    {
+      "item": "item-20",
+      "regions": [
+        {
+          "id": "P1",
+          "opusVerdicts": [],
+          "terraFinal": [
+            {
+              "noun": "尾びれ",
+              "status": "撤回",
+              "confidence": "低",
+              "reason": "左端は二股だが広い中央部も領域に含まれ、領域全体を尾びれとするには不適切なので撤回する。"
+            }
+          ],
+          "supports": [],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "comment": ""
+        },
+        {
+          "id": "P2",
+          "opusVerdicts": [
+            {
+              "noun": "前脚",
+              "verdict": "支持",
+              "confidence": "低",
+              "reason": "再確認した結果、頭のような右上の正方形の下側で、垂直な右辺をもち、下端が尖って図形の底に届く三角形で、前脚のように見える。脚にしては三角形で幅が広い。"
+            }
+          ],
+          "terraFinal": [
+            {
+              "noun": "ひれ",
+              "status": "維持",
+              "confidence": "低",
+              "reason": "接続点の下から三角形が下へ尖る。大きく左右非対称である。"
+            }
+          ],
+          "supports": [
+            "前脚"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "comment": ""
+        },
+        {
+          "id": "P3",
+          "opusVerdicts": [
+            {
+              "noun": "首",
+              "verdict": "支持",
+              "confidence": "低",
+              "reason": "再確認した結果、頭のような正方形の真下にあり、その下の三角形とつなぐ小さな三角形で、首の位置にあたる。首にしては小さく、帯状でない。"
+            },
+            {
+              "noun": "あご",
+              "verdict": "支持",
+              "confidence": "低",
+              "reason": "再確認した結果、頭のような正方形の下面に付き、左下へ斜めに細る三角形で、あごの下の輪郭とも取れる。頭の正方形と幅が同じで、あごの張り出しがない。"
+            }
+          ],
+          "terraFinal": [],
+          "supports": [
+            "首",
+            "あご"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "comment": ""
+        },
+        {
+          "id": "P4",
+          "opusVerdicts": [
+            {
+              "noun": "頭",
+              "verdict": "支持",
+              "confidence": "低",
+              "reason": "再確認した結果、右上端に四角い領域が付く。顔や向きの手掛かりがない。"
+            }
+          ],
+          "terraFinal": [
+            {
+              "noun": "頭",
+              "status": "維持",
+              "confidence": "低",
+              "reason": "右上端に四角い領域が付く。顔や向きの手掛かりがない。"
+            }
+          ],
+          "supports": [
+            "頭"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "comment": ""
+        },
+        {
+          "id": "P5",
+          "opusVerdicts": [
+            {
+              "noun": "耳",
+              "verdict": "支持",
+              "confidence": "低",
+              "reason": "再確認した結果、右上の四角の左から三角形が上へ尖る。耳の内側はない。"
+            }
+          ],
+          "terraFinal": [
+            {
+              "noun": "耳",
+              "status": "維持",
+              "confidence": "低",
+              "reason": "右上の四角の左から三角形が上へ尖る。耳の内側はない。"
+            }
+          ],
+          "supports": [
+            "耳"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "comment": ""
+        }
+      ]
+    },
+    {
+      "item": "item-21",
+      "regions": [
+        {
+          "id": "P1",
+          "opusVerdicts": [
+            {
+              "noun": "尾びれ",
+              "verdict": "支持",
+              "confidence": "低",
+              "reason": "再確認した結果、左端の長い垂直辺から右へ尖って残りの部分に接する三角形で、上下の端が尖り、魚の尾びれのように見える。図形の半分を占め、尾びれとしては大きい。"
+            }
+          ],
+          "terraFinal": [
+            {
+              "noun": "翼",
+              "status": "撤回",
+              "confidence": "低",
+              "reason": "本体側の接点が狭く外側が広がり、翼とする決め手が弱いため撤回する。"
+            }
+          ],
+          "supports": [
+            "尾びれ"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "comment": ""
+        },
+        {
+          "id": "P2",
+          "opusVerdicts": [
+            {
+              "noun": "屋根",
+              "verdict": "支持",
+              "confidence": "低",
+              "reason": "再確認した結果、頂点から左右に斜辺が下がり右下に水平辺がある。左側の裾が隣の領域と接している。"
+            },
+            {
+              "noun": "頭",
+              "verdict": "不支持",
+              "confidence": "低",
+              "reason": "中央の大きな台形には顔や前後の手掛かりがなく、頭という特定は弱い。"
+            }
+          ],
+          "terraFinal": [
+            {
+              "noun": "屋根",
+              "status": "維持",
+              "confidence": "中",
+              "reason": "頂点から左右に斜辺が下がり右下に水平辺がある。左側の裾が隣の領域と接している。"
+            }
+          ],
+          "supports": [
+            "屋根"
+          ],
+          "objects": [
+            {
+              "noun": "頭",
+              "reason": "中央の大きな台形には顔や前後の手掛かりがなく、頭という特定は弱い。"
+            }
+          ],
+          "proposals": [],
+          "note": "",
+          "comment": ""
+        },
+        {
+          "id": "P3",
+          "opusVerdicts": [],
+          "terraFinal": [
+            {
+              "noun": "幹",
+              "status": "維持",
+              "confidence": "低",
+              "reason": "上の三角形の下から四角く垂直に下がる。短く幅広い。"
+            }
+          ],
+          "supports": [],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "comment": ""
+        }
+      ]
+    },
+    {
+      "item": "item-22",
+      "regions": [
+        {
+          "id": "P1",
+          "opusVerdicts": [
+            {
+              "noun": "牙",
+              "verdict": "支持",
+              "confidence": "低",
+              "reason": "再確認した結果、横長の上部の右端から三角形が下に尖る。歯列や口の線はない。"
+            }
+          ],
+          "terraFinal": [
+            {
+              "noun": "牙",
+              "status": "維持",
+              "confidence": "低",
+              "reason": "横長の上部の右端から三角形が下に尖る。歯列や口の線はない。"
+            }
+          ],
+          "supports": [
+            "牙"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "comment": ""
+        },
+        {
+          "id": "P2",
+          "opusVerdicts": [],
+          "terraFinal": [
+            {
+              "noun": "歯",
+              "status": "撤回",
+              "confidence": "低",
+              "reason": "図形の半分を占める広い領域全体を歯とする根拠は弱く、撤回する。"
+            }
+          ],
+          "supports": [],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "comment": ""
+        },
+        {
+          "id": "P3",
+          "opusVerdicts": [],
+          "terraFinal": [],
+          "supports": [],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "comment": ""
+        },
+        {
+          "id": "P4",
+          "opusVerdicts": [],
+          "terraFinal": [],
+          "supports": [],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "comment": ""
+        },
+        {
+          "id": "P5",
+          "opusVerdicts": [
+            {
+              "noun": "尾",
+              "verdict": "支持",
+              "confidence": "低",
+              "reason": "再確認した結果、斜めに伸びる領域の先に小さく左下へ尖る。根元との境目が直線的で短い。"
+            }
+          ],
+          "terraFinal": [
+            {
+              "noun": "尾",
+              "status": "維持",
+              "confidence": "低",
+              "reason": "斜めに伸びる領域の先に小さく左下へ尖る。根元との境目が直線的で短い。"
+            }
+          ],
+          "supports": [
+            "尾"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "comment": ""
+        }
+      ]
+    },
+    {
+      "item": "item-23",
+      "regions": [
+        {
+          "id": "P1",
+          "opusVerdicts": [],
+          "terraFinal": [],
+          "supports": [],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "comment": ""
+        },
+        {
+          "id": "P2",
+          "opusVerdicts": [
+            {
+              "noun": "足",
+              "verdict": "支持",
+              "confidence": "低",
+              "reason": "再確認した結果、本体の左下に付き、平らな底辺で図形の下端近くに接し左へ尖る三角形で、足のように見える。一般的な語で、本体から横に広がりすぎている。"
+            }
+          ],
+          "terraFinal": [
+            {
+              "noun": "ひれ",
+              "status": "維持",
+              "confidence": "低",
+              "reason": "大きな領域の左下から三角形が左に張り出す。辺が対称で単純である。"
+            }
+          ],
+          "supports": [
+            "足"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "comment": ""
+        },
+        {
+          "id": "P3",
+          "opusVerdicts": [
+            {
+              "noun": "脚",
+              "verdict": "支持",
+              "confidence": "低",
+              "reason": "再確認した結果、本体の下の尖りの右から下へ伸び、図形の最下点に届く三角形で、下へ伸ばした脚のように見える。一般的な語で、三角形で幅が広い。"
+            }
+          ],
+          "terraFinal": [
+            {
+              "noun": "ひれ",
+              "status": "維持",
+              "confidence": "低",
+              "reason": "大きな領域の下から三角形が下向きに伸びる。片側が垂直で幅が広い。"
+            }
+          ],
+          "supports": [
+            "脚"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "comment": ""
+        },
+        {
+          "id": "P4",
+          "opusVerdicts": [
+            {
+              "noun": "頭",
+              "verdict": "支持",
+              "confidence": "低",
+              "reason": "再確認した結果、肩のように横に広い逆三角形の上辺に載る正方形で、頭のように見える。一般的な語で、中央より右にずれている。"
+            }
+          ],
+          "terraFinal": [
+            {
+              "noun": "煙突",
+              "status": "維持",
+              "confidence": "低",
+              "reason": "大きな領域の上辺から四角く上に立つ。短く屋根との関係は曖昧である。"
+            }
+          ],
+          "supports": [
+            "頭"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "comment": ""
+        },
+        {
+          "id": "P5",
+          "opusVerdicts": [
+            {
+              "noun": "腕",
+              "verdict": "不支持",
+              "confidence": "低",
+              "reason": "細長い帯は四角の側面から出ており、腕の付け根と見る根拠が弱い。"
+            },
+            {
+              "noun": "耳",
+              "verdict": "支持",
+              "confidence": "低",
+              "reason": "再確認した結果、上部から右上へ細長く伸び先端が尖る。直線的で内側の形はない。"
+            }
+          ],
+          "terraFinal": [
+            {
+              "noun": "耳",
+              "status": "維持",
+              "confidence": "低",
+              "reason": "上部から右上へ細長く伸び先端が尖る。直線的で内側の形はない。"
+            }
+          ],
+          "supports": [
+            "耳"
+          ],
+          "objects": [
+            {
+              "noun": "腕",
+              "reason": "細長い帯は四角の側面から出ており、腕の付け根と見る根拠が弱い。"
+            }
+          ],
+          "proposals": [],
+          "note": "",
+          "comment": ""
+        }
+      ]
+    },
+    {
+      "item": "item-24",
+      "regions": [
+        {
+          "id": "P1",
+          "opusVerdicts": [],
+          "terraFinal": [],
+          "supports": [],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "comment": ""
+        },
+        {
+          "id": "P2",
+          "opusVerdicts": [],
+          "terraFinal": [],
+          "supports": [],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "comment": ""
+        },
+        {
+          "id": "P3",
+          "opusVerdicts": [
+            {
+              "noun": "足",
+              "verdict": "支持",
+              "confidence": "低",
+              "reason": "再確認した結果、下向きに伸びる部分の末端に四角く付く。足指や足先の向きが分からない。"
+            }
+          ],
+          "terraFinal": [
+            {
+              "noun": "足",
+              "status": "維持",
+              "confidence": "低",
+              "reason": "下向きに伸びる部分の末端に四角く付く。足指や足先の向きが分からない。"
+            }
+          ],
+          "supports": [
+            "足"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "comment": ""
+        },
+        {
+          "id": "P4",
+          "opusVerdicts": [
+            {
+              "noun": "耳",
+              "verdict": "支持",
+              "confidence": "低",
+              "reason": "再確認した結果、上部から左上に細長く伸び上端が尖る。先端は片側で切れている。"
+            }
+          ],
+          "terraFinal": [
+            {
+              "noun": "耳",
+              "status": "維持",
+              "confidence": "低",
+              "reason": "上部から左上に細長く伸び上端が尖る。先端は片側で切れている。"
+            }
+          ],
+          "supports": [
+            "耳"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "comment": ""
+        }
+      ]
+    },
+    {
+      "item": "item-25",
+      "regions": [
+        {
+          "id": "P1",
+          "opusVerdicts": [],
+          "terraFinal": [],
+          "supports": [],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "comment": ""
+        },
+        {
+          "id": "P2",
+          "opusVerdicts": [
+            {
+              "noun": "帆",
+              "verdict": "支持",
+              "confidence": "低",
+              "reason": "再確認した結果、垂直な左辺と水平な底辺をもち上と右に尖る直角三角形で、マストに張った帆のように見える。下の台形は船体らしい形でない。"
+            }
+          ],
+          "terraFinal": [
+            {
+              "noun": "屋根",
+              "status": "維持",
+              "confidence": "中",
+              "reason": "上に尖った三角形が下の領域の上に乗る。左右非対称で片方の辺が垂直である。"
+            }
+          ],
+          "supports": [
+            "帆"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "comment": ""
+        },
+        {
+          "id": "P3",
+          "opusVerdicts": [],
+          "terraFinal": [],
+          "supports": [],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "comment": ""
+        },
+        {
+          "id": "P4",
+          "opusVerdicts": [
+            {
+              "noun": "尾",
+              "verdict": "支持",
+              "confidence": "低",
+              "reason": "再確認した結果、左下の小さな領域からさらに左下へ細く伸びる。先が尖らず水平に切れている。"
+            }
+          ],
+          "terraFinal": [
+            {
+              "noun": "尾",
+              "status": "維持",
+              "confidence": "低",
+              "reason": "左下の小さな領域からさらに左下へ細く伸びる。先が尖らず水平に切れている。"
+            }
+          ],
+          "supports": [
+            "尾"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "comment": ""
+        }
+      ]
+    },
+    {
+      "item": "item-26",
+      "regions": [
+        {
+          "id": "P1",
+          "opusVerdicts": [
+            {
+              "noun": "刃",
+              "verdict": "支持",
+              "confidence": "低",
+              "reason": "再確認した結果、下端が尖る盾形の大きな五角形で、角から斜めの細い帯が伸び、スコップの刃のように見える。図形の8割を占め、部分というより全体に近い。"
+            }
+          ],
+          "terraFinal": [],
+          "supports": [
+            "刃"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "comment": ""
+        },
+        {
+          "id": "P2",
+          "opusVerdicts": [
+            {
+              "noun": "柄",
+              "verdict": "支持",
+              "confidence": "中",
+              "reason": "再確認した結果、大きな領域の左上から細長く斜めに伸びる。先端が斜めに切れ握りの細部はない。"
+            }
+          ],
+          "terraFinal": [
+            {
+              "noun": "柄",
+              "status": "維持",
+              "confidence": "中",
+              "reason": "大きな領域の左上から細長く斜めに伸びる。先端が斜めに切れ握りの細部はない。"
+            }
+          ],
+          "supports": [
+            "柄"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "comment": ""
+        }
+      ]
+    },
+    {
+      "item": "item-27",
+      "regions": [
+        {
+          "id": "P1",
+          "opusVerdicts": [
+            {
+              "noun": "屋根",
+              "verdict": "支持",
+              "confidence": "低",
+              "reason": "再確認した結果、長い水平辺から中央上の頂点へ斜辺が上がる。周辺との結合は一般的な屋根と異なる。"
+            }
+          ],
+          "terraFinal": [
+            {
+              "noun": "屋根",
+              "status": "維持",
+              "confidence": "中",
+              "reason": "長い水平辺から中央上の頂点へ斜辺が上がる。周辺との結合は一般的な屋根と異なる。"
+            }
+          ],
+          "supports": [
+            "屋根"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "comment": ""
+        },
+        {
+          "id": "P2",
+          "opusVerdicts": [],
+          "terraFinal": [],
+          "supports": [],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "comment": ""
+        },
+        {
+          "id": "P3",
+          "opusVerdicts": [
+            {
+              "noun": "船体",
+              "verdict": "支持",
+              "confidence": "中",
+              "reason": "再確認した結果、長い上辺から斜辺が下の短い辺に向かって絞られる。中央部に水平な底が残る。"
+            }
+          ],
+          "terraFinal": [
+            {
+              "noun": "船底",
+              "status": "維持",
+              "confidence": "中",
+              "reason": "長い上辺から斜辺が下の短い辺に向かって絞られる。中央部に水平な底が残る。"
+            }
+          ],
+          "supports": [
+            "船体"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "comment": ""
+        },
+        {
+          "id": "P4",
+          "opusVerdicts": [
+            {
+              "noun": "煙突",
+              "verdict": "支持",
+              "confidence": "低",
+              "reason": "再確認した結果、三角形の上方へ縦長に立っている。下端が斜めに切れている。"
+            }
+          ],
+          "terraFinal": [
+            {
+              "noun": "煙突",
+              "status": "維持",
+              "confidence": "低",
+              "reason": "三角形の上方へ縦長に立っている。下端が斜めに切れている。"
+            }
+          ],
+          "supports": [
+            "煙突"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "comment": ""
+        }
+      ]
+    },
+    {
+      "item": "item-28",
+      "regions": [
+        {
+          "id": "P1",
+          "opusVerdicts": [],
+          "terraFinal": [],
+          "supports": [],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "comment": ""
+        },
+        {
+          "id": "P2",
+          "opusVerdicts": [
+            {
+              "noun": "頭",
+              "verdict": "不支持",
+              "confidence": "低",
+              "reason": "右端の三角形は先細りで、頭より具体的なくちばしとして読む根拠が強い。"
+            },
+            {
+              "noun": "くちばし",
+              "verdict": "支持",
+              "confidence": "低",
+              "reason": "再確認した結果、右上の接続部から三角形が右へ出る。口の線がなく幅が広い。"
+            }
+          ],
+          "terraFinal": [
+            {
+              "noun": "くちばし",
+              "status": "維持",
+              "confidence": "低",
+              "reason": "右上の接続部から三角形が右へ出る。口の線がなく幅が広い。"
+            }
+          ],
+          "supports": [
+            "くちばし"
+          ],
+          "objects": [
+            {
+              "noun": "頭",
+              "reason": "右端の三角形は先細りで、頭より具体的なくちばしとして読む根拠が強い。"
+            }
+          ],
+          "proposals": [],
+          "note": "",
+          "comment": ""
+        },
+        {
+          "id": "P3",
+          "opusVerdicts": [
+            {
+              "noun": "脚",
+              "verdict": "支持",
+              "confidence": "低",
+              "reason": "再確認した結果、中央の下から右下に尖って垂れ四角い領域に接する。関節や足指はない。"
+            }
+          ],
+          "terraFinal": [
+            {
+              "noun": "足",
+              "status": "維持",
+              "confidence": "低",
+              "reason": "中央の下から右下に尖って垂れ四角い領域に接する。関節や足指はない。"
+            }
+          ],
+          "supports": [
+            "脚"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "comment": ""
+        },
+        {
+          "id": "P4",
+          "opusVerdicts": [
+            {
+              "noun": "足",
+              "verdict": "支持",
+              "confidence": "低",
+              "reason": "再確認した結果、下に垂れる領域の右下端に四角く付く。足指や足先の区別がない。"
+            }
+          ],
+          "terraFinal": [
+            {
+              "noun": "足",
+              "status": "維持",
+              "confidence": "低",
+              "reason": "下に垂れる領域の右下端に四角く付く。足指や足先の区別がない。"
+            }
+          ],
+          "supports": [
+            "足"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "comment": ""
+        },
+        {
+          "id": "P5",
+          "opusVerdicts": [
+            {
+              "noun": "翼",
+              "verdict": "支持",
+              "confidence": "低",
+              "reason": "再確認した結果、本体の上辺から左上へ斜めに立ち上がる帯で、上げた翼のように見える。翼にしては細く、幅が一定である。"
+            },
+            {
+              "noun": "耳",
+              "verdict": "支持",
+              "confidence": "低",
+              "reason": "再確認した結果、上部から左上に細長く伸び左端が尖る。長辺が平行で耳の内側がない。"
+            }
+          ],
+          "terraFinal": [
+            {
+              "noun": "耳",
+              "status": "維持",
+              "confidence": "低",
+              "reason": "上部から左上に細長く伸び左端が尖る。長辺が平行で耳の内側がない。"
+            }
+          ],
+          "supports": [
+            "翼",
+            "耳"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "comment": ""
+        }
+      ]
+    },
+    {
+      "item": "item-29",
+      "regions": [
+        {
+          "id": "P1",
+          "opusVerdicts": [],
+          "terraFinal": [],
+          "supports": [],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "comment": ""
+        },
+        {
+          "id": "P2",
+          "opusVerdicts": [
+            {
+              "noun": "腕",
+              "verdict": "支持",
+              "confidence": "低",
+              "reason": "再確認した結果、三角形の右の斜面上部から右へ水平に突き出す台形で、前へ伸ばした腕のように見える。腕にしては太く短く、手の形がない。"
+            },
+            {
+              "noun": "前足",
+              "verdict": "不支持",
+              "confidence": "低",
+              "reason": "右への張り出しは短く、前足と特定する関節や足先の手掛かりがない。"
+            }
+          ],
+          "terraFinal": [
+            {
+              "noun": "袖",
+              "status": "維持",
+              "confidence": "低",
+              "reason": "中央上部から右へ張り出し右端が垂直である。袖口の開きや腕はない。"
+            }
+          ],
+          "supports": [
+            "腕"
+          ],
+          "objects": [
+            {
+              "noun": "前足",
+              "reason": "右への張り出しは短く、前足と特定する関節や足先の手掛かりがない。"
+            }
+          ],
+          "proposals": [],
+          "note": "",
+          "comment": ""
+        },
+        {
+          "id": "P3",
+          "opusVerdicts": [
+            {
+              "noun": "頭",
+              "verdict": "支持",
+              "confidence": "低",
+              "reason": "再確認した結果、下の大きな三角形の頂点の上に載る台形で、上に斜めの帯が付き、頭のように見える。一般的な語で、右辺が斜めに切れて角ばっている。"
+            }
+          ],
+          "terraFinal": [],
+          "supports": [
+            "頭"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "comment": ""
+        },
+        {
+          "id": "P4",
+          "opusVerdicts": [
+            {
+              "noun": "耳",
+              "verdict": "支持",
+              "confidence": "低",
+              "reason": "再確認した結果、上の領域から右上へ細長く伸びる。先端が斜めに切れ耳の内側はない。"
+            },
+            {
+              "noun": "くちばし",
+              "verdict": "支持",
+              "confidence": "低",
+              "reason": "再確認した結果、下の台形との間に右へ開く「く」の字の切れ込みをつくり、開いたくちばしの上側とも取れる。くちばしにしては頭の上に載りすぎている。"
+            }
+          ],
+          "terraFinal": [
+            {
+              "noun": "耳",
+              "status": "維持",
+              "confidence": "低",
+              "reason": "上の領域から右上へ細長く伸びる。先端が斜めに切れ耳の内側はない。"
+            }
+          ],
+          "supports": [
+            "耳",
+            "くちばし"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "comment": ""
+        }
+      ]
+    },
+    {
+      "item": "item-30",
+      "regions": [
+        {
+          "id": "P1",
+          "opusVerdicts": [
+            {
+              "noun": "脚",
+              "verdict": "支持",
+              "confidence": "低",
+              "reason": "再確認した結果、図形の右端で垂直な右辺をもち、下端が図形の底に届く三角形で、ぎざぎざの下縁をなす脚の一本のように見える。一般的な語で、三角形で幅が広い。"
+            },
+            {
+              "noun": "尾びれ",
+              "verdict": "支持",
+              "confidence": "低",
+              "reason": "再確認した結果、右端に長い垂直辺をもち内側へ尖る三角形で、尾びれとも取れる。上端が本体と一続きで、尾びれとして独立して見えない。"
+            }
+          ],
+          "terraFinal": [
+            {
+              "noun": "牙",
+              "status": "維持",
+              "confidence": "低",
+              "reason": "上部の右端から三角形が下に尖る。口や歯列の線はない。"
+            }
+          ],
+          "supports": [
+            "脚",
+            "尾びれ"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "comment": ""
+        },
+        {
+          "id": "P2",
+          "opusVerdicts": [],
+          "terraFinal": [],
+          "supports": [],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "comment": ""
+        },
+        {
+          "id": "P3",
+          "opusVerdicts": [],
+          "terraFinal": [],
+          "supports": [],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "comment": ""
+        },
+        {
+          "id": "P4",
+          "opusVerdicts": [
+            {
+              "noun": "頭",
+              "verdict": "不支持",
+              "confidence": "低",
+              "reason": "最下部の正方形には顔や向きを示す手掛かりがなく、頭としての根拠が弱い。"
+            }
+          ],
+          "terraFinal": [
+            {
+              "noun": "足",
+              "status": "維持",
+              "confidence": "低",
+              "reason": "左端の下側に四角い領域が付いている。足指や関節は見えない。"
+            }
+          ],
+          "supports": [],
+          "objects": [
+            {
+              "noun": "頭",
+              "reason": "最下部の正方形には顔や向きを示す手掛かりがなく、頭としての根拠が弱い。"
+            }
+          ],
+          "proposals": [],
+          "note": "",
+          "comment": ""
+        },
+        {
+          "id": "P5",
+          "opusVerdicts": [
+            {
+              "noun": "背びれ",
+              "verdict": "支持",
+              "confidence": "低",
+              "reason": "再確認した結果、本体の水平な上辺から左上へ傾いて立つ平行四辺形で、背びれのように見える。下縁がぎざぎざの脚状で、魚らしい体形と合わない。"
+            },
+            {
+              "noun": "翼",
+              "verdict": "支持",
+              "confidence": "低",
+              "reason": "再確認した結果、本体の上から斜め上へ伸びる帯で、上げた翼とも取れる。翼にしては細く短い。"
+            }
+          ],
+          "terraFinal": [
+            {
+              "noun": "耳",
+              "status": "維持",
+              "confidence": "低",
+              "reason": "上部から左上へ細長く伸び左先端が尖る。長辺が平行で耳の内側はない。"
+            }
+          ],
+          "supports": [
+            "背びれ",
+            "翼"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "",
+          "comment": ""
+        }
+      ]
+    }
+  ]
+}

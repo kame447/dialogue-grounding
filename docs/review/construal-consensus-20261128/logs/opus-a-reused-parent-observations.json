@@ -1,0 +1,563 @@
+[
+  {
+    "item": "item-02",
+    "silhouetteImpression": "下向きの大きな三角の胴、左上へ伸びる首と四角い頭、右上へ上がる翼があり、首を伸ばして飛ぶ大型の鳥に見える。",
+    "candidates": [
+      {
+        "rank": 1,
+        "noun": "ツル",
+        "posture": "首を伸ばして飛ぶ",
+        "direction": "頭が左上",
+        "confidence": "中",
+        "parts": [
+          {
+            "id": "P1",
+            "role": "胴（右端が尾）",
+            "evidence": "中央の大きな三角形で、他の部分がすべてここから出る"
+          },
+          {
+            "id": "P2",
+            "role": "首",
+            "evidence": "頭と胴をつなぐ斜めの細い平行四辺形"
+          },
+          {
+            "id": "P3",
+            "role": "頭",
+            "evidence": "左端の正方形"
+          },
+          {
+            "id": "P4",
+            "role": "上げた翼",
+            "evidence": "胴の上から右上へ伸びる平行四辺形"
+          }
+        ],
+        "evidence": "長い首・上げた翼・胴の並びが飛ぶ大型の鳥の姿に合う。",
+        "weaknesses": "脚が無く、胴の下向きの尖りの説明が弱い。"
+      },
+      {
+        "rank": 2,
+        "noun": "白鳥",
+        "posture": "首を伸ばして飛ぶ",
+        "direction": "頭が左上",
+        "confidence": "低",
+        "parts": [
+          {
+            "id": "P1",
+            "role": "胴",
+            "evidence": "大きな三角形"
+          },
+          {
+            "id": "P2",
+            "role": "首",
+            "evidence": "斜めの平行四辺形"
+          },
+          {
+            "id": "P3",
+            "role": "頭",
+            "evidence": "左端の正方形"
+          },
+          {
+            "id": "P4",
+            "role": "翼",
+            "evidence": "右上へ伸びる平行四辺形"
+          }
+        ],
+        "evidence": "長い首の水鳥として同じ対応が成り立つ。",
+        "weaknesses": "ツルとの区別は形からはつかない。"
+      }
+    ],
+    "noConstrual": false,
+    "noConstrualReason": "",
+    "uncertainty": "種の区別（ツル・白鳥・ガン）は形だけでは決まらない。"
+  },
+  {
+    "item": "item-09",
+    "silhouetteImpression": "左に縦長の大きな三角、右に下へ曲がる首と頭があり、尾羽を立てて右下をついばむ鶏に見える。",
+    "candidates": [
+      {
+        "rank": 1,
+        "noun": "ニワトリ",
+        "posture": "首を下げて餌をついばむ",
+        "direction": "右向き、頭が右下",
+        "confidence": "中",
+        "parts": [
+          {
+            "id": "P1",
+            "role": "立てた尾羽",
+            "evidence": "左端で縦に立つ大きな三角形"
+          },
+          {
+            "id": "P2",
+            "role": "脚",
+            "evidence": "胴の下に垂れる正方形"
+          },
+          {
+            "id": "P3",
+            "role": "胴・首の付け根",
+            "evidence": "中央上の台形で、尾と頭をつなぐ"
+          },
+          {
+            "id": "P4",
+            "role": "下げた首と頭（くちばしが右下）",
+            "evidence": "右側で右下へ下りる平行四辺形"
+          }
+        ],
+        "evidence": "大きな尾と下へ曲がった頭の組み合わせが、ついばむ鶏の横姿に合う。",
+        "weaknesses": "尾が胴より大きすぎ、くちばしの尖りが弱い。"
+      },
+      {
+        "rank": 2,
+        "noun": "馬",
+        "posture": "首を下げて草を食べる",
+        "direction": "右向き、頭が右下",
+        "confidence": "低",
+        "parts": [
+          {
+            "id": "P1",
+            "role": "尻・後半身",
+            "evidence": "左の大きな三角形"
+          },
+          {
+            "id": "P2",
+            "role": "脚",
+            "evidence": "下へ垂れる正方形"
+          },
+          {
+            "id": "P3",
+            "role": "肩・胸",
+            "evidence": "中央の台形"
+          },
+          {
+            "id": "P4",
+            "role": "首と頭",
+            "evidence": "右下へ下りる平行四辺形"
+          }
+        ],
+        "evidence": "頭を地面へ下ろす輪郭が草を食む姿に近い。",
+        "weaknesses": "脚が一本しかなく胴が短い。"
+      }
+    ],
+    "noConstrual": false,
+    "noConstrualReason": "",
+    "uncertainty": "左の三角形を尾と見るか体の後半と見るかで読みが変わる。"
+  },
+  {
+    "item": "item-10",
+    "silhouetteImpression": "右に尖った頂部を持つ大きな縦長の塊、左に突き出た四角、左下へ伸びる斜めの帯があり、具体物としてはまとまりにくい。",
+    "candidates": [
+      {
+        "rank": 1,
+        "noun": "犬",
+        "posture": "前脚を伸ばして座る",
+        "direction": "左向き",
+        "confidence": "低",
+        "parts": [
+          {
+            "id": "P1",
+            "role": "頭頂（耳）から胴・後ろ脚",
+            "evidence": "右側の縦長の五角形で上端が尖る"
+          },
+          {
+            "id": "P2",
+            "role": "前へ伸ばした前脚",
+            "evidence": "左下へ伸びる平行四辺形"
+          },
+          {
+            "id": "P3",
+            "role": "鼻先",
+            "evidence": "上部で左へ突き出た正方形"
+          }
+        ],
+        "evidence": "左へ突き出た鼻先と下へ伸びる前脚が、座る犬の横姿に部分的に対応する。",
+        "weaknesses": "頭と胴が一体で区別できず、鼻先の位置が低すぎる。"
+      }
+    ],
+    "noConstrual": false,
+    "noConstrualReason": "",
+    "uncertainty": "見立てなしに近い。斧や鳥の頭とも読めるが決め手が無い。"
+  },
+  {
+    "item": "item-13",
+    "silhouetteImpression": "横に長い腕のような帯が左右に伸び、上に小さな尖り、下に下へ尖る五角形の胴があり、腕を広げたかかしや翼を広げた鳥の正面に見える。",
+    "candidates": [
+      {
+        "rank": 1,
+        "noun": "かかし",
+        "posture": "両腕を横に広げて立つ",
+        "direction": "正面、頭が上",
+        "confidence": "低",
+        "parts": [
+          {
+            "id": "P1",
+            "role": "胴（着物）",
+            "evidence": "中央で下へ尖る五角形"
+          },
+          {
+            "id": "P2",
+            "role": "左腕",
+            "evidence": "胴の左上から左へ伸びる平行四辺形"
+          },
+          {
+            "id": "P3",
+            "role": "頭",
+            "evidence": "胴の上の小三角形"
+          },
+          {
+            "id": "P4",
+            "role": "右腕",
+            "evidence": "胴の右上の正方形"
+          }
+        ],
+        "evidence": "左右に張り出す腕と中央の頭・胴の配置が、腕を広げて立つかかしに合う。",
+        "weaknesses": "左右の腕の長さが違い、頭が小さく尖る。"
+      },
+      {
+        "rank": 2,
+        "noun": "ワシ",
+        "posture": "翼を広げて正面から飛んでくる",
+        "direction": "正面、頭が上",
+        "confidence": "低",
+        "parts": [
+          {
+            "id": "P1",
+            "role": "胴と尾",
+            "evidence": "下へ尖る五角形"
+          },
+          {
+            "id": "P2",
+            "role": "左の翼",
+            "evidence": "左へ伸びる平行四辺形"
+          },
+          {
+            "id": "P3",
+            "role": "頭",
+            "evidence": "上の小三角形"
+          },
+          {
+            "id": "P4",
+            "role": "右の翼",
+            "evidence": "右の正方形"
+          }
+        ],
+        "evidence": "左右の張り出しを翼、下の尖りを尾と見られる。",
+        "weaknesses": "翼が短く左右非対称。"
+      }
+    ],
+    "noConstrual": false,
+    "noConstrualReason": "",
+    "uncertainty": "左右非対称なので、正面の姿として読むには無理がある。"
+  },
+  {
+    "item": "item-19",
+    "silhouetteImpression": "右へ尖る大きな三角の上から右へ水平な棒が伸び、左上に尖った突起、下に小さな三角がある。右を向けた拳銃のような形に見える。",
+    "candidates": [
+      {
+        "rank": 1,
+        "noun": "拳銃",
+        "posture": "横向きに構えられている",
+        "direction": "銃口が右、握りが下",
+        "confidence": "低",
+        "parts": [
+          {
+            "id": "P1",
+            "role": "撃鉄・後部",
+            "evidence": "左上へ尖る縦長の平行四辺形"
+          },
+          {
+            "id": "P2",
+            "role": "本体と握り",
+            "evidence": "下端が尖る大きな三角形"
+          },
+          {
+            "id": "P3",
+            "role": "引き金",
+            "evidence": "銃身の下の小三角形"
+          },
+          {
+            "id": "P4",
+            "role": "銃身",
+            "evidence": "右へ水平に伸びる平行四辺形"
+          }
+        ],
+        "evidence": "水平な銃身・下の引き金・後ろの握りの位置関係が拳銃の横姿に合う。",
+        "weaknesses": "握りが三角形で太く、銃身との角度が不自然。"
+      },
+      {
+        "rank": 2,
+        "noun": "ハチドリ",
+        "posture": "空中で止まる",
+        "direction": "右向き、くちばしが右",
+        "confidence": "低",
+        "parts": [
+          {
+            "id": "P1",
+            "role": "尾",
+            "evidence": "左上へ立つ平行四辺形"
+          },
+          {
+            "id": "P2",
+            "role": "胴",
+            "evidence": "大きな三角形"
+          },
+          {
+            "id": "P3",
+            "role": "喉",
+            "evidence": "くちばしの下の小三角形"
+          },
+          {
+            "id": "P4",
+            "role": "長いくちばし",
+            "evidence": "右へ水平に伸びる細長い部分"
+          }
+        ],
+        "evidence": "右へ長く伸びる細い部分が長いくちばしに見える。",
+        "weaknesses": "翼が無く、くちばしが太い。"
+      }
+    ],
+    "noConstrual": false,
+    "noConstrualReason": "",
+    "uncertainty": "生き物と道具のどちらとも決めにくい。"
+  },
+  {
+    "item": "item-20",
+    "silhouetteImpression": "下に台形の船体、左上に大きな三角、右上に四角があり、帆と船室を持つ船に見える。",
+    "candidates": [
+      {
+        "rank": 1,
+        "noun": "帆船",
+        "posture": "水面に浮かんで進む",
+        "direction": "船首が右、帆が左寄り",
+        "confidence": "中",
+        "parts": [
+          {
+            "id": "P1",
+            "role": "帆",
+            "evidence": "船体の上に立つ大きな三角形"
+          },
+          {
+            "id": "P2",
+            "role": "船体",
+            "evidence": "上辺が長く下辺が短い台形"
+          },
+          {
+            "id": "P3",
+            "role": "船室（または煙突）",
+            "evidence": "船体の右上に載る正方形"
+          }
+        ],
+        "evidence": "台形の船体の上に三角の帆と四角い船室が載る典型的な船の形。",
+        "weaknesses": "帆が船体より左へはみ出している。"
+      }
+    ],
+    "noConstrual": false,
+    "noConstrualReason": "",
+    "uncertainty": "四角を煙突と見れば汽船にもなる。"
+  },
+  {
+    "item": "item-22",
+    "silhouetteImpression": "左下に先の尖った幅広の板、右上へ細い柄が伸び、スコップに見える。",
+    "candidates": [
+      {
+        "rank": 1,
+        "noun": "スコップ",
+        "posture": "斜めに置かれている",
+        "direction": "刃先が左下、柄が右上",
+        "confidence": "中",
+        "parts": [
+          {
+            "id": "P1",
+            "role": "刃（先端が左下）",
+            "evidence": "左下へ尖る幅広の六角形"
+          },
+          {
+            "id": "P2",
+            "role": "柄",
+            "evidence": "刃の右上から右上へ伸びる細い平行四辺形"
+          }
+        ],
+        "evidence": "幅広く先の尖った板と、そこから一直線に伸びる細い柄の組み合わせ。",
+        "weaknesses": "柄が刃の中心線からずれている。"
+      },
+      {
+        "rank": 2,
+        "noun": "ギター",
+        "posture": "斜めに置かれている",
+        "direction": "胴が左下、ネックが右上",
+        "confidence": "低",
+        "parts": [
+          {
+            "id": "P1",
+            "role": "胴",
+            "evidence": "左下の幅広の六角形"
+          },
+          {
+            "id": "P2",
+            "role": "ネック",
+            "evidence": "右上へ伸びる細い平行四辺形"
+          }
+        ],
+        "evidence": "大きな胴と細長い棹の比率が楽器に合う。",
+        "weaknesses": "胴にくびれが無く角張る。"
+      }
+    ],
+    "noConstrual": false,
+    "noConstrualReason": "",
+    "uncertainty": "おたまやフライパンなど、柄の付いた道具全般にも当てはまる。"
+  },
+  {
+    "item": "item-23",
+    "silhouetteImpression": "左上に斜めに突き出た頭、その下の左に小さな腕、右下へ斜めに下がる背中と、右下端の四角があり、左を向いて立つカンガルーに見える。",
+    "candidates": [
+      {
+        "rank": 1,
+        "noun": "カンガルー",
+        "posture": "後ろ脚と尾で立つ",
+        "direction": "左向き、頭が左上",
+        "confidence": "低",
+        "parts": [
+          {
+            "id": "P1",
+            "role": "胴（背中が右下へ下がる）",
+            "evidence": "縦の辺が左にある大きな直角三角形"
+          },
+          {
+            "id": "P2",
+            "role": "前脚（短い腕）",
+            "evidence": "胴の左に付く小さな三角形"
+          },
+          {
+            "id": "P3",
+            "role": "頭",
+            "evidence": "最上部で左上へ突き出る平行四辺形"
+          },
+          {
+            "id": "P4",
+            "role": "尾の先・後ろ足",
+            "evidence": "右下端の正方形"
+          }
+        ],
+        "evidence": "上へ伸びる頭、前の小さな腕、下へ広がる胴の並びがカンガルーの立ち姿に合う。",
+        "weaknesses": "尾が短く、脚の区別が無い。"
+      }
+    ],
+    "noConstrual": false,
+    "noConstrualReason": "",
+    "uncertainty": "左上を向くアシカやペンギンとも読める。"
+  },
+  {
+    "item": "item-27",
+    "silhouetteImpression": "上部に二つの尖りと谷があり耳のように見え、左下へ伸びる三角と右下へ伸びる脚がある。跳ねる小動物に見えなくもない。",
+    "candidates": [
+      {
+        "rank": 1,
+        "noun": "ウサギ",
+        "posture": "左へ跳ねる",
+        "direction": "左向き、耳が上",
+        "confidence": "低",
+        "parts": [
+          {
+            "id": "P1",
+            "role": "頭と胴（右上の角が片耳）",
+            "evidence": "縦の辺が右にある大きな三角形で、上端が尖る"
+          },
+          {
+            "id": "P2",
+            "role": "もう一方の耳",
+            "evidence": "上端左で上へ尖る三角形"
+          },
+          {
+            "id": "P3",
+            "role": "前へ伸ばした前脚",
+            "evidence": "左下へ伸びる三角形"
+          },
+          {
+            "id": "P4",
+            "role": "尻",
+            "evidence": "胴の右の正方形"
+          },
+          {
+            "id": "P5",
+            "role": "後ろへ蹴り出す後ろ脚",
+            "evidence": "右下へ伸びる平行四辺形"
+          }
+        ],
+        "evidence": "二つの尖った耳と、前後に開いた脚が跳ねる姿に対応する。",
+        "weaknesses": "頭の位置がはっきりせず、胴が三角形で不自然。"
+      }
+    ],
+    "noConstrual": false,
+    "noConstrualReason": "",
+    "uncertainty": "耳のある猫の座り姿にも見えるが、どちらも弱い。"
+  },
+  {
+    "item": "item-29",
+    "silhouetteImpression": "左上から右下へ傾いた太い帯の下に脚があり、右端で細い帯が右上へ立ち上がる。しっぽを立てて座る四つ足の動物の横姿に見える。",
+    "candidates": [
+      {
+        "rank": 1,
+        "noun": "猫",
+        "posture": "座ってしっぽを立てる",
+        "direction": "左向き、頭が左上",
+        "confidence": "低",
+        "parts": [
+          {
+            "id": "P1",
+            "role": "前脚",
+            "evidence": "帯の左寄りから真下へ下りる縦長の五角形"
+          },
+          {
+            "id": "P2",
+            "role": "頭から背中",
+            "evidence": "左上が高く右下へ下がる大きな平行四辺形"
+          },
+          {
+            "id": "P3",
+            "role": "腰・後ろ脚",
+            "evidence": "右端下の小三角形"
+          },
+          {
+            "id": "P4",
+            "role": "立てたしっぽ",
+            "evidence": "右端から右上へ伸びる細い平行四辺形"
+          }
+        ],
+        "evidence": "前が高く後ろが低い背中、前脚、立てたしっぽが座る猫の横姿に対応する。",
+        "weaknesses": "頭と背中が一続きで、耳が無い。"
+      },
+      {
+        "rank": 2,
+        "noun": "セキレイ",
+        "posture": "尾を上げて止まる",
+        "direction": "左向き、頭が左上",
+        "confidence": "低",
+        "parts": [
+          {
+            "id": "P1",
+            "role": "脚",
+            "evidence": "下へ伸びる縦長の部分"
+          },
+          {
+            "id": "P2",
+            "role": "頭と胴",
+            "evidence": "左上へ伸びる大きな平行四辺形"
+          },
+          {
+            "id": "P3",
+            "role": "腹の後ろ",
+            "evidence": "胴の後端の小三角形"
+          },
+          {
+            "id": "P4",
+            "role": "上げた尾",
+            "evidence": "右上へ立つ細い平行四辺形"
+          }
+        ],
+        "evidence": "細く上げた尾が尾を振る小鳥の特徴に合う。",
+        "weaknesses": "くちばしが無く胴が太すぎる。"
+      }
+    ],
+    "noConstrual": false,
+    "noConstrualReason": "",
+    "uncertainty": "頭の位置が明示されず、動物の種類は決めにくい。"
+  }
+]

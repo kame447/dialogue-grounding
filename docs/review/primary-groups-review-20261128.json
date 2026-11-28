@@ -1,0 +1,1833 @@
+{
+  "schemaVersion": "tangram_primary_groups_review_v1",
+  "status": "awaiting_user_review_with_expression_editor",
+  "confirmedFigureIds": [
+    "F1"
+  ],
+  "figures": [
+    {
+      "figureId": "F1",
+      "groups": [
+        [
+          4,
+          5
+        ],
+        [
+          1,
+          2,
+          3
+        ],
+        [
+          6,
+          7
+        ]
+      ],
+      "status": "user_specified",
+      "reason": "2026-11-28のユーザー指定",
+      "reviewOutcome": "user_reports_confirmed_in_screen; exact_groups_pending_import"
+    },
+    {
+      "figureId": "F2",
+      "groups": [
+        [
+          1,
+          6
+        ],
+        [
+          2,
+          3,
+          4,
+          5
+        ],
+        [
+          7
+        ]
+      ],
+      "review": "保留",
+      "reason": "左下の折れた張出し、上のまとまり、右の細い跳ね上がり。中央の切れ目は自明ではない。",
+      "alternative": [
+        [
+          1,
+          2,
+          3,
+          4,
+          5
+        ],
+        [
+          6
+        ],
+        [
+          7
+        ]
+      ],
+      "reviewOutcome": "user_reports_confirmed_in_screen; exact_groups_pending_import"
+    },
+    {
+      "figureId": "F3",
+      "groups": [
+        [
+          4,
+          6
+        ],
+        [
+          1,
+          2,
+          3
+        ],
+        [
+          5,
+          7
+        ]
+      ],
+      "review": "未確認",
+      "reason": "左の横長な突出、斜めの主塊、右下へ曲がる突出。",
+      "reviewOutcome": "user_reports_confirmed_in_screen; exact_groups_pending_import"
+    },
+    {
+      "figureId": "F4",
+      "groups": [
+        [
+          3,
+          5,
+          6
+        ],
+        [
+          1,
+          2,
+          4
+        ],
+        [
+          7
+        ]
+      ],
+      "review": "未確認",
+      "reason": "左上の五角形、斜めに伸びる胴、右の細い突出。",
+      "reviewOutcome": "user_reports_confirmed_in_screen; exact_groups_pending_import"
+    },
+    {
+      "figureId": "F5",
+      "groups": [
+        [
+          6,
+          7
+        ],
+        [
+          1,
+          2,
+          3
+        ],
+        [
+          4
+        ],
+        [
+          5
+        ]
+      ],
+      "review": "未確認",
+      "reason": "上の折れた部分、中央の五角形、下と右の三角の突出。4と5は点で触れるだけ。",
+      "reviewOutcome": "user_reports_confirmed_in_screen; exact_groups_pending_import"
+    },
+    {
+      "figureId": "F6",
+      "groups": [
+        [
+          1,
+          2,
+          3,
+          4
+        ],
+        [
+          5,
+          6,
+          7
+        ]
+      ],
+      "review": "未確認",
+      "reason": "広い上の塊と、細く曲がる下の部分。",
+      "status": "user_described_regions_with_coordinate_proposal",
+      "wholePieceGroupsStatus": "superseded_by_user_feedback",
+      "userFeedback": {
+        "text": "2が思っていた形と違った。おそらく3,1,2の半分で大きい三角形として認識すると思う",
+        "receivedDate": "2026-11-28",
+        "splitPiece": 2
+      },
+      "perceptualRegionsProposal": {
+        "text": "2が思っていた形と違った。おそらく3,1,2の半分で大きい三角形として認識すると思う",
+        "cut": {
+          "sourcePiece": 2,
+          "endpoints": [
+            [
+              90,
+              90
+            ],
+            [
+              180,
+              180
+            ]
+          ]
+        },
+        "regions": [
+          {
+            "id": "A",
+            "label": "1・3 ＋ 2の半分 → 大きな三角形",
+            "polygon": [
+              [
+                0,
+                0
+              ],
+              [
+                360,
+                0
+              ],
+              [
+                180,
+                180
+              ]
+            ],
+            "wholePieces": [
+              1,
+              3
+            ],
+            "partialPieces": [
+              {
+                "piece": 2,
+                "fraction": 0.5,
+                "polygon": [
+                  [
+                    90,
+                    90
+                  ],
+                  [
+                    180,
+                    0
+                  ],
+                  [
+                    180,
+                    180
+                  ]
+                ]
+              }
+            ]
+          }
+        ],
+        "remainderPolicy": "今回の発言で指定されていない残余は、承認済みの群として補完しない。",
+        "figureId": "F6",
+        "coordinateFrame": "figure_local_pixels",
+        "origin": [
+          220,
+          400
+        ],
+        "size": [
+          360,
+          360
+        ],
+        "coordinateProvenance": "ユーザーの形状記述を満たすように算出した座標。端点座標そのもののユーザー確認を意味しない。",
+        "receivedDate": "2026-11-28"
+      }
+    },
+    {
+      "figureId": "F7",
+      "groups": [
+        [
+          3
+        ],
+        [
+          1,
+          2
+        ],
+        [
+          4,
+          5,
+          6
+        ],
+        [
+          7
+        ]
+      ],
+      "review": "未確認",
+      "reason": "左の三角、中央の大三角、右上の折れた突出、右下の細い突出。",
+      "reviewOutcome": "user_reports_confirmed_in_screen; exact_groups_pending_import"
+    },
+    {
+      "figureId": "F8",
+      "groups": [
+        [
+          3
+        ],
+        [
+          1,
+          2
+        ],
+        [
+          4,
+          5,
+          6,
+          7
+        ]
+      ],
+      "review": "未確認",
+      "reason": "左の三角、中央の大三角、右上へ長く続く突出。",
+      "reviewOutcome": "user_reports_confirmed_in_screen; exact_groups_pending_import"
+    },
+    {
+      "figureId": "F9",
+      "groups": [
+        [
+          3,
+          7
+        ],
+        [
+          1,
+          2,
+          5
+        ],
+        [
+          4,
+          6
+        ]
+      ],
+      "review": "未確認",
+      "reason": "上端の台形、中央の大きな塊、下へ伸びる部分。",
+      "reviewOutcome": "user_reports_confirmed_in_screen; exact_groups_pending_import"
+    },
+    {
+      "figureId": "F10",
+      "groups": [
+        [
+          1,
+          2,
+          3,
+          5,
+          7
+        ],
+        [
+          4,
+          6
+        ]
+      ],
+      "review": "保留",
+      "reason": "上の広い塊をまとめ、下の突出を分ける。F9と同じ3群としても読める。",
+      "alternative": [
+        [
+          3,
+          7
+        ],
+        [
+          1,
+          2,
+          5
+        ],
+        [
+          4,
+          6
+        ]
+      ],
+      "reviewOutcome": "user_reports_confirmed_in_screen; exact_groups_pending_import"
+    },
+    {
+      "figureId": "F11",
+      "groups": [
+        [
+          1,
+          2,
+          4,
+          5
+        ],
+        [
+          3,
+          7
+        ],
+        [
+          6
+        ]
+      ],
+      "status": "user_described_regions_with_coordinate_proposal",
+      "note": "下側の大きな塊、左上へ伸びる部分、上の四角い突起。3を伸びた部分の根元に含めるかが曖昧。",
+      "alternatives": [
+        {
+          "groups": [
+            [
+              1,
+              2,
+              3,
+              4,
+              5
+            ],
+            [
+              7
+            ],
+            [
+              6
+            ]
+          ],
+          "note": "3を大きな塊へ含め、7だけを斜めの突起とする。"
+        }
+      ],
+      "wholePieceGroupsStatus": "superseded_by_user_feedback",
+      "userFeedback": {
+        "text": "3の半分で区切って下の大きな塊と上の飛び出してるやつで判定すると思う",
+        "receivedDate": "2026-11-28",
+        "splitPiece": 3
+      },
+      "perceptualRegionsProposal": {
+        "text": "3の半分で区切って下の大きな塊と上の飛び出してるやつで判定すると思う",
+        "cut": {
+          "sourcePiece": 3,
+          "endpoints": [
+            [
+              90,
+              180
+            ],
+            [
+              180,
+              180
+            ]
+          ]
+        },
+        "regions": [
+          {
+            "id": "A",
+            "label": "下の大きな塊 ＋ 3の下半分",
+            "polygon": [
+              [
+                90,
+                180
+              ],
+              [
+                360,
+                180
+              ],
+              [
+                180,
+                360
+              ],
+              [
+                0,
+                360
+              ],
+              [
+                0,
+                270
+              ]
+            ],
+            "wholePieces": [
+              1,
+              2,
+              4,
+              5
+            ],
+            "partialPieces": [
+              {
+                "piece": 3,
+                "fraction": 0.5,
+                "polygon": [
+                  [
+                    90,
+                    180
+                  ],
+                  [
+                    180,
+                    180
+                  ],
+                  [
+                    90,
+                    270
+                  ]
+                ]
+              }
+            ]
+          },
+          {
+            "id": "B",
+            "label": "上への張り出し ＋ 3の上半分",
+            "polygon": [
+              [
+                0,
+                0
+              ],
+              [
+                180,
+                180
+              ],
+              [
+                90,
+                180
+              ],
+              [
+                0,
+                90
+              ]
+            ],
+            "wholePieces": [
+              7
+            ],
+            "partialPieces": [
+              {
+                "piece": 3,
+                "fraction": 0.5,
+                "polygon": [
+                  [
+                    90,
+                    90
+                  ],
+                  [
+                    180,
+                    180
+                  ],
+                  [
+                    90,
+                    180
+                  ]
+                ]
+              }
+            ]
+          }
+        ],
+        "remainderPolicy": "6の所属は今回の発言から補完せず、確認画面の結果を引き継ぐ。",
+        "figureId": "F11",
+        "coordinateFrame": "figure_local_pixels",
+        "origin": [
+          220,
+          220
+        ],
+        "size": [
+          360,
+          360
+        ],
+        "coordinateProvenance": "ユーザーの形状記述を満たすように算出した座標。端点座標そのもののユーザー確認を意味しない。",
+        "receivedDate": "2026-11-28"
+      }
+    },
+    {
+      "figureId": "F12",
+      "groups": [
+        [
+          1,
+          2
+        ],
+        [
+          3,
+          4,
+          5,
+          7
+        ],
+        [
+          6
+        ]
+      ],
+      "status": "draft",
+      "note": "右の大きな三角形、左下の台形の塊、上の四角い突起。",
+      "alternatives": [],
+      "reviewOutcome": "user_reports_confirmed_in_screen; exact_groups_pending_import"
+    },
+    {
+      "figureId": "F13",
+      "groups": [
+        [
+          1,
+          2,
+          3
+        ],
+        [
+          4,
+          7
+        ],
+        [
+          5
+        ],
+        [
+          6
+        ]
+      ],
+      "status": "draft",
+      "note": "中央の五角形、上へ伸びる部分、右の三角形、下の四角形。右の小さな三角形を独立した部分として残す案。",
+      "alternatives": [
+        {
+          "groups": [
+            [
+              1,
+              2,
+              3,
+              5
+            ],
+            [
+              4,
+              7
+            ],
+            [
+              6
+            ]
+          ],
+          "note": "右の小さな三角形を中央の塊へ含め、3群とする。"
+        }
+      ],
+      "reviewOutcome": "user_reports_confirmed_in_screen; exact_groups_pending_import"
+    },
+    {
+      "figureId": "F14",
+      "groups": [
+        [
+          1,
+          2,
+          3,
+          5,
+          6
+        ],
+        [
+          4,
+          7
+        ]
+      ],
+      "status": "needs_review",
+      "note": "下の広い塊と上へ伸びる部分。下の塊は外形が一続きなので、右端の5と6もまとめる案。",
+      "alternatives": [
+        {
+          "groups": [
+            [
+              1,
+              2,
+              3
+            ],
+            [
+              4,
+              7
+            ],
+            [
+              5,
+              6
+            ]
+          ],
+          "note": "中央の五角形と右端の台形を分け、3群とする。"
+        }
+      ],
+      "reviewOutcome": "user_reports_confirmed_in_screen; exact_groups_pending_import"
+    },
+    {
+      "figureId": "F15",
+      "groups": [
+        [
+          1,
+          2
+        ],
+        [
+          3
+        ],
+        [
+          4,
+          5
+        ],
+        [
+          6,
+          7
+        ]
+      ],
+      "status": "needs_review",
+      "note": "中央の大きな三角形、右上の三角形、左上の三角形、左下へ伸びる部分。右上の3を中央と一体で見るかは要確認。",
+      "alternatives": [
+        {
+          "groups": [
+            [
+              1,
+              2,
+              3
+            ],
+            [
+              4,
+              5
+            ],
+            [
+              6,
+              7
+            ]
+          ],
+          "note": "右上の3を中央に含めて、3群とする。"
+        }
+      ],
+      "reviewOutcome": "user_reports_confirmed_in_screen; exact_groups_pending_import"
+    },
+    {
+      "figureId": "F16",
+      "groups": [
+        [
+          1,
+          3,
+          4,
+          5,
+          6
+        ],
+        [
+          2,
+          7
+        ]
+      ],
+      "status": "user_described_regions_with_coordinate_proposal",
+      "note": "左上の広い塊と右下へ伸びる部分。伸びた部分の根元を2まで含める境目は特に曖昧で、確認前の仮案。",
+      "alternatives": [
+        {
+          "groups": [
+            [
+              1,
+              2,
+              3,
+              4,
+              5,
+              6
+            ],
+            [
+              7
+            ]
+          ],
+          "note": "2は広い塊へ含め、7だけを先端とする。"
+        },
+        {
+          "groups": [
+            [
+              1,
+              2,
+              3,
+              4,
+              5,
+              6,
+              7
+            ]
+          ],
+          "note": "全体を一続きの塊として扱い、主要部分の分割を保留する。"
+        }
+      ],
+      "wholePieceGroupsStatus": "superseded_by_user_feedback",
+      "userFeedback": {
+        "text": "2の途中できれて大きな塊と下に伸びてるやつと認識すると思う",
+        "receivedDate": "2026-11-28",
+        "splitPiece": 2
+      },
+      "perceptualRegionsProposal": {
+        "text": "2の途中できれて大きな塊と下に伸びてるやつと認識すると思う",
+        "cut": {
+          "sourcePiece": 2,
+          "endpoints": [
+            [
+              180,
+              270
+            ],
+            [
+              270,
+              270
+            ]
+          ]
+        },
+        "regions": [
+          {
+            "id": "A",
+            "label": "大きな塊 ＋ 2の上側",
+            "polygon": [
+              [
+                0,
+                90
+              ],
+              [
+                90,
+                0
+              ],
+              [
+                270,
+                180
+              ],
+              [
+                270,
+                270
+              ],
+              [
+                0,
+                270
+              ]
+            ],
+            "wholePieces": [
+              1,
+              3,
+              4,
+              5,
+              6
+            ],
+            "partialPieces": [
+              {
+                "piece": 2,
+                "fraction": 0.75,
+                "polygon": [
+                  [
+                    90,
+                    180
+                  ],
+                  [
+                    270,
+                    180
+                  ],
+                  [
+                    270,
+                    270
+                  ],
+                  [
+                    180,
+                    270
+                  ]
+                ]
+              }
+            ]
+          },
+          {
+            "id": "B",
+            "label": "下に伸びる部分 ＋ 2の下側",
+            "polygon": [
+              [
+                180,
+                270
+              ],
+              [
+                270,
+                270
+              ],
+              [
+                360,
+                360
+              ],
+              [
+                360,
+                450
+              ]
+            ],
+            "wholePieces": [
+              7
+            ],
+            "partialPieces": [
+              {
+                "piece": 2,
+                "fraction": 0.25,
+                "polygon": [
+                  [
+                    180,
+                    270
+                  ],
+                  [
+                    270,
+                    270
+                  ],
+                  [
+                    270,
+                    360
+                  ]
+                ]
+              }
+            ]
+          }
+        ],
+        "positionNote": "切る向きは発言に含まれないため、大きな塊の下辺を延長する水平線を座標案とした。",
+        "alternativeCut": [
+          [
+            180,
+            270
+          ],
+          [
+            270,
+            180
+          ]
+        ],
+        "remainderPolicy": "この座標案では2領域で原形全体を覆う。",
+        "figureId": "F16",
+        "coordinateFrame": "figure_local_pixels",
+        "origin": [
+          310,
+          400
+        ],
+        "size": [
+          360,
+          450
+        ],
+        "coordinateProvenance": "ユーザーの形状記述を満たすように算出した座標。端点座標そのもののユーザー確認を意味しない。",
+        "receivedDate": "2026-11-28"
+      }
+    },
+    {
+      "figureId": "F17",
+      "groups": [
+        [
+          1,
+          2,
+          3
+        ],
+        [
+          4,
+          5,
+          6
+        ],
+        [
+          7
+        ]
+      ],
+      "status": "draft",
+      "note": "左側から下へ続く大きな台形の塊、右上の曲がった突起、右下へ伸びる部分。",
+      "alternatives": [],
+      "reviewOutcome": "user_reports_confirmed_in_screen; exact_groups_pending_import"
+    },
+    {
+      "figureId": "F18",
+      "groups": [
+        [
+          1,
+          2
+        ],
+        [
+          6
+        ],
+        [
+          5
+        ],
+        [
+          3,
+          4,
+          7
+        ]
+      ],
+      "status": "needs_review",
+      "note": "中央の大きな三角形、上の四角形、右上の小さな三角形、右下へ伸びる部分。右上の5を独立させるかが曖昧。",
+      "alternatives": [
+        {
+          "groups": [
+            [
+              1,
+              2,
+              5
+            ],
+            [
+              6
+            ],
+            [
+              3,
+              4,
+              7
+            ]
+          ],
+          "note": "右上の5を中央の塊へ含め、3群とする。"
+        }
+      ],
+      "reviewOutcome": "user_reports_confirmed_in_screen; exact_groups_pending_import"
+    },
+    {
+      "figureId": "F19",
+      "groups": [
+        [
+          1,
+          2,
+          3
+        ],
+        [
+          4,
+          6
+        ],
+        [
+          5,
+          7
+        ]
+      ],
+      "status": "user_described_regions_with_coordinate_proposal",
+      "note": "大きな中央の塊、上へ伸びる部分、右へ伸びる部分。左下の三角形を中央の一部とする粗い案。",
+      "alternatives": [
+        {
+          "groups": [
+            [
+              1,
+              2
+            ],
+            [
+              3
+            ],
+            [
+              4,
+              6
+            ],
+            [
+              5,
+              7
+            ]
+          ],
+          "note": "3を独立した三角形の突出として、4群に分ける。"
+        }
+      ],
+      "wholePieceGroupsStatus": "superseded_by_user_feedback",
+      "userFeedback": {
+        "text": "2の下部分だけ除いて123で大きな三角形として認識すると思う",
+        "receivedDate": "2026-11-28",
+        "splitPiece": 2
+      },
+      "perceptualRegionsProposal": {
+        "text": "2の下部分だけ除いて123で大きな三角形として認識すると思う",
+        "cut": {
+          "sourcePiece": 2,
+          "endpoints": [
+            [
+              180,
+              360
+            ],
+            [
+              270,
+              360
+            ]
+          ]
+        },
+        "regions": [
+          {
+            "id": "A",
+            "label": "1・3 ＋ 2の上側 → 大きな三角形",
+            "polygon": [
+              [
+                0,
+                360
+              ],
+              [
+                270,
+                90
+              ],
+              [
+                270,
+                360
+              ]
+            ],
+            "wholePieces": [
+              1,
+              3
+            ],
+            "partialPieces": [
+              {
+                "piece": 2,
+                "fraction": 0.75,
+                "polygon": [
+                  [
+                    90,
+                    270
+                  ],
+                  [
+                    270,
+                    270
+                  ],
+                  [
+                    270,
+                    360
+                  ],
+                  [
+                    180,
+                    360
+                  ]
+                ]
+              }
+            ]
+          }
+        ],
+        "excludedFragment": {
+          "sourcePiece": 2,
+          "polygon": [
+            [
+              180,
+              360
+            ],
+            [
+              270,
+              360
+            ],
+            [
+              270,
+              450
+            ]
+          ],
+          "area": 4050.0,
+          "fractionOfSourcePiece": 0.25,
+          "groupAssignment": "unconfirmed"
+        },
+        "geometryVerification": {
+          "mainOverlapByOriginalPiece": {
+            "1": 16200.0,
+            "2": 12150.0,
+            "3": 8100.0,
+            "4": 0.0,
+            "5": 0.0,
+            "6": 0.0,
+            "7": 0.0
+          },
+          "excludedOverlapByOriginalPiece": {
+            "1": 0,
+            "2": 4050.0,
+            "3": 0.0,
+            "4": 0,
+            "5": 0,
+            "6": 0,
+            "7": 0
+          },
+          "mainExcludedIntersectionArea": 0,
+          "wholeArea": 64800.0,
+          "mainPlusExcludedPlusUnchangedPiecesArea": 64800.0
+        },
+        "remainderPolicy": "4〜7の確認結果を変更しない。除いた断片の所属は今回の発言から補完しない。",
+        "figureId": "F19",
+        "coordinateFrame": "figure_local_pixels",
+        "origin": [
+          310,
+          310
+        ],
+        "size": [
+          450,
+          450
+        ],
+        "coordinateProvenance": "ユーザーの形状記述を満たすように算出した座標。端点座標そのもののユーザー確認を意味しない。",
+        "receivedDate": "2026-11-28"
+      }
+    },
+    {
+      "figureId": "F20",
+      "groups": [
+        [
+          1,
+          2,
+          3
+        ],
+        [
+          4,
+          6
+        ],
+        [
+          5,
+          7
+        ]
+      ],
+      "status": "user_described_regions_with_coordinate_proposal",
+      "note": "大きな中央の塊、上へ伸びる部分、右下へ伸びる部分。左の3を中央の一部とする粗い案。",
+      "alternatives": [
+        {
+          "groups": [
+            [
+              1,
+              2
+            ],
+            [
+              3
+            ],
+            [
+              4,
+              6
+            ],
+            [
+              5,
+              7
+            ]
+          ],
+          "note": "左の3を独立した三角形の突出として、4群に分ける。"
+        }
+      ],
+      "wholePieceGroupsStatus": "superseded_by_user_feedback",
+      "userFeedback": {
+        "text": "1の上だけ除いて123で大きな三角形として認識すると思う",
+        "receivedDate": "2026-11-28",
+        "splitPiece": 1
+      },
+      "perceptualRegionsProposal": {
+        "text": "1の上だけ除いて123で大きな三角形として認識すると思う",
+        "cut": {
+          "sourcePiece": 1,
+          "endpoints": [
+            [
+              180,
+              180
+            ],
+            [
+              270,
+              180
+            ]
+          ]
+        },
+        "regions": [
+          {
+            "id": "A",
+            "label": "2・3 ＋ 1の下側 → 大きな三角形",
+            "polygon": [
+              [
+                0,
+                180
+              ],
+              [
+                270,
+                180
+              ],
+              [
+                270,
+                450
+              ]
+            ],
+            "wholePieces": [
+              2,
+              3
+            ],
+            "partialPieces": [
+              {
+                "piece": 1,
+                "fraction": 0.75,
+                "polygon": [
+                  [
+                    90,
+                    270
+                  ],
+                  [
+                    180,
+                    180
+                  ],
+                  [
+                    270,
+                    180
+                  ],
+                  [
+                    270,
+                    270
+                  ]
+                ]
+              }
+            ]
+          }
+        ],
+        "excludedFragment": {
+          "sourcePiece": 1,
+          "polygon": [
+            [
+              180,
+              180
+            ],
+            [
+              270,
+              90
+            ],
+            [
+              270,
+              180
+            ]
+          ],
+          "area": 4050.0,
+          "fractionOfSourcePiece": 0.25,
+          "groupAssignment": "unconfirmed"
+        },
+        "geometryVerification": {
+          "mainOverlapByOriginalPiece": {
+            "1": 12150.0,
+            "2": 16200.0,
+            "3": 8100.0,
+            "4": 0.0,
+            "5": 0.0,
+            "6": 0,
+            "7": 0.0
+          },
+          "excludedOverlapByOriginalPiece": {
+            "1": 4050.0,
+            "2": 0,
+            "3": 0.0,
+            "4": 0.0,
+            "5": 0.0,
+            "6": 0.0,
+            "7": 0
+          },
+          "mainExcludedIntersectionArea": 0,
+          "wholeArea": 64800.0,
+          "mainPlusExcludedPlusUnchangedPiecesArea": 64800.0
+        },
+        "remainderPolicy": "4〜7の確認結果を変更しない。除いた断片の所属は今回の発言から補完しない。",
+        "figureId": "F20",
+        "coordinateFrame": "figure_local_pixels",
+        "origin": [
+          310,
+          310
+        ],
+        "size": [
+          450,
+          450
+        ],
+        "coordinateProvenance": "ユーザーの形状記述を満たすように算出した座標。端点座標そのもののユーザー確認を意味しない。",
+        "receivedDate": "2026-11-28"
+      }
+    },
+    {
+      "figureId": "F21",
+      "groups": [
+        [
+          1,
+          2,
+          4,
+          5,
+          7
+        ],
+        [
+          3
+        ],
+        [
+          6
+        ]
+      ],
+      "reason": "縦長の凸な台形を中心に、右上の三角形と右中段の正方形を突出部として分ける。",
+      "uncertainty": "上側を一つの頭部のように見るなら別の区切りもあり得る。",
+      "alternative": [
+        [
+          2,
+          3
+        ],
+        [
+          1,
+          4,
+          5,
+          7
+        ],
+        [
+          6
+        ]
+      ],
+      "groupShapes": [
+        "trapezoid",
+        "triangle",
+        "square"
+      ],
+      "reviewOutcome": "user_reports_confirmed_in_screen; exact_groups_pending_import"
+    },
+    {
+      "figureId": "F22",
+      "groups": [
+        [
+          1,
+          2,
+          4,
+          5,
+          7
+        ],
+        [
+          3
+        ],
+        [
+          6
+        ]
+      ],
+      "reason": "F21と共通する縦長の台形に、右上の三角形と左上の正方形が付いた構成として分ける。",
+      "uncertainty": "上側の三つを一続きの折れた突出部と見る余地がある。",
+      "alternative": [
+        [
+          2,
+          3,
+          6
+        ],
+        [
+          1,
+          4,
+          5,
+          7
+        ]
+      ],
+      "groupShapes": [
+        "trapezoid",
+        "triangle",
+        "square"
+      ],
+      "reviewOutcome": "user_reports_confirmed_in_screen; exact_groups_pending_import"
+    },
+    {
+      "figureId": "F23",
+      "groups": [
+        [
+          1,
+          2
+        ],
+        [
+          3
+        ],
+        [
+          4,
+          5,
+          6
+        ],
+        [
+          7
+        ]
+      ],
+      "reason": "中央の平行四辺形、左の三角形、上の曲がった突出部、右下の細い突出部に分ける。",
+      "uncertainty": "左の三角形を中央の胴体にまとめるかは曖昧。",
+      "alternative": [
+        [
+          1,
+          2,
+          3
+        ],
+        [
+          4,
+          5,
+          6
+        ],
+        [
+          7
+        ]
+      ],
+      "groupShapes": [
+        "parallelogram",
+        "triangle",
+        "hexagon",
+        "parallelogram"
+      ],
+      "reviewOutcome": "user_reports_confirmed_in_screen; exact_groups_pending_import"
+    },
+    {
+      "figureId": "F24",
+      "groups": [
+        [
+          1,
+          2
+        ],
+        [
+          3,
+          4,
+          5,
+          7
+        ],
+        [
+          6
+        ]
+      ],
+      "reason": "上側の大きな三角形、左下の縦長の台形、右下の正方形に分ける。",
+      "groupShapes": [
+        "triangle",
+        "trapezoid",
+        "square"
+      ],
+      "reviewOutcome": "user_reports_confirmed_in_screen; exact_groups_pending_import"
+    },
+    {
+      "figureId": "F25",
+      "groups": [
+        [
+          1,
+          2,
+          3
+        ],
+        [
+          4,
+          5
+        ],
+        [
+          6,
+          7
+        ]
+      ],
+      "reason": "中央の五角形、右の正方形、左下の曲がった突出部に分ける。F1と同程度の粗さ。",
+      "groupShapes": [
+        "pentagon",
+        "square",
+        "hexagon"
+      ],
+      "reviewOutcome": "user_reports_confirmed_in_screen; exact_groups_pending_import"
+    },
+    {
+      "figureId": "F26",
+      "groups": [
+        [
+          1,
+          2,
+          3
+        ],
+        [
+          4,
+          5
+        ],
+        [
+          6
+        ],
+        [
+          7
+        ]
+      ],
+      "reason": "中央の五角形を一つにまとめ、右の正方形・下の正方形・左上の細い突出部を分ける。",
+      "groupShapes": [
+        "pentagon",
+        "square",
+        "square",
+        "parallelogram"
+      ],
+      "reviewOutcome": "user_reports_confirmed_in_screen; exact_groups_pending_import"
+    },
+    {
+      "figureId": "F27",
+      "groups": [
+        [
+          1,
+          2,
+          7
+        ],
+        [
+          3,
+          4,
+          6
+        ],
+        [
+          5
+        ]
+      ],
+      "reason": "右側の大きなまとまり、左側の縦長のまとまり、下向きの小さな三角形に分ける。",
+      "uncertainty": "右端の切れ込みを強く見ると7を独立した突出部に分けた方が自然な可能性がある。",
+      "alternative": [
+        [
+          1,
+          2
+        ],
+        [
+          7
+        ],
+        [
+          3,
+          4,
+          6
+        ],
+        [
+          5
+        ]
+      ],
+      "groupShapes": [
+        "hexagon",
+        "polygon",
+        "triangle"
+      ],
+      "reviewOutcome": "user_reports_confirmed_in_screen; exact_groups_pending_import"
+    },
+    {
+      "figureId": "F28",
+      "groups": [
+        [
+          1,
+          2
+        ],
+        [
+          3,
+          4,
+          5,
+          7
+        ],
+        [
+          6
+        ]
+      ],
+      "reason": "上の大きな三角形、下の横長の台形、下向きの正方形に分ける。",
+      "groupShapes": [
+        "triangle",
+        "trapezoid",
+        "square"
+      ],
+      "reviewOutcome": "user_reports_confirmed_in_screen; exact_groups_pending_import"
+    },
+    {
+      "figureId": "F29",
+      "groups": [
+        [
+          1,
+          2
+        ],
+        [
+          4,
+          6
+        ],
+        [
+          7
+        ],
+        [
+          3,
+          5
+        ]
+      ],
+      "reason": "中央の下向き三角形、上の台形、左上の細い突出部、右下の折れた突出部に分ける。",
+      "uncertainty": "右下を中央とまとめて一つの大きな塊と捉える余地がある。",
+      "alternative": [
+        [
+          1,
+          2,
+          3,
+          5
+        ],
+        [
+          4,
+          6
+        ],
+        [
+          7
+        ]
+      ],
+      "groupShapes": [
+        "triangle",
+        "trapezoid",
+        "parallelogram",
+        "pentagon"
+      ],
+      "reviewOutcome": "user_reports_confirmed_in_screen; exact_groups_pending_import"
+    },
+    {
+      "figureId": "F30",
+      "groups": [
+        [
+          1,
+          2,
+          5
+        ],
+        [
+          6,
+          7
+        ],
+        [
+          3
+        ],
+        [
+          4
+        ]
+      ],
+      "reason": "斜めの太い部分、右上の曲がった先端、左下の二つの三角形に分ける。",
+      "uncertainty": "下端の三角形まで本体に含める読みもある。3と4は点でしか触れず、二つだけを一群にはしない。",
+      "alternative": [
+        [
+          1,
+          2,
+          3,
+          4,
+          5
+        ],
+        [
+          6,
+          7
+        ]
+      ],
+      "groupShapes": [
+        "pentagon",
+        "hexagon",
+        "triangle",
+        "triangle"
+      ],
+      "status": "user_described_regions_with_coordinate_proposal",
+      "wholePieceGroupsStatus": "superseded_by_user_feedback",
+      "userFeedback": {
+        "text": "1の下の部分除いて125で三角形に長方形がついた図形で413で三角形として認識すると思う",
+        "receivedDate": "2026-11-28",
+        "splitPiece": 1
+      },
+      "perceptualRegionsProposal": {
+        "text": "1の下の部分除いて125で三角形に長方形がついた図形で413で三角形として認識すると思う",
+        "cut": {
+          "sourcePiece": 1,
+          "endpoints": [
+            [
+              90,
+              360
+            ],
+            [
+              180,
+              360
+            ]
+          ]
+        },
+        "regions": [
+          {
+            "id": "A",
+            "label": "1の上側・2・5 → 三角形 ＋ 長方形",
+            "wholePieces": [
+              2,
+              5
+            ],
+            "partialPieces": [
+              {
+                "piece": 1,
+                "polygon": [
+                  [
+                    90,
+                    270
+                  ],
+                  [
+                    270,
+                    270
+                  ],
+                  [
+                    180,
+                    360
+                  ],
+                  [
+                    90,
+                    360
+                  ]
+                ]
+              }
+            ],
+            "polygon": [
+              [
+                90,
+                270
+              ],
+              [
+                270,
+                90
+              ],
+              [
+                270,
+                360
+              ],
+              [
+                90,
+                360
+              ]
+            ],
+            "substructure": [
+              {
+                "label": "三角形",
+                "polygon": [
+                  [
+                    90,
+                    270
+                  ],
+                  [
+                    270,
+                    90
+                  ],
+                  [
+                    270,
+                    270
+                  ]
+                ]
+              },
+              {
+                "label": "長方形",
+                "polygon": [
+                  [
+                    90,
+                    270
+                  ],
+                  [
+                    270,
+                    270
+                  ],
+                  [
+                    270,
+                    360
+                  ],
+                  [
+                    90,
+                    360
+                  ]
+                ]
+              }
+            ]
+          },
+          {
+            "id": "B",
+            "label": "4・1の下側・3 → 大きな三角形",
+            "wholePieces": [
+              4,
+              3
+            ],
+            "partialPieces": [
+              {
+                "piece": 1,
+                "polygon": [
+                  [
+                    90,
+                    360
+                  ],
+                  [
+                    180,
+                    360
+                  ],
+                  [
+                    90,
+                    450
+                  ]
+                ]
+              }
+            ],
+            "polygon": [
+              [
+                0,
+                360
+              ],
+              [
+                180,
+                360
+              ],
+              [
+                180,
+                540
+              ]
+            ]
+          }
+        ],
+        "geometryVerification": {
+          "originalArea": 64800.0,
+          "regionAreas": [
+            32400.0,
+            16200.0,
+            16200.0
+          ],
+          "piece1OriginalArea": 16200.0,
+          "piece1UpperArea": 12150.0,
+          "piece1LowerArea": 4050.0,
+          "bodyTriangleArea": 16200.0,
+          "bodyRectangleArea": 16200.0,
+          "validationMethod": "shoelace area plus direct polygon boundaries; no Boolean geometry library used"
+        },
+        "remainderPolicy": "6・7の確認結果は変更しない。",
+        "figureId": "F30",
+        "coordinateFrame": "figure_local_pixels",
+        "origin": [
+          310,
+          130
+        ],
+        "size": [
+          450,
+          540
+        ],
+        "coordinateProvenance": "ユーザーの形状記述を満たすように算出した座標。端点座標そのもののユーザー確認を意味しない。",
+        "receivedDate": "2026-11-28"
+      }
+    }
+  ],
+  "representationRequirement": "primary regions may cut through original pieces; original piece boundaries do not constrain perceptual regions",
+  "reviewResultTransfer": {
+    "userStatement": "他は確認して次押した通りです",
+    "status": "prior_screen_results_not_received; user_requested_full_second_review",
+    "reason": "The review screen keeps edits and confirmation state in its local JavaScript state; it has no automatic transfer to the conversation.",
+    "affectedFigureIds": [
+      "F1",
+      "F2",
+      "F3",
+      "F4",
+      "F5",
+      "F7",
+      "F8",
+      "F9",
+      "F10",
+      "F12",
+      "F13",
+      "F14",
+      "F15",
+      "F17",
+      "F18",
+      "F21",
+      "F22",
+      "F23",
+      "F24",
+      "F25",
+      "F26",
+      "F27",
+      "F28",
+      "F29"
+    ],
+    "doNotInfer": "Do not substitute the initial proposals for the user-edited review results.",
+    "supersededByRound": 2,
+    "separateImportRequired": false
+  },
+  "currentReview": {
+    "reviewId": "tangram-expression-review-20261128",
+    "proposalFile": "region-expression-editor-data.json",
+    "dataSha256": "377d9eb85a53790c5b6c8429618be42b1af9f1e814188ba7142c0ce3ff15cde5",
+    "inputMethod": "plus joins atoms, slash separates groups",
+    "supersedes": "round2 note-only interface",
+    "userRequest": "前の選択が反映されていない。前の + / で区切る入力がよい。",
+    "previousSelectionStatus": "not_received; import original review export without guessing",
+    "importPolicy": "preserve 24 figures and confirmation status; update six explicitly corrected regions and retain original remainder groups; retain raw imported text",
+    "splitTokens": "a and b identify the two fragments of the cut source piece"
+  }
+}

@@ -1,0 +1,2215 @@
+{
+  "schemaVersion": "perceptual_regions_independent_validation_v1",
+  "status": "pass",
+  "sourceFile": "all-regions-review-v2.json",
+  "sourceSha256": "97f1fc831d923fc43bf0249adc5add519ca3c08873004e3dd118084134e0281a",
+  "originalCatalogSha256": "57b410db7e62aa7c7d083f4744c1b230a731f199b0bd6f385173a1b88d83f826",
+  "method": "Exact rational polygon areas; independently implemented ear-clipping triangulation and convex triangle intersections. Runtime geometry functions were not used.",
+  "approvalPolicy": "Geometry validation only. Every figure and region remains unreviewed.",
+  "figureCount": 30,
+  "regionCount": 96,
+  "cutFigureIds": [
+    "F6",
+    "F11",
+    "F16",
+    "F19",
+    "F20",
+    "F30"
+  ],
+  "results": [
+    {
+      "figureId": "F1",
+      "status": "geometry_valid_not_user_approval",
+      "originalArea": 64800,
+      "regionsCombinedArea": 64800,
+      "sourcePiecesUnchanged": true,
+      "areaOutsideOriginal": 0,
+      "uncoveredOriginalArea": 0,
+      "symmetricDifferenceArea": 0,
+      "regionPairOverlapAreas": {
+        "A/B": 0,
+        "A/C": 0,
+        "B/C": 0
+      },
+      "regions": [
+        {
+          "id": "A",
+          "area": 8100,
+          "originalPieceOverlapAreas": {
+            "1": 0,
+            "2": 0,
+            "3": 0,
+            "4": 4050,
+            "5": 4050,
+            "6": 0,
+            "7": 0
+          },
+          "areaOutsideOriginal": 0,
+          "pieceMetadataMatchesGeometry": true,
+          "reviewStatus": "未確認"
+        },
+        {
+          "id": "B",
+          "area": 40500,
+          "originalPieceOverlapAreas": {
+            "1": 16200,
+            "2": 16200,
+            "3": 8100,
+            "4": 0,
+            "5": 0,
+            "6": 0,
+            "7": 0
+          },
+          "areaOutsideOriginal": 0,
+          "pieceMetadataMatchesGeometry": true,
+          "reviewStatus": "未確認"
+        },
+        {
+          "id": "C",
+          "area": 16200,
+          "originalPieceOverlapAreas": {
+            "1": 0,
+            "2": 0,
+            "3": 0,
+            "4": 0,
+            "5": 0,
+            "6": 8100,
+            "7": 8100
+          },
+          "areaOutsideOriginal": 0,
+          "pieceMetadataMatchesGeometry": true,
+          "reviewStatus": "未確認"
+        }
+      ],
+      "cut": null
+    },
+    {
+      "figureId": "F2",
+      "status": "geometry_valid_not_user_approval",
+      "originalArea": 64800,
+      "regionsCombinedArea": 64800,
+      "sourcePiecesUnchanged": true,
+      "areaOutsideOriginal": 0,
+      "uncoveredOriginalArea": 0,
+      "symmetricDifferenceArea": 0,
+      "regionPairOverlapAreas": {
+        "A/B": 0,
+        "A/C": 0,
+        "B/C": 0
+      },
+      "regions": [
+        {
+          "id": "A",
+          "area": 24300,
+          "originalPieceOverlapAreas": {
+            "1": 16200,
+            "2": 0,
+            "3": 0,
+            "4": 0,
+            "5": 0,
+            "6": 8100,
+            "7": 0
+          },
+          "areaOutsideOriginal": 0,
+          "pieceMetadataMatchesGeometry": true,
+          "reviewStatus": "未確認"
+        },
+        {
+          "id": "B",
+          "area": 32400,
+          "originalPieceOverlapAreas": {
+            "1": 0,
+            "2": 16200,
+            "3": 8100,
+            "4": 4050,
+            "5": 4050,
+            "6": 0,
+            "7": 0
+          },
+          "areaOutsideOriginal": 0,
+          "pieceMetadataMatchesGeometry": true,
+          "reviewStatus": "未確認"
+        },
+        {
+          "id": "C",
+          "area": 8100,
+          "originalPieceOverlapAreas": {
+            "1": 0,
+            "2": 0,
+            "3": 0,
+            "4": 0,
+            "5": 0,
+            "6": 0,
+            "7": 8100
+          },
+          "areaOutsideOriginal": 0,
+          "pieceMetadataMatchesGeometry": true,
+          "reviewStatus": "未確認"
+        }
+      ],
+      "cut": null
+    },
+    {
+      "figureId": "F3",
+      "status": "geometry_valid_not_user_approval",
+      "originalArea": 64800,
+      "regionsCombinedArea": 64800,
+      "sourcePiecesUnchanged": true,
+      "areaOutsideOriginal": 0,
+      "uncoveredOriginalArea": 0,
+      "symmetricDifferenceArea": 0,
+      "regionPairOverlapAreas": {
+        "A/B": 0,
+        "A/C": 0,
+        "B/C": 0
+      },
+      "regions": [
+        {
+          "id": "A",
+          "area": 12150,
+          "originalPieceOverlapAreas": {
+            "1": 0,
+            "2": 0,
+            "3": 0,
+            "4": 4050,
+            "5": 0,
+            "6": 8100,
+            "7": 0
+          },
+          "areaOutsideOriginal": 0,
+          "pieceMetadataMatchesGeometry": true,
+          "reviewStatus": "未確認"
+        },
+        {
+          "id": "B",
+          "area": 40500,
+          "originalPieceOverlapAreas": {
+            "1": 16200,
+            "2": 16200,
+            "3": 8100,
+            "4": 0,
+            "5": 0,
+            "6": 0,
+            "7": 0
+          },
+          "areaOutsideOriginal": 0,
+          "pieceMetadataMatchesGeometry": true,
+          "reviewStatus": "未確認"
+        },
+        {
+          "id": "C",
+          "area": 12150,
+          "originalPieceOverlapAreas": {
+            "1": 0,
+            "2": 0,
+            "3": 0,
+            "4": 0,
+            "5": 4050,
+            "6": 0,
+            "7": 8100
+          },
+          "areaOutsideOriginal": 0,
+          "pieceMetadataMatchesGeometry": true,
+          "reviewStatus": "未確認"
+        }
+      ],
+      "cut": null
+    },
+    {
+      "figureId": "F4",
+      "status": "geometry_valid_not_user_approval",
+      "originalArea": 64800,
+      "regionsCombinedArea": 64800,
+      "sourcePiecesUnchanged": true,
+      "areaOutsideOriginal": 0,
+      "uncoveredOriginalArea": 0,
+      "symmetricDifferenceArea": 0,
+      "regionPairOverlapAreas": {
+        "A/B": 0,
+        "A/C": 0,
+        "B/C": 0
+      },
+      "regions": [
+        {
+          "id": "A",
+          "area": 20250,
+          "originalPieceOverlapAreas": {
+            "1": 0,
+            "2": 0,
+            "3": 8100,
+            "4": 0,
+            "5": 4050,
+            "6": 8100,
+            "7": 0
+          },
+          "areaOutsideOriginal": 0,
+          "pieceMetadataMatchesGeometry": true,
+          "reviewStatus": "未確認"
+        },
+        {
+          "id": "B",
+          "area": 36450,
+          "originalPieceOverlapAreas": {
+            "1": 16200,
+            "2": 16200,
+            "3": 0,
+            "4": 4050,
+            "5": 0,
+            "6": 0,
+            "7": 0
+          },
+          "areaOutsideOriginal": 0,
+          "pieceMetadataMatchesGeometry": true,
+          "reviewStatus": "未確認"
+        },
+        {
+          "id": "C",
+          "area": 8100,
+          "originalPieceOverlapAreas": {
+            "1": 0,
+            "2": 0,
+            "3": 0,
+            "4": 0,
+            "5": 0,
+            "6": 0,
+            "7": 8100
+          },
+          "areaOutsideOriginal": 0,
+          "pieceMetadataMatchesGeometry": true,
+          "reviewStatus": "未確認"
+        }
+      ],
+      "cut": null
+    },
+    {
+      "figureId": "F5",
+      "status": "geometry_valid_not_user_approval",
+      "originalArea": 64800,
+      "regionsCombinedArea": 64800,
+      "sourcePiecesUnchanged": true,
+      "areaOutsideOriginal": 0,
+      "uncoveredOriginalArea": 0,
+      "symmetricDifferenceArea": 0,
+      "regionPairOverlapAreas": {
+        "A/B": 0,
+        "A/C": 0,
+        "A/D": 0,
+        "B/C": 0,
+        "B/D": 0,
+        "C/D": 0
+      },
+      "regions": [
+        {
+          "id": "A",
+          "area": 16200,
+          "originalPieceOverlapAreas": {
+            "1": 0,
+            "2": 0,
+            "3": 0,
+            "4": 0,
+            "5": 0,
+            "6": 8100,
+            "7": 8100
+          },
+          "areaOutsideOriginal": 0,
+          "pieceMetadataMatchesGeometry": true,
+          "reviewStatus": "未確認"
+        },
+        {
+          "id": "B",
+          "area": 40500,
+          "originalPieceOverlapAreas": {
+            "1": 16200,
+            "2": 16200,
+            "3": 8100,
+            "4": 0,
+            "5": 0,
+            "6": 0,
+            "7": 0
+          },
+          "areaOutsideOriginal": 0,
+          "pieceMetadataMatchesGeometry": true,
+          "reviewStatus": "未確認"
+        },
+        {
+          "id": "C",
+          "area": 4050,
+          "originalPieceOverlapAreas": {
+            "1": 0,
+            "2": 0,
+            "3": 0,
+            "4": 4050,
+            "5": 0,
+            "6": 0,
+            "7": 0
+          },
+          "areaOutsideOriginal": 0,
+          "pieceMetadataMatchesGeometry": true,
+          "reviewStatus": "未確認"
+        },
+        {
+          "id": "D",
+          "area": 4050,
+          "originalPieceOverlapAreas": {
+            "1": 0,
+            "2": 0,
+            "3": 0,
+            "4": 0,
+            "5": 4050,
+            "6": 0,
+            "7": 0
+          },
+          "areaOutsideOriginal": 0,
+          "pieceMetadataMatchesGeometry": true,
+          "reviewStatus": "未確認"
+        }
+      ],
+      "cut": null
+    },
+    {
+      "figureId": "F6",
+      "status": "geometry_valid_not_user_approval",
+      "originalArea": 64800,
+      "regionsCombinedArea": 64800,
+      "sourcePiecesUnchanged": true,
+      "areaOutsideOriginal": 0,
+      "uncoveredOriginalArea": 0,
+      "symmetricDifferenceArea": 0,
+      "regionPairOverlapAreas": {
+        "A/B": 0,
+        "A/C": 0,
+        "B/C": 0
+      },
+      "regions": [
+        {
+          "id": "A",
+          "area": 32400,
+          "originalPieceOverlapAreas": {
+            "1": 16200,
+            "2": 8100,
+            "3": 8100,
+            "4": 0,
+            "5": 0,
+            "6": 0,
+            "7": 0
+          },
+          "areaOutsideOriginal": 0,
+          "pieceMetadataMatchesGeometry": true,
+          "reviewStatus": "未確認"
+        },
+        {
+          "id": "B",
+          "area": 12150,
+          "originalPieceOverlapAreas": {
+            "1": 0,
+            "2": 8100,
+            "3": 0,
+            "4": 4050,
+            "5": 0,
+            "6": 0,
+            "7": 0
+          },
+          "areaOutsideOriginal": 0,
+          "pieceMetadataMatchesGeometry": true,
+          "reviewStatus": "未確認"
+        },
+        {
+          "id": "C",
+          "area": 20250,
+          "originalPieceOverlapAreas": {
+            "1": 0,
+            "2": 0,
+            "3": 0,
+            "4": 0,
+            "5": 4050,
+            "6": 8100,
+            "7": 8100
+          },
+          "areaOutsideOriginal": 0,
+          "pieceMetadataMatchesGeometry": true,
+          "reviewStatus": "未確認"
+        }
+      ],
+      "cut": {
+        "sourcePiece": 2,
+        "endpoints": [
+          [
+            90,
+            90
+          ],
+          [
+            180,
+            180
+          ]
+        ],
+        "fragmentAreas": {
+          "A": 8100,
+          "B": 8100
+        }
+      }
+    },
+    {
+      "figureId": "F7",
+      "status": "geometry_valid_not_user_approval",
+      "originalArea": 64800,
+      "regionsCombinedArea": 64800,
+      "sourcePiecesUnchanged": true,
+      "areaOutsideOriginal": 0,
+      "uncoveredOriginalArea": 0,
+      "symmetricDifferenceArea": 0,
+      "regionPairOverlapAreas": {
+        "A/B": 0,
+        "A/C": 0,
+        "A/D": 0,
+        "B/C": 0,
+        "B/D": 0,
+        "C/D": 0
+      },
+      "regions": [
+        {
+          "id": "A",
+          "area": 8100,
+          "originalPieceOverlapAreas": {
+            "1": 0,
+            "2": 0,
+            "3": 8100,
+            "4": 0,
+            "5": 0,
+            "6": 0,
+            "7": 0
+          },
+          "areaOutsideOriginal": 0,
+          "pieceMetadataMatchesGeometry": true,
+          "reviewStatus": "未確認"
+        },
+        {
+          "id": "B",
+          "area": 32400,
+          "originalPieceOverlapAreas": {
+            "1": 16200,
+            "2": 16200,
+            "3": 0,
+            "4": 0,
+            "5": 0,
+            "6": 0,
+            "7": 0
+          },
+          "areaOutsideOriginal": 0,
+          "pieceMetadataMatchesGeometry": true,
+          "reviewStatus": "未確認"
+        },
+        {
+          "id": "C",
+          "area": 16200,
+          "originalPieceOverlapAreas": {
+            "1": 0,
+            "2": 0,
+            "3": 0,
+            "4": 4050,
+            "5": 4050,
+            "6": 8100,
+            "7": 0
+          },
+          "areaOutsideOriginal": 0,
+          "pieceMetadataMatchesGeometry": true,
+          "reviewStatus": "未確認"
+        },
+        {
+          "id": "D",
+          "area": 8100,
+          "originalPieceOverlapAreas": {
+            "1": 0,
+            "2": 0,
+            "3": 0,
+            "4": 0,
+            "5": 0,
+            "6": 0,
+            "7": 8100
+          },
+          "areaOutsideOriginal": 0,
+          "pieceMetadataMatchesGeometry": true,
+          "reviewStatus": "未確認"
+        }
+      ],
+      "cut": null
+    },
+    {
+      "figureId": "F8",
+      "status": "geometry_valid_not_user_approval",
+      "originalArea": 64800,
+      "regionsCombinedArea": 64800,
+      "sourcePiecesUnchanged": true,
+      "areaOutsideOriginal": 0,
+      "uncoveredOriginalArea": 0,
+      "symmetricDifferenceArea": 0,
+      "regionPairOverlapAreas": {
+        "A/B": 0,
+        "A/C": 0,
+        "B/C": 0
+      },
+      "regions": [
+        {
+          "id": "A",
+          "area": 8100,
+          "originalPieceOverlapAreas": {
+            "1": 0,
+            "2": 0,
+            "3": 8100,
+            "4": 0,
+            "5": 0,
+            "6": 0,
+            "7": 0
+          },
+          "areaOutsideOriginal": 0,
+          "pieceMetadataMatchesGeometry": true,
+          "reviewStatus": "未確認"
+        },
+        {
+          "id": "B",
+          "area": 32400,
+          "originalPieceOverlapAreas": {
+            "1": 16200,
+            "2": 16200,
+            "3": 0,
+            "4": 0,
+            "5": 0,
+            "6": 0,
+            "7": 0
+          },
+          "areaOutsideOriginal": 0,
+          "pieceMetadataMatchesGeometry": true,
+          "reviewStatus": "未確認"
+        },
+        {
+          "id": "C",
+          "area": 24300,
+          "originalPieceOverlapAreas": {
+            "1": 0,
+            "2": 0,
+            "3": 0,
+            "4": 4050,
+            "5": 4050,
+            "6": 8100,
+            "7": 8100
+          },
+          "areaOutsideOriginal": 0,
+          "pieceMetadataMatchesGeometry": true,
+          "reviewStatus": "未確認"
+        }
+      ],
+      "cut": null
+    },
+    {
+      "figureId": "F9",
+      "status": "geometry_valid_not_user_approval",
+      "originalArea": 64800,
+      "regionsCombinedArea": 64800,
+      "sourcePiecesUnchanged": true,
+      "areaOutsideOriginal": 0,
+      "uncoveredOriginalArea": 0,
+      "symmetricDifferenceArea": 0,
+      "regionPairOverlapAreas": {
+        "A/B": 0,
+        "A/C": 0,
+        "B/C": 0
+      },
+      "regions": [
+        {
+          "id": "A",
+          "area": 16200,
+          "originalPieceOverlapAreas": {
+            "1": 0,
+            "2": 0,
+            "3": 8100,
+            "4": 0,
+            "5": 0,
+            "6": 0,
+            "7": 8100
+          },
+          "areaOutsideOriginal": 0,
+          "pieceMetadataMatchesGeometry": true,
+          "reviewStatus": "未確認"
+        },
+        {
+          "id": "B",
+          "area": 36450,
+          "originalPieceOverlapAreas": {
+            "1": 16200,
+            "2": 16200,
+            "3": 0,
+            "4": 0,
+            "5": 4050,
+            "6": 0,
+            "7": 0
+          },
+          "areaOutsideOriginal": 0,
+          "pieceMetadataMatchesGeometry": true,
+          "reviewStatus": "未確認"
+        },
+        {
+          "id": "C",
+          "area": 12150,
+          "originalPieceOverlapAreas": {
+            "1": 0,
+            "2": 0,
+            "3": 0,
+            "4": 4050,
+            "5": 0,
+            "6": 8100,
+            "7": 0
+          },
+          "areaOutsideOriginal": 0,
+          "pieceMetadataMatchesGeometry": true,
+          "reviewStatus": "未確認"
+        }
+      ],
+      "cut": null
+    },
+    {
+      "figureId": "F10",
+      "status": "geometry_valid_not_user_approval",
+      "originalArea": 64800,
+      "regionsCombinedArea": 64800,
+      "sourcePiecesUnchanged": true,
+      "areaOutsideOriginal": 0,
+      "uncoveredOriginalArea": 0,
+      "symmetricDifferenceArea": 0,
+      "regionPairOverlapAreas": {
+        "A/B": 0
+      },
+      "regions": [
+        {
+          "id": "A",
+          "area": 52650,
+          "originalPieceOverlapAreas": {
+            "1": 16200,
+            "2": 16200,
+            "3": 8100,
+            "4": 0,
+            "5": 4050,
+            "6": 0,
+            "7": 8100
+          },
+          "areaOutsideOriginal": 0,
+          "pieceMetadataMatchesGeometry": true,
+          "reviewStatus": "未確認"
+        },
+        {
+          "id": "B",
+          "area": 12150,
+          "originalPieceOverlapAreas": {
+            "1": 0,
+            "2": 0,
+            "3": 0,
+            "4": 4050,
+            "5": 0,
+            "6": 8100,
+            "7": 0
+          },
+          "areaOutsideOriginal": 0,
+          "pieceMetadataMatchesGeometry": true,
+          "reviewStatus": "未確認"
+        }
+      ],
+      "cut": null
+    },
+    {
+      "figureId": "F11",
+      "status": "geometry_valid_not_user_approval",
+      "originalArea": 64800,
+      "regionsCombinedArea": 64800,
+      "sourcePiecesUnchanged": true,
+      "areaOutsideOriginal": 0,
+      "uncoveredOriginalArea": 0,
+      "symmetricDifferenceArea": 0,
+      "regionPairOverlapAreas": {
+        "A/B": 0,
+        "A/C": 0,
+        "B/C": 0
+      },
+      "regions": [
+        {
+          "id": "A",
+          "area": 44550,
+          "originalPieceOverlapAreas": {
+            "1": 16200,
+            "2": 16200,
+            "3": 4050,
+            "4": 4050,
+            "5": 4050,
+            "6": 0,
+            "7": 0
+          },
+          "areaOutsideOriginal": 0,
+          "pieceMetadataMatchesGeometry": true,
+          "reviewStatus": "未確認"
+        },
+        {
+          "id": "B",
+          "area": 12150,
+          "originalPieceOverlapAreas": {
+            "1": 0,
+            "2": 0,
+            "3": 4050,
+            "4": 0,
+            "5": 0,
+            "6": 0,
+            "7": 8100
+          },
+          "areaOutsideOriginal": 0,
+          "pieceMetadataMatchesGeometry": true,
+          "reviewStatus": "未確認"
+        },
+        {
+          "id": "C",
+          "area": 8100,
+          "originalPieceOverlapAreas": {
+            "1": 0,
+            "2": 0,
+            "3": 0,
+            "4": 0,
+            "5": 0,
+            "6": 8100,
+            "7": 0
+          },
+          "areaOutsideOriginal": 0,
+          "pieceMetadataMatchesGeometry": true,
+          "reviewStatus": "未確認"
+        }
+      ],
+      "cut": {
+        "sourcePiece": 3,
+        "endpoints": [
+          [
+            90,
+            180
+          ],
+          [
+            180,
+            180
+          ]
+        ],
+        "fragmentAreas": {
+          "A": 4050,
+          "B": 4050
+        }
+      }
+    },
+    {
+      "figureId": "F12",
+      "status": "geometry_valid_not_user_approval",
+      "originalArea": 64800,
+      "regionsCombinedArea": 64800,
+      "sourcePiecesUnchanged": true,
+      "areaOutsideOriginal": 0,
+      "uncoveredOriginalArea": 0,
+      "symmetricDifferenceArea": 0,
+      "regionPairOverlapAreas": {
+        "A/B": 0,
+        "A/C": 0,
+        "B/C": 0
+      },
+      "regions": [
+        {
+          "id": "A",
+          "area": 32400,
+          "originalPieceOverlapAreas": {
+            "1": 16200,
+            "2": 16200,
+            "3": 0,
+            "4": 0,
+            "5": 0,
+            "6": 0,
+            "7": 0
+          },
+          "areaOutsideOriginal": 0,
+          "pieceMetadataMatchesGeometry": true,
+          "reviewStatus": "未確認"
+        },
+        {
+          "id": "B",
+          "area": 24300,
+          "originalPieceOverlapAreas": {
+            "1": 0,
+            "2": 0,
+            "3": 8100,
+            "4": 4050,
+            "5": 4050,
+            "6": 0,
+            "7": 8100
+          },
+          "areaOutsideOriginal": 0,
+          "pieceMetadataMatchesGeometry": true,
+          "reviewStatus": "未確認"
+        },
+        {
+          "id": "C",
+          "area": 8100,
+          "originalPieceOverlapAreas": {
+            "1": 0,
+            "2": 0,
+            "3": 0,
+            "4": 0,
+            "5": 0,
+            "6": 8100,
+            "7": 0
+          },
+          "areaOutsideOriginal": 0,
+          "pieceMetadataMatchesGeometry": true,
+          "reviewStatus": "未確認"
+        }
+      ],
+      "cut": null
+    },
+    {
+      "figureId": "F13",
+      "status": "geometry_valid_not_user_approval",
+      "originalArea": 64800,
+      "regionsCombinedArea": 64800,
+      "sourcePiecesUnchanged": true,
+      "areaOutsideOriginal": 0,
+      "uncoveredOriginalArea": 0,
+      "symmetricDifferenceArea": 0,
+      "regionPairOverlapAreas": {
+        "A/B": 0,
+        "A/C": 0,
+        "A/D": 0,
+        "B/C": 0,
+        "B/D": 0,
+        "C/D": 0
+      },
+      "regions": [
+        {
+          "id": "A",
+          "area": 40500,
+          "originalPieceOverlapAreas": {
+            "1": 16200,
+            "2": 16200,
+            "3": 8100,
+            "4": 0,
+            "5": 0,
+            "6": 0,
+            "7": 0
+          },
+          "areaOutsideOriginal": 0,
+          "pieceMetadataMatchesGeometry": true,
+          "reviewStatus": "未確認"
+        },
+        {
+          "id": "B",
+          "area": 12150,
+          "originalPieceOverlapAreas": {
+            "1": 0,
+            "2": 0,
+            "3": 0,
+            "4": 4050,
+            "5": 0,
+            "6": 0,
+            "7": 8100
+          },
+          "areaOutsideOriginal": 0,
+          "pieceMetadataMatchesGeometry": true,
+          "reviewStatus": "未確認"
+        },
+        {
+          "id": "C",
+          "area": 4050,
+          "originalPieceOverlapAreas": {
+            "1": 0,
+            "2": 0,
+            "3": 0,
+            "4": 0,
+            "5": 4050,
+            "6": 0,
+            "7": 0
+          },
+          "areaOutsideOriginal": 0,
+          "pieceMetadataMatchesGeometry": true,
+          "reviewStatus": "未確認"
+        },
+        {
+          "id": "D",
+          "area": 8100,
+          "originalPieceOverlapAreas": {
+            "1": 0,
+            "2": 0,
+            "3": 0,
+            "4": 0,
+            "5": 0,
+            "6": 8100,
+            "7": 0
+          },
+          "areaOutsideOriginal": 0,
+          "pieceMetadataMatchesGeometry": true,
+          "reviewStatus": "未確認"
+        }
+      ],
+      "cut": null
+    },
+    {
+      "figureId": "F14",
+      "status": "geometry_valid_not_user_approval",
+      "originalArea": 64800,
+      "regionsCombinedArea": 64800,
+      "sourcePiecesUnchanged": true,
+      "areaOutsideOriginal": 0,
+      "uncoveredOriginalArea": 0,
+      "symmetricDifferenceArea": 0,
+      "regionPairOverlapAreas": {
+        "A/B": 0
+      },
+      "regions": [
+        {
+          "id": "A",
+          "area": 52650,
+          "originalPieceOverlapAreas": {
+            "1": 16200,
+            "2": 16200,
+            "3": 8100,
+            "4": 0,
+            "5": 4050,
+            "6": 8100,
+            "7": 0
+          },
+          "areaOutsideOriginal": 0,
+          "pieceMetadataMatchesGeometry": true,
+          "reviewStatus": "未確認"
+        },
+        {
+          "id": "B",
+          "area": 12150,
+          "originalPieceOverlapAreas": {
+            "1": 0,
+            "2": 0,
+            "3": 0,
+            "4": 4050,
+            "5": 0,
+            "6": 0,
+            "7": 8100
+          },
+          "areaOutsideOriginal": 0,
+          "pieceMetadataMatchesGeometry": true,
+          "reviewStatus": "未確認"
+        }
+      ],
+      "cut": null
+    },
+    {
+      "figureId": "F15",
+      "status": "geometry_valid_not_user_approval",
+      "originalArea": 64800,
+      "regionsCombinedArea": 64800,
+      "sourcePiecesUnchanged": true,
+      "areaOutsideOriginal": 0,
+      "uncoveredOriginalArea": 0,
+      "symmetricDifferenceArea": 0,
+      "regionPairOverlapAreas": {
+        "A/B": 0,
+        "A/C": 0,
+        "A/D": 0,
+        "B/C": 0,
+        "B/D": 0,
+        "C/D": 0
+      },
+      "regions": [
+        {
+          "id": "A",
+          "area": 32400,
+          "originalPieceOverlapAreas": {
+            "1": 16200,
+            "2": 16200,
+            "3": 0,
+            "4": 0,
+            "5": 0,
+            "6": 0,
+            "7": 0
+          },
+          "areaOutsideOriginal": 0,
+          "pieceMetadataMatchesGeometry": true,
+          "reviewStatus": "未確認"
+        },
+        {
+          "id": "B",
+          "area": 8100,
+          "originalPieceOverlapAreas": {
+            "1": 0,
+            "2": 0,
+            "3": 8100,
+            "4": 0,
+            "5": 0,
+            "6": 0,
+            "7": 0
+          },
+          "areaOutsideOriginal": 0,
+          "pieceMetadataMatchesGeometry": true,
+          "reviewStatus": "未確認"
+        },
+        {
+          "id": "C",
+          "area": 8100,
+          "originalPieceOverlapAreas": {
+            "1": 0,
+            "2": 0,
+            "3": 0,
+            "4": 4050,
+            "5": 4050,
+            "6": 0,
+            "7": 0
+          },
+          "areaOutsideOriginal": 0,
+          "pieceMetadataMatchesGeometry": true,
+          "reviewStatus": "未確認"
+        },
+        {
+          "id": "D",
+          "area": 16200,
+          "originalPieceOverlapAreas": {
+            "1": 0,
+            "2": 0,
+            "3": 0,
+            "4": 0,
+            "5": 0,
+            "6": 8100,
+            "7": 8100
+          },
+          "areaOutsideOriginal": 0,
+          "pieceMetadataMatchesGeometry": true,
+          "reviewStatus": "未確認"
+        }
+      ],
+      "cut": null
+    },
+    {
+      "figureId": "F16",
+      "status": "geometry_valid_not_user_approval",
+      "originalArea": 64800,
+      "regionsCombinedArea": 64800,
+      "sourcePiecesUnchanged": true,
+      "areaOutsideOriginal": 0,
+      "uncoveredOriginalArea": 0,
+      "symmetricDifferenceArea": 0,
+      "regionPairOverlapAreas": {
+        "A/B": 0
+      },
+      "regions": [
+        {
+          "id": "A",
+          "area": 52650,
+          "originalPieceOverlapAreas": {
+            "1": 16200,
+            "2": 12150,
+            "3": 8100,
+            "4": 4050,
+            "5": 4050,
+            "6": 8100,
+            "7": 0
+          },
+          "areaOutsideOriginal": 0,
+          "pieceMetadataMatchesGeometry": true,
+          "reviewStatus": "未確認"
+        },
+        {
+          "id": "B",
+          "area": 12150,
+          "originalPieceOverlapAreas": {
+            "1": 0,
+            "2": 4050,
+            "3": 0,
+            "4": 0,
+            "5": 0,
+            "6": 0,
+            "7": 8100
+          },
+          "areaOutsideOriginal": 0,
+          "pieceMetadataMatchesGeometry": true,
+          "reviewStatus": "未確認"
+        }
+      ],
+      "cut": {
+        "sourcePiece": 2,
+        "endpoints": [
+          [
+            180,
+            270
+          ],
+          [
+            270,
+            270
+          ]
+        ],
+        "fragmentAreas": {
+          "A": 12150,
+          "B": 4050
+        }
+      }
+    },
+    {
+      "figureId": "F17",
+      "status": "geometry_valid_not_user_approval",
+      "originalArea": 64800,
+      "regionsCombinedArea": 64800,
+      "sourcePiecesUnchanged": true,
+      "areaOutsideOriginal": 0,
+      "uncoveredOriginalArea": 0,
+      "symmetricDifferenceArea": 0,
+      "regionPairOverlapAreas": {
+        "A/B": 0,
+        "A/C": 0,
+        "B/C": 0
+      },
+      "regions": [
+        {
+          "id": "A",
+          "area": 40500,
+          "originalPieceOverlapAreas": {
+            "1": 16200,
+            "2": 16200,
+            "3": 8100,
+            "4": 0,
+            "5": 0,
+            "6": 0,
+            "7": 0
+          },
+          "areaOutsideOriginal": 0,
+          "pieceMetadataMatchesGeometry": true,
+          "reviewStatus": "未確認"
+        },
+        {
+          "id": "B",
+          "area": 16200,
+          "originalPieceOverlapAreas": {
+            "1": 0,
+            "2": 0,
+            "3": 0,
+            "4": 4050,
+            "5": 4050,
+            "6": 8100,
+            "7": 0
+          },
+          "areaOutsideOriginal": 0,
+          "pieceMetadataMatchesGeometry": true,
+          "reviewStatus": "未確認"
+        },
+        {
+          "id": "C",
+          "area": 8100,
+          "originalPieceOverlapAreas": {
+            "1": 0,
+            "2": 0,
+            "3": 0,
+            "4": 0,
+            "5": 0,
+            "6": 0,
+            "7": 8100
+          },
+          "areaOutsideOriginal": 0,
+          "pieceMetadataMatchesGeometry": true,
+          "reviewStatus": "未確認"
+        }
+      ],
+      "cut": null
+    },
+    {
+      "figureId": "F18",
+      "status": "geometry_valid_not_user_approval",
+      "originalArea": 64800,
+      "regionsCombinedArea": 64800,
+      "sourcePiecesUnchanged": true,
+      "areaOutsideOriginal": 0,
+      "uncoveredOriginalArea": 0,
+      "symmetricDifferenceArea": 0,
+      "regionPairOverlapAreas": {
+        "A/B": 0,
+        "A/C": 0,
+        "A/D": 0,
+        "B/C": 0,
+        "B/D": 0,
+        "C/D": 0
+      },
+      "regions": [
+        {
+          "id": "A",
+          "area": 32400,
+          "originalPieceOverlapAreas": {
+            "1": 16200,
+            "2": 16200,
+            "3": 0,
+            "4": 0,
+            "5": 0,
+            "6": 0,
+            "7": 0
+          },
+          "areaOutsideOriginal": 0,
+          "pieceMetadataMatchesGeometry": true,
+          "reviewStatus": "未確認"
+        },
+        {
+          "id": "B",
+          "area": 8100,
+          "originalPieceOverlapAreas": {
+            "1": 0,
+            "2": 0,
+            "3": 0,
+            "4": 0,
+            "5": 0,
+            "6": 8100,
+            "7": 0
+          },
+          "areaOutsideOriginal": 0,
+          "pieceMetadataMatchesGeometry": true,
+          "reviewStatus": "未確認"
+        },
+        {
+          "id": "C",
+          "area": 4050,
+          "originalPieceOverlapAreas": {
+            "1": 0,
+            "2": 0,
+            "3": 0,
+            "4": 0,
+            "5": 4050,
+            "6": 0,
+            "7": 0
+          },
+          "areaOutsideOriginal": 0,
+          "pieceMetadataMatchesGeometry": true,
+          "reviewStatus": "未確認"
+        },
+        {
+          "id": "D",
+          "area": 20250,
+          "originalPieceOverlapAreas": {
+            "1": 0,
+            "2": 0,
+            "3": 8100,
+            "4": 4050,
+            "5": 0,
+            "6": 0,
+            "7": 8100
+          },
+          "areaOutsideOriginal": 0,
+          "pieceMetadataMatchesGeometry": true,
+          "reviewStatus": "未確認"
+        }
+      ],
+      "cut": null
+    },
+    {
+      "figureId": "F19",
+      "status": "geometry_valid_not_user_approval",
+      "originalArea": 64800,
+      "regionsCombinedArea": 64800,
+      "sourcePiecesUnchanged": true,
+      "areaOutsideOriginal": 0,
+      "uncoveredOriginalArea": 0,
+      "symmetricDifferenceArea": 0,
+      "regionPairOverlapAreas": {
+        "A/B": 0,
+        "A/C": 0,
+        "A/D": 0,
+        "B/C": 0,
+        "B/D": 0,
+        "C/D": 0
+      },
+      "regions": [
+        {
+          "id": "A",
+          "area": 36450,
+          "originalPieceOverlapAreas": {
+            "1": 16200,
+            "2": 12150,
+            "3": 8100,
+            "4": 0,
+            "5": 0,
+            "6": 0,
+            "7": 0
+          },
+          "areaOutsideOriginal": 0,
+          "pieceMetadataMatchesGeometry": true,
+          "reviewStatus": "未確認"
+        },
+        {
+          "id": "B",
+          "area": 12150,
+          "originalPieceOverlapAreas": {
+            "1": 0,
+            "2": 0,
+            "3": 0,
+            "4": 4050,
+            "5": 0,
+            "6": 8100,
+            "7": 0
+          },
+          "areaOutsideOriginal": 0,
+          "pieceMetadataMatchesGeometry": true,
+          "reviewStatus": "未確認"
+        },
+        {
+          "id": "C",
+          "area": 12150,
+          "originalPieceOverlapAreas": {
+            "1": 0,
+            "2": 0,
+            "3": 0,
+            "4": 0,
+            "5": 4050,
+            "6": 0,
+            "7": 8100
+          },
+          "areaOutsideOriginal": 0,
+          "pieceMetadataMatchesGeometry": true,
+          "reviewStatus": "未確認"
+        },
+        {
+          "id": "D",
+          "area": 4050,
+          "originalPieceOverlapAreas": {
+            "1": 0,
+            "2": 4050,
+            "3": 0,
+            "4": 0,
+            "5": 0,
+            "6": 0,
+            "7": 0
+          },
+          "areaOutsideOriginal": 0,
+          "pieceMetadataMatchesGeometry": true,
+          "reviewStatus": "未確認"
+        }
+      ],
+      "cut": {
+        "sourcePiece": 2,
+        "endpoints": [
+          [
+            180,
+            360
+          ],
+          [
+            270,
+            360
+          ]
+        ],
+        "fragmentAreas": {
+          "A": 12150,
+          "D": 4050
+        }
+      }
+    },
+    {
+      "figureId": "F20",
+      "status": "geometry_valid_not_user_approval",
+      "originalArea": 64800,
+      "regionsCombinedArea": 64800,
+      "sourcePiecesUnchanged": true,
+      "areaOutsideOriginal": 0,
+      "uncoveredOriginalArea": 0,
+      "symmetricDifferenceArea": 0,
+      "regionPairOverlapAreas": {
+        "A/B": 0,
+        "A/C": 0,
+        "B/C": 0
+      },
+      "regions": [
+        {
+          "id": "A",
+          "area": 36450,
+          "originalPieceOverlapAreas": {
+            "1": 12150,
+            "2": 16200,
+            "3": 8100,
+            "4": 0,
+            "5": 0,
+            "6": 0,
+            "7": 0
+          },
+          "areaOutsideOriginal": 0,
+          "pieceMetadataMatchesGeometry": true,
+          "reviewStatus": "未確認"
+        },
+        {
+          "id": "B",
+          "area": 16200,
+          "originalPieceOverlapAreas": {
+            "1": 4050,
+            "2": 0,
+            "3": 0,
+            "4": 4050,
+            "5": 0,
+            "6": 8100,
+            "7": 0
+          },
+          "areaOutsideOriginal": 0,
+          "pieceMetadataMatchesGeometry": true,
+          "reviewStatus": "未確認"
+        },
+        {
+          "id": "C",
+          "area": 12150,
+          "originalPieceOverlapAreas": {
+            "1": 0,
+            "2": 0,
+            "3": 0,
+            "4": 0,
+            "5": 4050,
+            "6": 0,
+            "7": 8100
+          },
+          "areaOutsideOriginal": 0,
+          "pieceMetadataMatchesGeometry": true,
+          "reviewStatus": "未確認"
+        }
+      ],
+      "cut": {
+        "sourcePiece": 1,
+        "endpoints": [
+          [
+            180,
+            180
+          ],
+          [
+            270,
+            180
+          ]
+        ],
+        "fragmentAreas": {
+          "A": 12150,
+          "B": 4050
+        }
+      }
+    },
+    {
+      "figureId": "F21",
+      "status": "geometry_valid_not_user_approval",
+      "originalArea": 64800,
+      "regionsCombinedArea": 64800,
+      "sourcePiecesUnchanged": true,
+      "areaOutsideOriginal": 0,
+      "uncoveredOriginalArea": 0,
+      "symmetricDifferenceArea": 0,
+      "regionPairOverlapAreas": {
+        "A/B": 0,
+        "A/C": 0,
+        "B/C": 0
+      },
+      "regions": [
+        {
+          "id": "A",
+          "area": 48600,
+          "originalPieceOverlapAreas": {
+            "1": 16200,
+            "2": 16200,
+            "3": 0,
+            "4": 4050,
+            "5": 4050,
+            "6": 0,
+            "7": 8100
+          },
+          "areaOutsideOriginal": 0,
+          "pieceMetadataMatchesGeometry": true,
+          "reviewStatus": "未確認"
+        },
+        {
+          "id": "B",
+          "area": 8100,
+          "originalPieceOverlapAreas": {
+            "1": 0,
+            "2": 0,
+            "3": 8100,
+            "4": 0,
+            "5": 0,
+            "6": 0,
+            "7": 0
+          },
+          "areaOutsideOriginal": 0,
+          "pieceMetadataMatchesGeometry": true,
+          "reviewStatus": "未確認"
+        },
+        {
+          "id": "C",
+          "area": 8100,
+          "originalPieceOverlapAreas": {
+            "1": 0,
+            "2": 0,
+            "3": 0,
+            "4": 0,
+            "5": 0,
+            "6": 8100,
+            "7": 0
+          },
+          "areaOutsideOriginal": 0,
+          "pieceMetadataMatchesGeometry": true,
+          "reviewStatus": "未確認"
+        }
+      ],
+      "cut": null
+    },
+    {
+      "figureId": "F22",
+      "status": "geometry_valid_not_user_approval",
+      "originalArea": 64800,
+      "regionsCombinedArea": 64800,
+      "sourcePiecesUnchanged": true,
+      "areaOutsideOriginal": 0,
+      "uncoveredOriginalArea": 0,
+      "symmetricDifferenceArea": 0,
+      "regionPairOverlapAreas": {
+        "A/B": 0,
+        "A/C": 0,
+        "B/C": 0
+      },
+      "regions": [
+        {
+          "id": "A",
+          "area": 48600,
+          "originalPieceOverlapAreas": {
+            "1": 16200,
+            "2": 16200,
+            "3": 0,
+            "4": 4050,
+            "5": 4050,
+            "6": 0,
+            "7": 8100
+          },
+          "areaOutsideOriginal": 0,
+          "pieceMetadataMatchesGeometry": true,
+          "reviewStatus": "未確認"
+        },
+        {
+          "id": "B",
+          "area": 8100,
+          "originalPieceOverlapAreas": {
+            "1": 0,
+            "2": 0,
+            "3": 8100,
+            "4": 0,
+            "5": 0,
+            "6": 0,
+            "7": 0
+          },
+          "areaOutsideOriginal": 0,
+          "pieceMetadataMatchesGeometry": true,
+          "reviewStatus": "未確認"
+        },
+        {
+          "id": "C",
+          "area": 8100,
+          "originalPieceOverlapAreas": {
+            "1": 0,
+            "2": 0,
+            "3": 0,
+            "4": 0,
+            "5": 0,
+            "6": 8100,
+            "7": 0
+          },
+          "areaOutsideOriginal": 0,
+          "pieceMetadataMatchesGeometry": true,
+          "reviewStatus": "未確認"
+        }
+      ],
+      "cut": null
+    },
+    {
+      "figureId": "F23",
+      "status": "geometry_valid_not_user_approval",
+      "originalArea": 64800,
+      "regionsCombinedArea": 64800,
+      "sourcePiecesUnchanged": true,
+      "areaOutsideOriginal": 0,
+      "uncoveredOriginalArea": 0,
+      "symmetricDifferenceArea": 0,
+      "regionPairOverlapAreas": {
+        "A/B": 0,
+        "A/C": 0,
+        "A/D": 0,
+        "B/C": 0,
+        "B/D": 0,
+        "C/D": 0
+      },
+      "regions": [
+        {
+          "id": "A",
+          "area": 32400,
+          "originalPieceOverlapAreas": {
+            "1": 16200,
+            "2": 16200,
+            "3": 0,
+            "4": 0,
+            "5": 0,
+            "6": 0,
+            "7": 0
+          },
+          "areaOutsideOriginal": 0,
+          "pieceMetadataMatchesGeometry": true,
+          "reviewStatus": "未確認"
+        },
+        {
+          "id": "B",
+          "area": 8100,
+          "originalPieceOverlapAreas": {
+            "1": 0,
+            "2": 0,
+            "3": 8100,
+            "4": 0,
+            "5": 0,
+            "6": 0,
+            "7": 0
+          },
+          "areaOutsideOriginal": 0,
+          "pieceMetadataMatchesGeometry": true,
+          "reviewStatus": "未確認"
+        },
+        {
+          "id": "C",
+          "area": 16200,
+          "originalPieceOverlapAreas": {
+            "1": 0,
+            "2": 0,
+            "3": 0,
+            "4": 4050,
+            "5": 4050,
+            "6": 8100,
+            "7": 0
+          },
+          "areaOutsideOriginal": 0,
+          "pieceMetadataMatchesGeometry": true,
+          "reviewStatus": "未確認"
+        },
+        {
+          "id": "D",
+          "area": 8100,
+          "originalPieceOverlapAreas": {
+            "1": 0,
+            "2": 0,
+            "3": 0,
+            "4": 0,
+            "5": 0,
+            "6": 0,
+            "7": 8100
+          },
+          "areaOutsideOriginal": 0,
+          "pieceMetadataMatchesGeometry": true,
+          "reviewStatus": "未確認"
+        }
+      ],
+      "cut": null
+    },
+    {
+      "figureId": "F24",
+      "status": "geometry_valid_not_user_approval",
+      "originalArea": 64800,
+      "regionsCombinedArea": 64800,
+      "sourcePiecesUnchanged": true,
+      "areaOutsideOriginal": 0,
+      "uncoveredOriginalArea": 0,
+      "symmetricDifferenceArea": 0,
+      "regionPairOverlapAreas": {
+        "A/B": 0,
+        "A/C": 0,
+        "B/C": 0
+      },
+      "regions": [
+        {
+          "id": "A",
+          "area": 32400,
+          "originalPieceOverlapAreas": {
+            "1": 16200,
+            "2": 16200,
+            "3": 0,
+            "4": 0,
+            "5": 0,
+            "6": 0,
+            "7": 0
+          },
+          "areaOutsideOriginal": 0,
+          "pieceMetadataMatchesGeometry": true,
+          "reviewStatus": "未確認"
+        },
+        {
+          "id": "B",
+          "area": 24300,
+          "originalPieceOverlapAreas": {
+            "1": 0,
+            "2": 0,
+            "3": 8100,
+            "4": 4050,
+            "5": 4050,
+            "6": 0,
+            "7": 8100
+          },
+          "areaOutsideOriginal": 0,
+          "pieceMetadataMatchesGeometry": true,
+          "reviewStatus": "未確認"
+        },
+        {
+          "id": "C",
+          "area": 8100,
+          "originalPieceOverlapAreas": {
+            "1": 0,
+            "2": 0,
+            "3": 0,
+            "4": 0,
+            "5": 0,
+            "6": 8100,
+            "7": 0
+          },
+          "areaOutsideOriginal": 0,
+          "pieceMetadataMatchesGeometry": true,
+          "reviewStatus": "未確認"
+        }
+      ],
+      "cut": null
+    },
+    {
+      "figureId": "F25",
+      "status": "geometry_valid_not_user_approval",
+      "originalArea": 64800,
+      "regionsCombinedArea": 64800,
+      "sourcePiecesUnchanged": true,
+      "areaOutsideOriginal": 0,
+      "uncoveredOriginalArea": 0,
+      "symmetricDifferenceArea": 0,
+      "regionPairOverlapAreas": {
+        "A/B": 0,
+        "A/C": 0,
+        "B/C": 0
+      },
+      "regions": [
+        {
+          "id": "A",
+          "area": 40500,
+          "originalPieceOverlapAreas": {
+            "1": 16200,
+            "2": 16200,
+            "3": 8100,
+            "4": 0,
+            "5": 0,
+            "6": 0,
+            "7": 0
+          },
+          "areaOutsideOriginal": 0,
+          "pieceMetadataMatchesGeometry": true,
+          "reviewStatus": "未確認"
+        },
+        {
+          "id": "B",
+          "area": 8100,
+          "originalPieceOverlapAreas": {
+            "1": 0,
+            "2": 0,
+            "3": 0,
+            "4": 4050,
+            "5": 4050,
+            "6": 0,
+            "7": 0
+          },
+          "areaOutsideOriginal": 0,
+          "pieceMetadataMatchesGeometry": true,
+          "reviewStatus": "未確認"
+        },
+        {
+          "id": "C",
+          "area": 16200,
+          "originalPieceOverlapAreas": {
+            "1": 0,
+            "2": 0,
+            "3": 0,
+            "4": 0,
+            "5": 0,
+            "6": 8100,
+            "7": 8100
+          },
+          "areaOutsideOriginal": 0,
+          "pieceMetadataMatchesGeometry": true,
+          "reviewStatus": "未確認"
+        }
+      ],
+      "cut": null
+    },
+    {
+      "figureId": "F26",
+      "status": "geometry_valid_not_user_approval",
+      "originalArea": 64800,
+      "regionsCombinedArea": 64800,
+      "sourcePiecesUnchanged": true,
+      "areaOutsideOriginal": 0,
+      "uncoveredOriginalArea": 0,
+      "symmetricDifferenceArea": 0,
+      "regionPairOverlapAreas": {
+        "A/B": 0,
+        "A/C": 0,
+        "A/D": 0,
+        "B/C": 0,
+        "B/D": 0,
+        "C/D": 0
+      },
+      "regions": [
+        {
+          "id": "A",
+          "area": 40500,
+          "originalPieceOverlapAreas": {
+            "1": 16200,
+            "2": 16200,
+            "3": 8100,
+            "4": 0,
+            "5": 0,
+            "6": 0,
+            "7": 0
+          },
+          "areaOutsideOriginal": 0,
+          "pieceMetadataMatchesGeometry": true,
+          "reviewStatus": "未確認"
+        },
+        {
+          "id": "B",
+          "area": 8100,
+          "originalPieceOverlapAreas": {
+            "1": 0,
+            "2": 0,
+            "3": 0,
+            "4": 4050,
+            "5": 4050,
+            "6": 0,
+            "7": 0
+          },
+          "areaOutsideOriginal": 0,
+          "pieceMetadataMatchesGeometry": true,
+          "reviewStatus": "未確認"
+        },
+        {
+          "id": "C",
+          "area": 8100,
+          "originalPieceOverlapAreas": {
+            "1": 0,
+            "2": 0,
+            "3": 0,
+            "4": 0,
+            "5": 0,
+            "6": 8100,
+            "7": 0
+          },
+          "areaOutsideOriginal": 0,
+          "pieceMetadataMatchesGeometry": true,
+          "reviewStatus": "未確認"
+        },
+        {
+          "id": "D",
+          "area": 8100,
+          "originalPieceOverlapAreas": {
+            "1": 0,
+            "2": 0,
+            "3": 0,
+            "4": 0,
+            "5": 0,
+            "6": 0,
+            "7": 8100
+          },
+          "areaOutsideOriginal": 0,
+          "pieceMetadataMatchesGeometry": true,
+          "reviewStatus": "未確認"
+        }
+      ],
+      "cut": null
+    },
+    {
+      "figureId": "F27",
+      "status": "geometry_valid_not_user_approval",
+      "originalArea": 64800,
+      "regionsCombinedArea": 64800,
+      "sourcePiecesUnchanged": true,
+      "areaOutsideOriginal": 0,
+      "uncoveredOriginalArea": 0,
+      "symmetricDifferenceArea": 0,
+      "regionPairOverlapAreas": {
+        "A/B": 0,
+        "A/C": 0,
+        "B/C": 0
+      },
+      "regions": [
+        {
+          "id": "A",
+          "area": 40500,
+          "originalPieceOverlapAreas": {
+            "1": 16200,
+            "2": 16200,
+            "3": 0,
+            "4": 0,
+            "5": 0,
+            "6": 0,
+            "7": 8100
+          },
+          "areaOutsideOriginal": 0,
+          "pieceMetadataMatchesGeometry": true,
+          "reviewStatus": "未確認"
+        },
+        {
+          "id": "B",
+          "area": 20250,
+          "originalPieceOverlapAreas": {
+            "1": 0,
+            "2": 0,
+            "3": 8100,
+            "4": 4050,
+            "5": 0,
+            "6": 8100,
+            "7": 0
+          },
+          "areaOutsideOriginal": 0,
+          "pieceMetadataMatchesGeometry": true,
+          "reviewStatus": "未確認"
+        },
+        {
+          "id": "C",
+          "area": 4050,
+          "originalPieceOverlapAreas": {
+            "1": 0,
+            "2": 0,
+            "3": 0,
+            "4": 0,
+            "5": 4050,
+            "6": 0,
+            "7": 0
+          },
+          "areaOutsideOriginal": 0,
+          "pieceMetadataMatchesGeometry": true,
+          "reviewStatus": "未確認"
+        }
+      ],
+      "cut": null
+    },
+    {
+      "figureId": "F28",
+      "status": "geometry_valid_not_user_approval",
+      "originalArea": 64800,
+      "regionsCombinedArea": 64800,
+      "sourcePiecesUnchanged": true,
+      "areaOutsideOriginal": 0,
+      "uncoveredOriginalArea": 0,
+      "symmetricDifferenceArea": 0,
+      "regionPairOverlapAreas": {
+        "A/B": 0,
+        "A/C": 0,
+        "B/C": 0
+      },
+      "regions": [
+        {
+          "id": "A",
+          "area": 32400,
+          "originalPieceOverlapAreas": {
+            "1": 16200,
+            "2": 16200,
+            "3": 0,
+            "4": 0,
+            "5": 0,
+            "6": 0,
+            "7": 0
+          },
+          "areaOutsideOriginal": 0,
+          "pieceMetadataMatchesGeometry": true,
+          "reviewStatus": "未確認"
+        },
+        {
+          "id": "B",
+          "area": 24300,
+          "originalPieceOverlapAreas": {
+            "1": 0,
+            "2": 0,
+            "3": 8100,
+            "4": 4050,
+            "5": 4050,
+            "6": 0,
+            "7": 8100
+          },
+          "areaOutsideOriginal": 0,
+          "pieceMetadataMatchesGeometry": true,
+          "reviewStatus": "未確認"
+        },
+        {
+          "id": "C",
+          "area": 8100,
+          "originalPieceOverlapAreas": {
+            "1": 0,
+            "2": 0,
+            "3": 0,
+            "4": 0,
+            "5": 0,
+            "6": 8100,
+            "7": 0
+          },
+          "areaOutsideOriginal": 0,
+          "pieceMetadataMatchesGeometry": true,
+          "reviewStatus": "未確認"
+        }
+      ],
+      "cut": null
+    },
+    {
+      "figureId": "F29",
+      "status": "geometry_valid_not_user_approval",
+      "originalArea": 64800,
+      "regionsCombinedArea": 64800,
+      "sourcePiecesUnchanged": true,
+      "areaOutsideOriginal": 0,
+      "uncoveredOriginalArea": 0,
+      "symmetricDifferenceArea": 0,
+      "regionPairOverlapAreas": {
+        "A/B": 0,
+        "A/C": 0,
+        "A/D": 0,
+        "B/C": 0,
+        "B/D": 0,
+        "C/D": 0
+      },
+      "regions": [
+        {
+          "id": "A",
+          "area": 32400,
+          "originalPieceOverlapAreas": {
+            "1": 16200,
+            "2": 16200,
+            "3": 0,
+            "4": 0,
+            "5": 0,
+            "6": 0,
+            "7": 0
+          },
+          "areaOutsideOriginal": 0,
+          "pieceMetadataMatchesGeometry": true,
+          "reviewStatus": "未確認"
+        },
+        {
+          "id": "B",
+          "area": 12150,
+          "originalPieceOverlapAreas": {
+            "1": 0,
+            "2": 0,
+            "3": 0,
+            "4": 4050,
+            "5": 0,
+            "6": 8100,
+            "7": 0
+          },
+          "areaOutsideOriginal": 0,
+          "pieceMetadataMatchesGeometry": true,
+          "reviewStatus": "未確認"
+        },
+        {
+          "id": "C",
+          "area": 8100,
+          "originalPieceOverlapAreas": {
+            "1": 0,
+            "2": 0,
+            "3": 0,
+            "4": 0,
+            "5": 0,
+            "6": 0,
+            "7": 8100
+          },
+          "areaOutsideOriginal": 0,
+          "pieceMetadataMatchesGeometry": true,
+          "reviewStatus": "未確認"
+        },
+        {
+          "id": "D",
+          "area": 12150,
+          "originalPieceOverlapAreas": {
+            "1": 0,
+            "2": 0,
+            "3": 8100,
+            "4": 0,
+            "5": 4050,
+            "6": 0,
+            "7": 0
+          },
+          "areaOutsideOriginal": 0,
+          "pieceMetadataMatchesGeometry": true,
+          "reviewStatus": "未確認"
+        }
+      ],
+      "cut": null
+    },
+    {
+      "figureId": "F30",
+      "status": "geometry_valid_not_user_approval",
+      "originalArea": 64800,
+      "regionsCombinedArea": 64800,
+      "sourcePiecesUnchanged": true,
+      "areaOutsideOriginal": 0,
+      "uncoveredOriginalArea": 0,
+      "symmetricDifferenceArea": 0,
+      "regionPairOverlapAreas": {
+        "A/B": 0,
+        "A/C": 0,
+        "B/C": 0
+      },
+      "regions": [
+        {
+          "id": "A",
+          "area": 32400,
+          "originalPieceOverlapAreas": {
+            "1": 12150,
+            "2": 16200,
+            "3": 0,
+            "4": 0,
+            "5": 4050,
+            "6": 0,
+            "7": 0
+          },
+          "areaOutsideOriginal": 0,
+          "pieceMetadataMatchesGeometry": true,
+          "reviewStatus": "未確認"
+        },
+        {
+          "id": "B",
+          "area": 16200,
+          "originalPieceOverlapAreas": {
+            "1": 4050,
+            "2": 0,
+            "3": 8100,
+            "4": 4050,
+            "5": 0,
+            "6": 0,
+            "7": 0
+          },
+          "areaOutsideOriginal": 0,
+          "pieceMetadataMatchesGeometry": true,
+          "reviewStatus": "未確認"
+        },
+        {
+          "id": "C",
+          "area": 16200,
+          "originalPieceOverlapAreas": {
+            "1": 0,
+            "2": 0,
+            "3": 0,
+            "4": 0,
+            "5": 0,
+            "6": 8100,
+            "7": 8100
+          },
+          "areaOutsideOriginal": 0,
+          "pieceMetadataMatchesGeometry": true,
+          "reviewStatus": "未確認"
+        }
+      ],
+      "cut": {
+        "sourcePiece": 1,
+        "endpoints": [
+          [
+            90,
+            360
+          ],
+          [
+            180,
+            360
+          ]
+        ],
+        "fragmentAreas": {
+          "A": 12150,
+          "B": 4050
+        }
+      }
+    }
+  ],
+  "failures": []
+}

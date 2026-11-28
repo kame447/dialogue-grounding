@@ -1,0 +1,322 @@
+{
+  "observer": "RainyPascal",
+  "reviewPartner": "GoldNewton",
+  "description": "指定された30項目の争点への回答。支持候補はこの観察者自身が支持するものを示し、合意の最終確定は合議担当が行う。",
+  "items": [
+    {
+      "item": "item-01",
+      "status": "支持",
+      "supportedCandidates": [
+        "ウサギ"
+      ],
+      "response": "姿勢を「体を斜めに伸ばす」とし、座るか跳ねるかは未確定とする案に同意する。",
+      "objection": "P2 に独立した後ろ足は見えない。",
+      "revision": "座るという断定を取り下げる。",
+      "confidence": "低"
+    },
+    {
+      "item": "item-02",
+      "status": "支持",
+      "supportedCandidates": [
+        "独楽",
+        "蒸気船"
+      ],
+      "response": "独楽を受け入れる。上の P3 を心棒、P2 と P1 を胴、P1 下端を軸先と読むとまとまる。",
+      "objection": "蒸気船では P1 の船底が深い V 字で、独楽でも中心線がずれている。",
+      "revision": "蒸気船も相手が低で支持するため候補に残せる。独楽の方が読みやすい。",
+      "confidence": "中（独楽）、低（蒸気船）"
+    },
+    {
+      "item": "item-03",
+      "status": "支持",
+      "supportedCandidates": [
+        "キリン",
+        "ブラキオサウルス"
+      ],
+      "response": "ブラキオサウルスも低で受け入れる。背から首への連続した上り斜面、右上の小さな頭、左下の尾、下の脚という対応が成り立つ。",
+      "objection": "首が細く分かれず脚は一か所だけで、恐竜の種類まで特定する手がかりは少ない。",
+      "revision": "キリンも支持する。",
+      "confidence": "低"
+    },
+    {
+      "item": "item-04",
+      "status": "支持",
+      "supportedCandidates": [
+        "ペリカン"
+      ],
+      "response": "P3 頭、P4 長いくちばし、P1 胴、P2 尾というペリカンの対応を維持し、合意候補とする。",
+      "objection": "P4 が強く下を向き、足や喉袋も見えない。",
+      "revision": "",
+      "confidence": "低"
+    },
+    {
+      "item": "item-05",
+      "status": "支持",
+      "supportedCandidates": [
+        "ニワトリ"
+      ],
+      "response": "ニワトリを低で受け入れる。P1 の左上を頭に含むと、P2 のとさかと P3 の左向きのくちばしが隣接する。",
+      "objection": "首と脚が区切れず、丸い胴は角張る。",
+      "revision": "カタツムリは殻の下に前へ伸びる足がないため取り下げる。",
+      "confidence": "低"
+    },
+    {
+      "item": "item-06",
+      "status": "支持",
+      "supportedCandidates": [
+        "ペンギン"
+      ],
+      "response": "ペンギンを低で受け入れる。左の直立した背、P2 の張り出す腹、P1 の足、P4 のくちばしが揃う。",
+      "objection": "P4 の頭が細く長く、足が三角一枚でひれも見えない。",
+      "revision": "当初のガチョウは胴の立ち方と短い首を考慮して取り下げる。",
+      "confidence": "低"
+    },
+    {
+      "item": "item-07",
+      "status": "支持",
+      "supportedCandidates": [
+        "ティラノサウルス"
+      ],
+      "response": "低い確信でティラノサウルスを受け入れる。P5 を左上の頭、P4 を前足、P1 を胴と右下へ伸びる尾、P2・P3 を脚と見る読みができる。",
+      "objection": "頭が胴から細長く続き、二本の脚の形と位置も大きく異なる。",
+      "revision": "見立てなしを修正する。カンガルーは頭と尾の特徴が乏しく支持しない。",
+      "confidence": "低"
+    },
+    {
+      "item": "item-08",
+      "status": "見立てなしを支持",
+      "supportedCandidates": [],
+      "response": "鉢植えの芽は見立てなしとする合意を支持する。",
+      "objection": "上の大きな三角と左上の突起を葉と読んでも、植物として自然な茎との関係が弱い。",
+      "revision": "",
+      "confidence": ""
+    },
+    {
+      "item": "item-09",
+      "status": "支持",
+      "supportedCandidates": [
+        "ネコ"
+      ],
+      "response": "P2 を頭側の前脚と読む案を受け入れる。左に頭、右下に尾があり、P2 は胴の下の頭寄りにある。",
+      "objection": "一領域だけで前後を確定する根拠は弱い。",
+      "revision": "P2 を後ろ足から前脚へ修正する。",
+      "confidence": "低"
+    },
+    {
+      "item": "item-10",
+      "status": "見立てなしを支持",
+      "supportedCandidates": [],
+      "response": "見立てなしでの合意を支持する。item-27 より船底 P1 が左にずれ、帆 P2 の右端が船底から大きくはみ出すため、帆船としてのまとまりが弱い。",
+      "objection": "ヨットとして想像はできるが、船体と帆の重なりが小さく形を伝えにくい。",
+      "revision": "",
+      "confidence": ""
+    },
+    {
+      "item": "item-11",
+      "status": "一部支持",
+      "supportedCandidates": [
+        "リス"
+      ],
+      "response": "リスを低で支持する。P4 が尾、P2 が胴と首、P3 が頭、P1 が後ろ足と読める。",
+      "objection": "オオカミは頭が小さく尖りすぎ、鼻先や四本足も明確でないため、遠吠え姿としては受け入れない。",
+      "revision": "オオカミは相手側の弱い別読みにとどめる。",
+      "confidence": "低"
+    },
+    {
+      "item": "item-12",
+      "status": "見立てなしを支持",
+      "supportedCandidates": [],
+      "response": "見立てなしでの合意を支持する。",
+      "objection": "頭・胴・ひれという読みは可能だが、足がなく下端が尖るため種を定めにくい。",
+      "revision": "",
+      "confidence": ""
+    },
+    {
+      "item": "item-13",
+      "status": "見立てなしを支持",
+      "supportedCandidates": [],
+      "response": "見立てなしでの合意を支持する。",
+      "objection": "鉢と見た P3 は小さく、上の大きな三角と茎のつながりが不自然に見える。",
+      "revision": "",
+      "confidence": ""
+    },
+    {
+      "item": "item-14",
+      "status": "支持",
+      "supportedCandidates": [
+        "メガホン"
+      ],
+      "response": "左の P3 が吹き口、P1 が右に広がる筒、P2 が下の握りという対応で一致する。",
+      "objection": "筒の上下の広がりは非対称である。",
+      "revision": "",
+      "confidence": "中"
+    },
+    {
+      "item": "item-15",
+      "status": "見立てなしを支持",
+      "supportedCandidates": [],
+      "response": "見立てなしでの合意を支持する。アルファベット R の読みは、上部 P1 が塗りつぶされ、通常の R にある内側の空白がなく縦棒も短いため受け入れない。",
+      "objection": "輪郭の一部は R に似る。",
+      "revision": "",
+      "confidence": ""
+    },
+    {
+      "item": "item-16",
+      "status": "支持",
+      "supportedCandidates": [
+        "ヘアドライヤー",
+        "道標"
+      ],
+      "response": "道標を受け入れる。P1 は右向きの矢印形の板、P2 はその下に伸びる支柱と読める。",
+      "objection": "P2 の先が斜めに尖り、P1 は矢印の左側が下に欠ける。ドライヤーにも通風口がない。",
+      "revision": "ヘアドライヤーも低で維持する。",
+      "confidence": "中（道標）、低（ヘアドライヤー）"
+    },
+    {
+      "item": "item-17",
+      "status": "支持",
+      "supportedCandidates": [
+        "飛行機"
+      ],
+      "response": "上から見た右向きの飛行機を支持し、合意の確信度を中とすることに同意する。",
+      "objection": "上下の翼の長さと形が大きく異なるため、当初の高から下げる。",
+      "revision": "確信度を高から中に修正する。",
+      "confidence": "中"
+    },
+    {
+      "item": "item-18",
+      "status": "支持",
+      "supportedCandidates": [
+        "タツノオトシゴ"
+      ],
+      "response": "左向きの口 P3、立った頭と胴 P2、下側の腹と尾 P1 の対応を支持する。",
+      "objection": "尾が巻かず、腹が大きな三角形である。",
+      "revision": "",
+      "confidence": "低"
+    },
+    {
+      "item": "item-19",
+      "status": "見立てなしを支持",
+      "supportedCandidates": [],
+      "response": "見立てなしでの合意を支持する。",
+      "objection": "長靴の筒の上端が尖り、つま先がかかとより高い。",
+      "revision": "",
+      "confidence": ""
+    },
+    {
+      "item": "item-20",
+      "status": "支持",
+      "supportedCandidates": [
+        "ツバメ"
+      ],
+      "response": "ツバメを低で支持する。P1 左端の二股を燕尾、P4 を頭、P3 を首、P5 と P2 を上下に開いた翼と読める。二股の尾はカモよりツバメに合う。",
+      "objection": "頭が四角くくちばしがなく、翼も胴と尾に比べて小さい。ネコは P5 を耳とすると頭 P4 と同程度に大きく、尾と後ろ足の区別も曖昧なので支持しない。",
+      "revision": "当初のカモを取り下げ、飛ぶツバメに修正する。",
+      "confidence": "低"
+    },
+    {
+      "item": "item-21",
+      "status": "支持",
+      "supportedCandidates": [
+        "キンギョ"
+      ],
+      "response": "P1 を左の大きな尾びれ、P2 を胴と頭、P3 を腹びれとする右向きの金魚を支持する。",
+      "objection": "尾が胴より大きく、腹びれが四角い。",
+      "revision": "",
+      "confidence": "低"
+    },
+    {
+      "item": "item-22",
+      "status": "見立てなしを支持",
+      "supportedCandidates": [],
+      "response": "ワニを取り下げ、見立てなしに修正する。P5 の口先が P1・P2 の脚先より下にあり、長い尾も見えない点を重く見る。",
+      "objection": "頭を極端に下げた姿としては読めるが、尾の欠如も重なる。",
+      "revision": "当初のワニ候補を取り下げる。",
+      "confidence": ""
+    },
+    {
+      "item": "item-23",
+      "status": "支持",
+      "supportedCandidates": [
+        "踊る人"
+      ],
+      "response": "踊る人を低で受け入れる。P4 を頭、P1 を胴と左右に張る腕、P5 を上げた腕、P2・P3 を脚とする読みができる。",
+      "objection": "P5 は頭の横から伸び、肩から上がる腕としては付け根が不自然。左右の脚も形が異なる。",
+      "revision": "ガチョウは P5 の頭とくちばしが細長すぎるため取り下げる。",
+      "confidence": "低"
+    },
+    {
+      "item": "item-24",
+      "status": "支持",
+      "supportedCandidates": [
+        "馬"
+      ],
+      "response": "頭を右下へ下げた馬を受け入れる。P1 の耳の付け根から鼻先までが長く、P4 と P1 上端の耳が対を作る。",
+      "objection": "目・鼻孔・たてがみがなく、首 P2・P3 は小さい。",
+      "revision": "ウサギは顔に対して耳が短く見えるため取り下げる。",
+      "confidence": "中"
+    },
+    {
+      "item": "item-25",
+      "status": "見立てなしを支持",
+      "supportedCandidates": [],
+      "response": "双方見立てなしでの合意を支持する。",
+      "objection": "右上の先端と左下の段々を、具体的な一つの対象に対応させにくい。",
+      "revision": "",
+      "confidence": ""
+    },
+    {
+      "item": "item-26",
+      "status": "支持",
+      "supportedCandidates": [
+        "シャベル"
+      ],
+      "response": "幅広く下が尖る P1 を刃、左上の P2 を柄とするシャベルを支持する。",
+      "objection": "柄が刃に比べ短く、中心から左へずれて付く。",
+      "revision": "",
+      "confidence": "中"
+    },
+    {
+      "item": "item-27",
+      "status": "支持",
+      "supportedCandidates": [
+        "帆船"
+      ],
+      "response": "帆船を低で受け入れる。P1 の大きな三角形は船室より帆として読みやすく、P3 は船体、P4 は帆柱の先、P2 は旗と見られる。",
+      "objection": "帆が船体の右にはみ出し、帆柱は帆の中央から左へずれる。",
+      "revision": "三角形の船室という読みは弱く、蒸気船を取り下げる。",
+      "confidence": "低"
+    },
+    {
+      "item": "item-28",
+      "status": "支持",
+      "supportedCandidates": [
+        "キツネ"
+      ],
+      "response": "キツネを低で受け入れる。P5 を胴の後方から立つ尾、P2 を右向きの頭、P3・P4 を前足と読む。",
+      "objection": "P5 は細く、キツネらしい太い尾や耳は見えない。",
+      "revision": "P5 は頭 P2 と直接接しないことを重く見て、ウサギの耳という読みを取り下げる。ニワトリはとさかと首がなく支持しない。",
+      "confidence": "低"
+    },
+    {
+      "item": "item-29",
+      "status": "支持",
+      "supportedCandidates": [
+        "ウサギ"
+      ],
+      "response": "ウサギを低で受け入れる。P3 左端を顔、P4 を頭から右上に倒れる耳、P1 をうずくまった胴、P2 を後ろ側の背と尻と見ると、切れ込みも耳と後頭部の間としてまとまる。",
+      "objection": "顔の口先がなく、体は大きな三角形、尻も四角く張る。",
+      "revision": "見立てなしを修正する。",
+      "confidence": "低"
+    },
+    {
+      "item": "item-30",
+      "status": "見立てなしを支持",
+      "supportedCandidates": [],
+      "response": "ワニを取り下げ、見立てなしに修正する。P5 が背から斜め上に伸び、P4 の四角い口先に加えて尾の欠如も大きな弱点である。",
+      "objection": "四足の輪郭には見えるが、具体的な種類まで支える特徴が不足する。",
+      "revision": "当初のワニ候補を取り下げる。",
+      "confidence": ""
+    }
+  ]
+}

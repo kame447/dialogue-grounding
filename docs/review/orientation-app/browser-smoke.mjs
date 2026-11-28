@@ -1,0 +1,48 @@
+import { createRequire } from 'node:module';
+import { spawn } from 'node:child_process';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { once } from 'node:events';
+import assert from 'node:assert/strict';
+import { createServer } from 'node:net';
+const require=createRequire(import.meta.url);
+const {chromium}=require(process.env.PLAYWRIGHT_CORE_PATH||'playwright-core');
+const dir=mkdtempSync(join(tmpdir(),'orientation-browser-'));
+const probe=createServer().listen(0,'127.0.0.1');await once(probe,'listening');const port=probe.address().port;
+await new Promise((resolve,reject)=>probe.close(e=>e?reject(e):resolve()));
+const url='http://127.0.0.1:'+port;
+const child=spawn(process.execPath,[new URL('./server.ts',import.meta.url).pathname],{env:{...process.env,REVIEW_PORT:String(port),REVIEW_STATE_DIR:dir},stdio:'inherit'});
+let browser;
+try{
+ for(let i=0;i<100;i++){try{if((await fetch(url+'/api/state')).ok)break}catch{}await new Promise(r=>setTimeout(r,50))}
+ browser=await chromium.launch({headless:true,...(process.env.CHROMIUM_PATH?{executablePath:process.env.CHROMIUM_PATH}:{})});
+ const page=await browser.newPage({viewport:{width:1440,height:1000}});const errors=[];
+ page.on('pageerror',e=>errors.push(e.message));
+ await page.goto(url);await page.locator('#editor').waitFor({state:'visible'});
+ assert.equal(await page.locator('#figure-nav button').count(),30);
+ assert.equal(await page.locator('#orientations button').count(),4);
+ assert.equal(await page.locator('#parts .part').count(),4);
+ await page.getByRole('button',{name:'90度 未確認',exact:true}).click();
+ await page.locator('#whole').fill('90度での確認テスト');
+ await page.getByRole('textbox',{name:'P1 見立て',exact:true}).fill('翼\n先端');
+ await page.getByRole('button',{name:'確認して次へ',exact:true}).click();
+ await page.waitForFunction(()=>document.querySelector('#save-status').textContent.includes('保存済み'));
+ assert.match(await page.locator('#figure-title').textContent(),/180°/);
+ await page.reload();await page.locator('#editor').waitFor({state:'visible'});
+ assert.match(await page.locator('#figure-title').textContent(),/180°/);
+ await page.getByRole('button',{name:'90度 確認済み',exact:true}).click();
+ assert.equal(await page.locator('#whole').inputValue(),'90度での確認テスト');
+ assert.equal(await page.getByRole('textbox',{name:'P1 見立て',exact:true}).inputValue(),'翼\n先端');
+ await page.getByRole('button',{name:'0度 未確認',exact:true}).click();
+ assert.notEqual(await page.locator('#whole').inputValue(),'90度での確認テスト');
+ await page.waitForFunction(()=>document.querySelector('#save-status').textContent.includes('保存済み'));
+ const downloaded=page.waitForEvent('download');
+ await page.getByRole('button',{name:'JSONを書き出す',exact:true}).click();
+ const dl=await downloaded;assert.equal(dl.suggestedFilename(),'tangram-orientation-review-results.json');
+ await page.screenshot({path:'/tmp/tangram-orientation-review-preview.png',fullPage:true});
+ await page.locator('#pending-only').check();
+ assert.equal(await page.locator('#figure-nav button').count(),30);
+ assert.deepEqual(errors,[]);
+ console.log('Browser smoke passed: 4 previews, per-direction edits, persistence, export');
+}finally{if(browser)await browser.close();const end=once(child,'exit');child.kill();await end;rmSync(dir,{recursive:true,force:true})}

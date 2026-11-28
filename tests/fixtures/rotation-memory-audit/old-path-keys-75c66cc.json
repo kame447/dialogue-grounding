@@ -1,0 +1,437 @@
+{
+ "baseCommit": "75c66cc",
+ "keys": {
+  "relative_pm90|legacy6|0": {
+   "workerKeyV2": "terra_initial_observation_v1:93e65f0694fc4266110008a130c93f32e2ac3345695c59767a775ed5a728438d",
+   "workerKeyV1": "terra_initial_observation_v1:195428b8dc61b9a7d09e9eedc4448bdee35244d7ce82af8e21061c67374a2844",
+   "workerKeyNone": "terra_initial_observation_v1:d14e9df743ecfd01663b429a9a48fda4459b19020050ca333f25370881c22539",
+   "localKey": {
+    "imageHash": "4599f440ea1ddbb967a7ba7ee6a4316ec47531a45a7a7f011980a9d4a5546e12",
+    "anchorsHash": "7eab24b09db2b0d58d039781cc6a5e23f44f373b22bcc239be97cc38eed28f47",
+    "modelId": "synthetic-model",
+    "instructionHash": "f6513fbeff1cf6383281e6a00e1906efd90e44f3e813b2607fe0ed1b9e5d97ed",
+    "formatVersion": 1
+   }
+  },
+  "relative_pm90|legacy6|1": {
+   "workerKeyV2": "terra_initial_observation_v1:f9afb2c507fa26c49e83ea8a4dd42541ec59f3d0851f52ab6c9e9c3a89b18437",
+   "workerKeyV1": "terra_initial_observation_v1:3102df1e58078d10009c3b51733e8cba0586cb3eea2097a969ab961c0f7b9891",
+   "workerKeyNone": "terra_initial_observation_v1:7c7f78fa7eb22cf648974313b43079bb27dfc806d7e0a342b89fe78ba669392b",
+   "localKey": {
+    "imageHash": "2e2b36fab1b04bcb917279c755b5c251c08f676a8560a07c8d9113b2fd5ca4d7",
+    "anchorsHash": "f61795c18c04341648b92743fd254fbbaa9153d24b4910e07458b0efed81ad6e",
+    "modelId": "synthetic-model",
+    "instructionHash": "f6513fbeff1cf6383281e6a00e1906efd90e44f3e813b2607fe0ed1b9e5d97ed",
+    "formatVersion": 1
+   }
+  },
+  "relative_pm90|legacy6|7": {
+   "workerKeyV2": "terra_initial_observation_v1:0213de2b8a8ec0b6616b197d0e221aad3e8fc09baf86af281aa91421d94b22e0",
+   "workerKeyV1": "terra_initial_observation_v1:693828b92bb8dbdcacb157c3f5f556047ece05476875552b7023b1a1fb832dd8",
+   "workerKeyNone": "terra_initial_observation_v1:1dc238fac492d32db34121ba6159a59e5d4702969976493cd1acdc101efb572f",
+   "localKey": {
+    "imageHash": "14dc6c453438ca5bd63e68beba05af3aeff6739f1c5cccc1728fbcf1a1871f9b",
+    "anchorsHash": "2d489943b5b1ef2040ae4c84ca85dd5ce2da8f61c08c0ca47281e80dff16b238",
+    "modelId": "synthetic-model",
+    "instructionHash": "f6513fbeff1cf6383281e6a00e1906efd90e44f3e813b2607fe0ed1b9e5d97ed",
+    "formatVersion": 1
+   }
+  },
+  "relative_pm90|legacy6|104729": {
+   "workerKeyV2": "terra_initial_observation_v1:d744143af50860c1e35df87327ef56ef511f0160a27dffa196dd10b04c0f6d3c",
+   "workerKeyV1": "terra_initial_observation_v1:8ca60170e3ec3a5de84c8ac0ec82a370750e3845c129552ebf02110d505c515b",
+   "workerKeyNone": "terra_initial_observation_v1:c51a9b2a130bfbf40ee48c3b7bc6295c1041571c0214054753aebde19b2cdd4b",
+   "localKey": {
+    "imageHash": "542e026e69a22e77ac7f968ece939af1e4638e267d5f69c8887b80d3a2ae3d18",
+    "anchorsHash": "cb657e5d9ec279fff8541a4c9cc44d0533e3492ff60859059e6167d86928b093",
+    "modelId": "synthetic-model",
+    "instructionHash": "f6513fbeff1cf6383281e6a00e1906efd90e44f3e813b2607fe0ed1b9e5d97ed",
+    "formatVersion": 1
+   }
+  },
+  "relative_pm90|pilot4|0": {
+   "workerKeyV2": "terra_initial_observation_v1:941e7f3f920a5a453b6fee029585635dd5b63c009b99fd5787bff3d4f4f2f572",
+   "workerKeyV1": "terra_initial_observation_v1:787ab7cc1228ae6f1123db1ec91c7642316628f1691df793e9ecd6453600b870",
+   "workerKeyNone": "terra_initial_observation_v1:b1360399616f108489d4b322885b12c329b1550611bc81b8034aec1f99d11192",
+   "localKey": {
+    "imageHash": "c30a9441698c70b6b020e14e350ebeb7a730254e8c080e3eebd5e8f177d88e04",
+    "anchorsHash": "94b6c7540b7c241184415905e186d7e57fa916ef6241cc13dbf83752ed183d95",
+    "modelId": "synthetic-model",
+    "instructionHash": "eac4f0d19273bc8f163c46fae50350743cd1e1b3017538b911de5e07801cb6cb",
+    "formatVersion": 1
+   }
+  },
+  "relative_pm90|pilot4|1": {
+   "workerKeyV2": "terra_initial_observation_v1:844d25ac1381f1eefe7491bcb544f140c95aa3f2788fecd4cdafef02a80dc8be",
+   "workerKeyV1": "terra_initial_observation_v1:c7c856893faa16a8f7127032b3d519c21e3a98d8f6cbe9462f2c56db32a398c3",
+   "workerKeyNone": "terra_initial_observation_v1:bc204a80e9620356a28bb7a38f3a220ac45d41f84c37cf075e457b69b4ff975f",
+   "localKey": {
+    "imageHash": "23d078f6be40c4103b4884d12eda5f44adfbc505c91a7d4d54b9828af5a027b3",
+    "anchorsHash": "b8608d5308373cb7ffaf0ecc3395077498fea357f594bf4f0092445572110d5c",
+    "modelId": "synthetic-model",
+    "instructionHash": "eac4f0d19273bc8f163c46fae50350743cd1e1b3017538b911de5e07801cb6cb",
+    "formatVersion": 1
+   }
+  },
+  "relative_pm90|pilot4|7": {
+   "workerKeyV2": "terra_initial_observation_v1:c1633a18620c8604b64d584386bfeee28584de3b1abba43e962bb6ae50d36b6f",
+   "workerKeyV1": "terra_initial_observation_v1:b958b1e929b6c3f239ba87682102bba2afa9921e48cb1de90199e27da8ae3dab",
+   "workerKeyNone": "terra_initial_observation_v1:eccdb8c0334ebb932dd5c2e88c0437e51ab4d46f3a30a2a67f4c0aa6063d8c2d",
+   "localKey": {
+    "imageHash": "56a3f4c21c9e7d252974e6d5fd858dc3fca6ec2bfdc4ee197adffdaa16093b06",
+    "anchorsHash": "0c48c29b3a3a35a6d4d00be80b6a7899d7f463419b9f0958d3a1264994ed3fb4",
+    "modelId": "synthetic-model",
+    "instructionHash": "eac4f0d19273bc8f163c46fae50350743cd1e1b3017538b911de5e07801cb6cb",
+    "formatVersion": 1
+   }
+  },
+  "relative_pm90|pilot4|104729": {
+   "workerKeyV2": "terra_initial_observation_v1:559dd3b6c4fd95160be437ab42761c9fe8961d5bcf98c1504cad48ac5b975f79",
+   "workerKeyV1": "terra_initial_observation_v1:b4e60c6e9817830c96e9800f8cbef852434c7d868546177049d553f394df4767",
+   "workerKeyNone": "terra_initial_observation_v1:0c8c060bf9d81184dd66136ddde0864754bdfb6501212214ddbc1091ec8254d3",
+   "localKey": {
+    "imageHash": "818ad4895e36e93d5a79eedaaa51b23908cc6ca96ecd48a746fbc5275661e80a",
+    "anchorsHash": "8fd56c64e706270ebf09cc032b117736a1d5c87643eb021ee86e8fc5380e0807",
+    "modelId": "synthetic-model",
+    "instructionHash": "eac4f0d19273bc8f163c46fae50350743cd1e1b3017538b911de5e07801cb6cb",
+    "formatVersion": 1
+   }
+  },
+  "relative_pm90|custom3|0": {
+   "workerKeyV2": "terra_initial_observation_v1:f178d80b2481ce44b0f454cf0baef27dd71098bc18fef33fed8498657e503bae",
+   "workerKeyV1": "terra_initial_observation_v1:ed58e5b2754d6a17d908da9463e538ae634c01feb13c273ed43516bd0fb20f50",
+   "workerKeyNone": "terra_initial_observation_v1:2597175a328fc5edf9e5ff8a4123afba73aae039c804f6e2edf6a22bf0193145",
+   "localKey": {
+    "imageHash": "02bf988a00d1914ebff7553effd9a2426d73b3494b3bee494f7c802857729371",
+    "anchorsHash": "ca3fb725d85052e4c48f7779db0b825771dc0f9de63581e8f5b16f36563f6da4",
+    "modelId": "synthetic-model",
+    "instructionHash": "1da7c52fdd9bd52e116461efa921ea52f8037e796f1a06a298875e8fe3539e68",
+    "formatVersion": 1
+   }
+  },
+  "relative_pm90|custom3|1": {
+   "workerKeyV2": "terra_initial_observation_v1:31dedd21c16de9250ed98eb469aed91ed6f23f385fcd5617e9fc8a3e0968c4c0",
+   "workerKeyV1": "terra_initial_observation_v1:fb5dc27200159de734e7b21828192e20658679ecf0c115dc14b2daefb5300567",
+   "workerKeyNone": "terra_initial_observation_v1:02988545a9796e2170502cf5429b2ef02304e9ca266da2e478e90617c07a7b3c",
+   "localKey": {
+    "imageHash": "379d3ca6eef03f78aaacb77b72054db1757007c314654cbb7ed8bc8a604100a3",
+    "anchorsHash": "d50b223f763d8dd82f2bff59ff2e7c60b9c4e270db3cf4943a5bef75342cb5e1",
+    "modelId": "synthetic-model",
+    "instructionHash": "1da7c52fdd9bd52e116461efa921ea52f8037e796f1a06a298875e8fe3539e68",
+    "formatVersion": 1
+   }
+  },
+  "relative_pm90|custom3|7": {
+   "workerKeyV2": "terra_initial_observation_v1:3cdc594f49c3358ff1d900110f794a163e3345f5f0cfb27e3acda2c369b42658",
+   "workerKeyV1": "terra_initial_observation_v1:7e0d747aa852cb7fba1635bbabf4e5e662ea92032af51fb1268a6d4fc51f7c07",
+   "workerKeyNone": "terra_initial_observation_v1:989b04e40eedd47e6bae8fe09e8a1d19f2dfd273d569cd0a800c8b2320aaa5d4",
+   "localKey": {
+    "imageHash": "dc72a3305492ed904239e2abcceec2a66601541328a4fb361013c0d1dbb5a362",
+    "anchorsHash": "0fd0425d1d70d935e7935f23cc8a88b62727bb8755562d2122d5d6ee1b97dc77",
+    "modelId": "synthetic-model",
+    "instructionHash": "1da7c52fdd9bd52e116461efa921ea52f8037e796f1a06a298875e8fe3539e68",
+    "formatVersion": 1
+   }
+  },
+  "relative_pm90|custom3|104729": {
+   "workerKeyV2": "terra_initial_observation_v1:d79569a2c0c56cd213ed80a6d283faa8491440017b99865068a4bcadeaab7191",
+   "workerKeyV1": "terra_initial_observation_v1:61c629a92f6ca2b3320265443e9758e10b05c1dbb7ff64d912610b65b3814226",
+   "workerKeyNone": "terra_initial_observation_v1:6edc7c053b7457662a08698d12206b7b496ef8f4ee8ba3d7c64f98501a21fb5d",
+   "localKey": {
+    "imageHash": "a29983e8ffc8cf51afe0d5f757b56292afb6316970f306a4837da8f4bfd798a9",
+    "anchorsHash": "c0fc6e5dbe2b0672a71e0c1a36d9d79531fed81f88b9e362f0b87f6690d45184",
+    "modelId": "synthetic-model",
+    "instructionHash": "1da7c52fdd9bd52e116461efa921ea52f8037e796f1a06a298875e8fe3539e68",
+    "formatVersion": 1
+   }
+  },
+  "relative_0|legacy6|0": {
+   "workerKeyV2": "terra_initial_observation_v1:b9a5f82676cc6dce88a568576fd4992b24ccbb2eba5302f73ecf9a0ec069bf4c",
+   "workerKeyV1": "terra_initial_observation_v1:ec56105e29f2b4aee1163778e2760c415d552003cef900e4315281a805613cad",
+   "workerKeyNone": "terra_initial_observation_v1:cba6bd91e3c142a050e2dc4aa3ece1c56d52e4a16da26db1ae22e856a27bd9ca",
+   "localKey": {
+    "imageHash": "79e4621c940d974a20caf7a6dabce86427c4fe44dd5c8174ec68e9e11fac11c8",
+    "anchorsHash": "5cf6ebcdbe140f32f2c1c362bfb5fb697b76eff39d1aafa5daf418aad9cff41c",
+    "modelId": "synthetic-model",
+    "instructionHash": "f6513fbeff1cf6383281e6a00e1906efd90e44f3e813b2607fe0ed1b9e5d97ed",
+    "formatVersion": 1
+   }
+  },
+  "relative_0|legacy6|1": {
+   "workerKeyV2": "terra_initial_observation_v1:c51ce8e5cc8ce14a7355d22020c2a6ef53d8ef40338ad87191ce5f9e40a1f585",
+   "workerKeyV1": "terra_initial_observation_v1:04a7212685741daddcebc4b8846f9d5b9f318ab6905bda2800f5a31ed919d114",
+   "workerKeyNone": "terra_initial_observation_v1:d592e065346319997acb78da1bb426c119d1a9e00ee0dc25f7c86e8e3acba4e5",
+   "localKey": {
+    "imageHash": "795528a48260caf05587f80ce54fa3cf4066724be4c077ac70c18f1a040ad125",
+    "anchorsHash": "e3b01d1a4587f6fe3625b16f59ed6f94dd2edbe4690e46c7f8bd58bfd8223f70",
+    "modelId": "synthetic-model",
+    "instructionHash": "f6513fbeff1cf6383281e6a00e1906efd90e44f3e813b2607fe0ed1b9e5d97ed",
+    "formatVersion": 1
+   }
+  },
+  "relative_0|legacy6|7": {
+   "workerKeyV2": "terra_initial_observation_v1:2d1ed1ac2f783a9fd85ee33d4f01690557cf889617a6d5abd7f62ff93369e40e",
+   "workerKeyV1": "terra_initial_observation_v1:20dc7cf827b21573bdfb2c749574723e7b34e52db78b6b0234999a3d133ef1a9",
+   "workerKeyNone": "terra_initial_observation_v1:00ba7a23efce66df837c0423e23295c67fbb72f3280de42062cfbcd1d83d3ee6",
+   "localKey": {
+    "imageHash": "e377685e355f5f8f3063df6efe7553a9f3d8bd0a50ae8051a57d151895de65c6",
+    "anchorsHash": "9bcfc38cb25c0c20926725ba46bf254a0237bbeea342beed479e7211ab916fd9",
+    "modelId": "synthetic-model",
+    "instructionHash": "f6513fbeff1cf6383281e6a00e1906efd90e44f3e813b2607fe0ed1b9e5d97ed",
+    "formatVersion": 1
+   }
+  },
+  "relative_0|legacy6|104729": {
+   "workerKeyV2": "terra_initial_observation_v1:a49f719f3ef1f32f9837b7a9f03b8752a0907b974adc4e4844961c21dd018f4b",
+   "workerKeyV1": "terra_initial_observation_v1:3e9ed2d5f780c2bc39c9b780312a0c5a4339ca5363032cd4e57d6307cc38a0b5",
+   "workerKeyNone": "terra_initial_observation_v1:d5a1f472c03ab37c087b87c95acff57a5f62fd4d7c54c21064f7da7d30ae3539",
+   "localKey": {
+    "imageHash": "12b79cda527a71f929c963c377aa13c4b6da2a28da5ee30862a592090893f8f1",
+    "anchorsHash": "a8ce52a445f25b74bf6aaed9e548e352aa493c3d3e60047c722e0d086e706494",
+    "modelId": "synthetic-model",
+    "instructionHash": "f6513fbeff1cf6383281e6a00e1906efd90e44f3e813b2607fe0ed1b9e5d97ed",
+    "formatVersion": 1
+   }
+  },
+  "relative_0|pilot4|0": {
+   "workerKeyV2": "terra_initial_observation_v1:5add842e9d28b2b1a5e2a2b811fe25198b2b21b2d185a67e09cbf2153b5552a6",
+   "workerKeyV1": "terra_initial_observation_v1:c2b61ed7a96be36ab03cb3d84033e0242590c2b2d283fca04dced896633b9140",
+   "workerKeyNone": "terra_initial_observation_v1:922a1dbf4dc751aefb9fd858873935db23a99048ab19588406931ad2290a2aa0",
+   "localKey": {
+    "imageHash": "ea3c5aa7108890e0a4a8ce4f479088468cdd1dfec3de536b14a4341e3cf5283a",
+    "anchorsHash": "b9609244f5fd31d93c2ed114d26f78b964c18b195d81e2c7a9d12bf53dbf1fea",
+    "modelId": "synthetic-model",
+    "instructionHash": "eac4f0d19273bc8f163c46fae50350743cd1e1b3017538b911de5e07801cb6cb",
+    "formatVersion": 1
+   }
+  },
+  "relative_0|pilot4|1": {
+   "workerKeyV2": "terra_initial_observation_v1:368dc9559b19a0d2307d3bb665ef2864b95e84095e27ab3e084970a5b8679f12",
+   "workerKeyV1": "terra_initial_observation_v1:bf41a6bc34f05d92f7959d6903519f26184e25a633263f6cd1ac2405fb978508",
+   "workerKeyNone": "terra_initial_observation_v1:9cb9dc1d04e10bdd8767e4bee1d43f715b43ce48f438a69592baa5e3dbf47818",
+   "localKey": {
+    "imageHash": "2ab8b343ca6ea360e2c47800634ebbe5a1666f4012409f5faa9c969a1c6e3423",
+    "anchorsHash": "69bc0cedf2d7e7a8fcf90c86a24316e83f32c85daef2d980bd85ae9cfb92aa4c",
+    "modelId": "synthetic-model",
+    "instructionHash": "eac4f0d19273bc8f163c46fae50350743cd1e1b3017538b911de5e07801cb6cb",
+    "formatVersion": 1
+   }
+  },
+  "relative_0|pilot4|7": {
+   "workerKeyV2": "terra_initial_observation_v1:f7bcea1317cde934840c7db7b504df6c0c32ace631f2c2ecd071ce2264770235",
+   "workerKeyV1": "terra_initial_observation_v1:e1f51dbb8efcd13728f09ae8798bdca64afa2bb5b69dbea68c6499108f2425a6",
+   "workerKeyNone": "terra_initial_observation_v1:2d2e9a24018c08fb7d4659264605cb2943c974d382d1d4dcb787798d5eee3d21",
+   "localKey": {
+    "imageHash": "b7dc72393f50dc03fec9b439cde86c7048bdb0ed9285e515aca32d45b6820646",
+    "anchorsHash": "cd0bb429f24f8d9571888224d8f2875334e2190da6810ffb6b02ad86d3080421",
+    "modelId": "synthetic-model",
+    "instructionHash": "eac4f0d19273bc8f163c46fae50350743cd1e1b3017538b911de5e07801cb6cb",
+    "formatVersion": 1
+   }
+  },
+  "relative_0|pilot4|104729": {
+   "workerKeyV2": "terra_initial_observation_v1:0ad9721336b15b04c7a0c86f2c95a982740cd5ae36287d7b50d51c7b44906ee6",
+   "workerKeyV1": "terra_initial_observation_v1:273283ace1f9fe0a980bc61505b9388dce8af4c0c749f0f0dd924c6be7515236",
+   "workerKeyNone": "terra_initial_observation_v1:6b9167071021749c98dd950406ebbb283660ce142124d9fb1d7772a4d3d0ae2b",
+   "localKey": {
+    "imageHash": "8a6295c84a9fc1b631d25fe5322638d389b5ba0b7de793a4e50509e31418318b",
+    "anchorsHash": "69be04e00bf4d102ed4c8784a06c680d509373d4260c2e01faabc55b5bea7282",
+    "modelId": "synthetic-model",
+    "instructionHash": "eac4f0d19273bc8f163c46fae50350743cd1e1b3017538b911de5e07801cb6cb",
+    "formatVersion": 1
+   }
+  },
+  "relative_0|custom3|0": {
+   "workerKeyV2": "terra_initial_observation_v1:921378841aa3694220cefcceb1e378917f404b13ab8233c9febae816071e14c7",
+   "workerKeyV1": "terra_initial_observation_v1:1dc3c12ca6c5ab5877ad2f45c6a2c390ef51647d013e0d6301e894477d26ae71",
+   "workerKeyNone": "terra_initial_observation_v1:e4d8e2cf42f5f3ac4359a6f3ab57e0ffed66b4fb29e69414f5074fae9f26e434",
+   "localKey": {
+    "imageHash": "2d323a7fdcab35fb462187389ce81fc616877b8c5f61eeaac05ea5f02052ada1",
+    "anchorsHash": "148b651be6ebca2970e950bcbbb9f7b867f85a6efd9ce7a346c724cd71ef910d",
+    "modelId": "synthetic-model",
+    "instructionHash": "1da7c52fdd9bd52e116461efa921ea52f8037e796f1a06a298875e8fe3539e68",
+    "formatVersion": 1
+   }
+  },
+  "relative_0|custom3|1": {
+   "workerKeyV2": "terra_initial_observation_v1:302133253210c8e8572925fa8317b7399014f383b220370f4cca88b9722687b2",
+   "workerKeyV1": "terra_initial_observation_v1:62fba02b84c10db54f435a8811aca293f279689c912b075003193f78f26ba2d5",
+   "workerKeyNone": "terra_initial_observation_v1:0170dfe88759788e0c835ad2f402c08977fddc83261e54b844c0b195de7f5726",
+   "localKey": {
+    "imageHash": "6a9ba3c5446e19703df94a3c01c934ac7957a08680e9d14f168f3f6b02575cec",
+    "anchorsHash": "ce4f8740cb54a7f150050105da29627c22af0c76e22662016680119771336487",
+    "modelId": "synthetic-model",
+    "instructionHash": "1da7c52fdd9bd52e116461efa921ea52f8037e796f1a06a298875e8fe3539e68",
+    "formatVersion": 1
+   }
+  },
+  "relative_0|custom3|7": {
+   "workerKeyV2": "terra_initial_observation_v1:5184b0fb262810d5b4925c11207530f47661aa4bb275e925137c6b5938f642b3",
+   "workerKeyV1": "terra_initial_observation_v1:b998467d384503ee7130e05fd6e915fd6c2e0acd46c31b08e36359fee46a8b8e",
+   "workerKeyNone": "terra_initial_observation_v1:dfa4ee4cf51d89cbe3e4eb5afcd9f00ae657c94c93474d1dab818150d129ab05",
+   "localKey": {
+    "imageHash": "e4132f1f2d406cfc95ee862beb5ef5dc9fb90fe6e89f714d53bd0c5d0739cef3",
+    "anchorsHash": "4a61f59023d6a932af557af655c01f0ee054e9c9e9863c25a07a41d5412fd84d",
+    "modelId": "synthetic-model",
+    "instructionHash": "1da7c52fdd9bd52e116461efa921ea52f8037e796f1a06a298875e8fe3539e68",
+    "formatVersion": 1
+   }
+  },
+  "relative_0|custom3|104729": {
+   "workerKeyV2": "terra_initial_observation_v1:792a0e2466ac3206e9b11cb7e9fb28d58bb0e7ca3e88e23bffe3cbd99ce495da",
+   "workerKeyV1": "terra_initial_observation_v1:8d229ec01d59c6c4cadf8cc1b0709463617d55a47604aa2d6f6b18f7d50f0f6c",
+   "workerKeyNone": "terra_initial_observation_v1:5800fcbbd81dd769a20c01dbb4877405d8d60ae3ffbd151530f73503ee58f635",
+   "localKey": {
+    "imageHash": "0f938c162cf852231fe00b1803ef87b0e7abf9198ae55c5b2213c493f4ca1675",
+    "anchorsHash": "973880492bdeea584c1ee21c62f1aa4fe730e1ececde372d4aa052fb4506d8c9",
+    "modelId": "synthetic-model",
+    "instructionHash": "1da7c52fdd9bd52e116461efa921ea52f8037e796f1a06a298875e8fe3539e68",
+    "formatVersion": 1
+   }
+  },
+  "relative_90_180_270|legacy6|0": {
+   "workerKeyV2": "terra_initial_observation_v1:6873d661d7cd08ba9151f81f01a78cc45e49ecf2f1c8fc84a029ea15570a3ab8",
+   "workerKeyV1": "terra_initial_observation_v1:417e4816a9bc7a70d6c9b7c2deb716204833262f1a927aff9e0dcab6334a76fc",
+   "workerKeyNone": "terra_initial_observation_v1:cdca22c928b3dfa38955ad9922c053f28bd86514b39b47bd11201bdcf5d50c47",
+   "localKey": {
+    "imageHash": "5bc8a0004033be4268e71e02d674e6d5fb15b41bb324a59a6aa8de7699238040",
+    "anchorsHash": "48a847167ac088958d59e68e66dde4fb1fd0e34e7c4d6d636c05f836467973de",
+    "modelId": "synthetic-model",
+    "instructionHash": "f6513fbeff1cf6383281e6a00e1906efd90e44f3e813b2607fe0ed1b9e5d97ed",
+    "formatVersion": 1
+   }
+  },
+  "relative_90_180_270|legacy6|1": {
+   "workerKeyV2": "terra_initial_observation_v1:ee6c35468edce8d90aefed3c22a3cae6dc757a859720319ff9da2d3cb374dd34",
+   "workerKeyV1": "terra_initial_observation_v1:7404a61158541a93ba714c643800bd3eee413f9752bf91ff7d649b57453b21cb",
+   "workerKeyNone": "terra_initial_observation_v1:f06cd4ee3456d801db97c708980d6d87161c8dff1a1c95d2ecc7ce995ed8c69c",
+   "localKey": {
+    "imageHash": "8c5a4242669d2d6228b068efaf631727084a014d1126e7bd2684c889a20be4d8",
+    "anchorsHash": "638aa3473605065519f58c63b6a1da83a7973d4ac89853d58402a47a914d23d7",
+    "modelId": "synthetic-model",
+    "instructionHash": "f6513fbeff1cf6383281e6a00e1906efd90e44f3e813b2607fe0ed1b9e5d97ed",
+    "formatVersion": 1
+   }
+  },
+  "relative_90_180_270|legacy6|7": {
+   "workerKeyV2": "terra_initial_observation_v1:410d6d0bc5af0f600975562c051ac0e78891182e2245e9da122f5f50bcc56367",
+   "workerKeyV1": "terra_initial_observation_v1:8772df01e8a4d5202e61ba01c2757793d847f3de7de230a36c2861b4b564edc2",
+   "workerKeyNone": "terra_initial_observation_v1:fe2777f523dfe2a3fd2e3b2067c9847e3afa5670b1736318704c069a61b4e384",
+   "localKey": {
+    "imageHash": "e589585d225650fd2acab4762fb62ccc1328323315eb183d47b9f4037ca1abef",
+    "anchorsHash": "c732624e56534b815beb8bab99e40100eb416cc4875e1e9476fd24426f01c57c",
+    "modelId": "synthetic-model",
+    "instructionHash": "f6513fbeff1cf6383281e6a00e1906efd90e44f3e813b2607fe0ed1b9e5d97ed",
+    "formatVersion": 1
+   }
+  },
+  "relative_90_180_270|legacy6|104729": {
+   "workerKeyV2": "terra_initial_observation_v1:ba3149c2cee5c8ee63b386a84c78735bada8bd72991eb0794f66453a79c2d25d",
+   "workerKeyV1": "terra_initial_observation_v1:fba69587c5a3cf15379872f5aff1a3a7a230b7148af182e53fbbdd1ce302ffc3",
+   "workerKeyNone": "terra_initial_observation_v1:7fa8ac5d0c1c62ffe8cd798a7e25fd508cd173cf0dbda1d0d47002c55f3052d1",
+   "localKey": {
+    "imageHash": "d929e2ab13ad0a6e93bc8575007dd72b351ea6f859e3c9bf1c36e21846c1845e",
+    "anchorsHash": "b08e023f489e26809068c6e7301310cf154d1eb77998b964a764f45fc487d5db",
+    "modelId": "synthetic-model",
+    "instructionHash": "f6513fbeff1cf6383281e6a00e1906efd90e44f3e813b2607fe0ed1b9e5d97ed",
+    "formatVersion": 1
+   }
+  },
+  "relative_90_180_270|pilot4|0": {
+   "workerKeyV2": "terra_initial_observation_v1:f4e4688982431575aae00c18516c98687f4f105f5230e2b6c4f62fbe8574f304",
+   "workerKeyV1": "terra_initial_observation_v1:7ad712d49451d4a2a08fe08d2b981ef712be6a0570f4bdcf784a6f746b4f1fb3",
+   "workerKeyNone": "terra_initial_observation_v1:c97843a846f5984b4211de64ec69d80e6062e2d8014aec8b7a1a0c148bcd50e2",
+   "localKey": {
+    "imageHash": "097125eeab0d63d44970a634512196134cc1c5ea94cf2c957741e80330100746",
+    "anchorsHash": "b5a917a1461066644e07ad2ba368a08c3a4154b3e385b53d076f437678bf415c",
+    "modelId": "synthetic-model",
+    "instructionHash": "eac4f0d19273bc8f163c46fae50350743cd1e1b3017538b911de5e07801cb6cb",
+    "formatVersion": 1
+   }
+  },
+  "relative_90_180_270|pilot4|1": {
+   "workerKeyV2": "terra_initial_observation_v1:22f1a646f0809d03ee6f8b7f160c24602d8e4fd3ec3913117a4e1a1d368551bf",
+   "workerKeyV1": "terra_initial_observation_v1:ac7ccf649a12503255ffb989f8bfffa2195de13d1b9e1b432d598810a4c9a034",
+   "workerKeyNone": "terra_initial_observation_v1:903683ddadf05331f4e2a6104dae9cacfaed5d4d1850d08580950c86206df7ec",
+   "localKey": {
+    "imageHash": "f15c5351f481615b5281974e46f382de2d83e17ff58f91f735344b963aa70632",
+    "anchorsHash": "5a54e447d5290753f5a2900e977d1e2bd99208b4f8ac3b90a239918a78ba080b",
+    "modelId": "synthetic-model",
+    "instructionHash": "eac4f0d19273bc8f163c46fae50350743cd1e1b3017538b911de5e07801cb6cb",
+    "formatVersion": 1
+   }
+  },
+  "relative_90_180_270|pilot4|7": {
+   "workerKeyV2": "terra_initial_observation_v1:d95d1cdd2f92aec7d155be35820d9b1207c39c8fb5f591a483528fb344ac309b",
+   "workerKeyV1": "terra_initial_observation_v1:9acea4ff4a71020e0786869fefc9eaf83ed7a36ba575f0b8ed620c3952f1cf62",
+   "workerKeyNone": "terra_initial_observation_v1:13cf8a4bd7fefa1fbe299421a2a74b56aa7b1b114bb6ab50c9ec952dcec1a009",
+   "localKey": {
+    "imageHash": "cad727f2d03f8c2f0425174924efdff7fd8e30fdb669d1b704d42728be7e3f49",
+    "anchorsHash": "810a53387c7856600336214d531f6c5d8518f5e783c5de3627a3284f163dd6aa",
+    "modelId": "synthetic-model",
+    "instructionHash": "eac4f0d19273bc8f163c46fae50350743cd1e1b3017538b911de5e07801cb6cb",
+    "formatVersion": 1
+   }
+  },
+  "relative_90_180_270|pilot4|104729": {
+   "workerKeyV2": "terra_initial_observation_v1:9ce6da5d378578d7c01913e4b9a65cbf776b2c780ea66a8aa7678b60a219eac3",
+   "workerKeyV1": "terra_initial_observation_v1:8864c505e85a2803ac7ac0aefdf5e4511aa1edcf394b740f7bdc3a00f0c6bb59",
+   "workerKeyNone": "terra_initial_observation_v1:c667a9f5d33a72685fe2b50d84f21ce016a4cd473aeb2dff86acdf2675f4be20",
+   "localKey": {
+    "imageHash": "5745f12d353e9bced26ba4535c40eb7d31611dc58cd260f5a6ef7f4e2b40eded",
+    "anchorsHash": "c3d717ce53a0e1cc0162fb21f600b546b48f07b2ec598dc2e32bf6eb7fe01a98",
+    "modelId": "synthetic-model",
+    "instructionHash": "eac4f0d19273bc8f163c46fae50350743cd1e1b3017538b911de5e07801cb6cb",
+    "formatVersion": 1
+   }
+  },
+  "relative_90_180_270|custom3|0": {
+   "workerKeyV2": "terra_initial_observation_v1:a374d90bda2ea58ec85623286d14bc0184d14b28905d391d0c14f36258ee6d05",
+   "workerKeyV1": "terra_initial_observation_v1:cc99fcbfdaa6d951f6d11f48cb9dd07d0669f071232ba0daab6ae1812fcd80f2",
+   "workerKeyNone": "terra_initial_observation_v1:bbedf7ee8955f4bb370d047636b510af5b8d045c507dd5d7de8044089a2d6a93",
+   "localKey": {
+    "imageHash": "2c3ceb5a803cf4fee30d865610727e4e09f1c0ec101c369acdd194019c8cee1c",
+    "anchorsHash": "8c45ec70e976a6d8886e84ea38903301a434e7fa61d538a94cf787a7d9c9313c",
+    "modelId": "synthetic-model",
+    "instructionHash": "1da7c52fdd9bd52e116461efa921ea52f8037e796f1a06a298875e8fe3539e68",
+    "formatVersion": 1
+   }
+  },
+  "relative_90_180_270|custom3|1": {
+   "workerKeyV2": "terra_initial_observation_v1:31dedd21c16de9250ed98eb469aed91ed6f23f385fcd5617e9fc8a3e0968c4c0",
+   "workerKeyV1": "terra_initial_observation_v1:fb5dc27200159de734e7b21828192e20658679ecf0c115dc14b2daefb5300567",
+   "workerKeyNone": "terra_initial_observation_v1:02988545a9796e2170502cf5429b2ef02304e9ca266da2e478e90617c07a7b3c",
+   "localKey": {
+    "imageHash": "379d3ca6eef03f78aaacb77b72054db1757007c314654cbb7ed8bc8a604100a3",
+    "anchorsHash": "d50b223f763d8dd82f2bff59ff2e7c60b9c4e270db3cf4943a5bef75342cb5e1",
+    "modelId": "synthetic-model",
+    "instructionHash": "1da7c52fdd9bd52e116461efa921ea52f8037e796f1a06a298875e8fe3539e68",
+    "formatVersion": 1
+   }
+  },
+  "relative_90_180_270|custom3|7": {
+   "workerKeyV2": "terra_initial_observation_v1:67c0dd874addd2ec1ab124835b6641d7a7879d7459d46f794f2635b765073bd6",
+   "workerKeyV1": "terra_initial_observation_v1:8505327d822c97f6859c2973411462c151bb8f4e25a8144d537322bf70e8d298",
+   "workerKeyNone": "terra_initial_observation_v1:48d62ea53ec4f048c6f12576b7f34c0278a72fbd078a37a0c26d5fae4c3acfbd",
+   "localKey": {
+    "imageHash": "88d7612225deca6420339ec020541c320c4810a337d859032a93e8618b5e6558",
+    "anchorsHash": "8cbd45f7550f924b2f441de325df7d151ef4a503ecef8df806013c3079b262bd",
+    "modelId": "synthetic-model",
+    "instructionHash": "1da7c52fdd9bd52e116461efa921ea52f8037e796f1a06a298875e8fe3539e68",
+    "formatVersion": 1
+   }
+  },
+  "relative_90_180_270|custom3|104729": {
+   "workerKeyV2": "terra_initial_observation_v1:ae772e0132106cfc0a8daa0d9fdea3f4c0f414d50e8c327e631fb7c1f1e9fc7a",
+   "workerKeyV1": "terra_initial_observation_v1:6858d59007bfa09ecd39158c7d914d1bff370db5de10f81c9884cef93e587591",
+   "workerKeyNone": "terra_initial_observation_v1:42cad71d1e27fd7efc9d4424f490be367cbb510fd5aa7d24c61928e87d35314c",
+   "localKey": {
+    "imageHash": "8e36ddadb80d4a260c2249bd74a0267a5606d32551f345c4d3e9e0f6cb23aa60",
+    "anchorsHash": "ca9079eda0fe908dfd511592076e40f57f3a0a102abff439d7f7302cfafdf871",
+    "modelId": "synthetic-model",
+    "instructionHash": "1da7c52fdd9bd52e116461efa921ea52f8037e796f1a06a298875e8fe3539e68",
+    "formatVersion": 1
+   }
+  }
+ }
+}

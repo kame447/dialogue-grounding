@@ -1,0 +1,792 @@
+{
+  "observer": "FrostyGauss",
+  "model": "gpt-6.1-terra",
+  "effort": "ultra",
+  "viewedImages": true,
+  "items": [
+    {
+      "item": "item-01",
+      "silhouetteImpression": "左に頭を向け、翼を広げた鳥に見えた。",
+      "candidates": [
+        {
+          "rank": 1,
+          "noun": "飛んでいるカモ",
+          "posture": "翼を広げて飛ぶ",
+          "direction": "頭が左、尾が右",
+          "confidence": "中",
+          "parts": [
+            {
+              "id": "P1",
+              "role": "胴体と手前の翼",
+              "evidence": "中央から右下へ大きく張る三角形"
+            },
+            {
+              "id": "P2",
+              "role": "首",
+              "evidence": "左の四角と胴体の間にある小三角形"
+            },
+            {
+              "id": "P3",
+              "role": "頭",
+              "evidence": "左端の四角"
+            },
+            {
+              "id": "P4",
+              "role": "奥の翼",
+              "evidence": "胴体から右上へ斜めに伸びる"
+            },
+            {
+              "id": "P5",
+              "role": "尾",
+              "evidence": "胴体の右端に小さく突き出る"
+            }
+          ],
+          "evidence": "左右に頭と尾が伸び、中央に上下の翼が開いて見える。",
+          "weaknesses": "頭が四角く、くちばしや足は見えない。"
+        }
+      ],
+      "noConstrual": false,
+      "noConstrualReason": "",
+      "uncertainty": "翼のうち下側が大きく、胴体との境目は曖昧。"
+    },
+    {
+      "item": "item-02",
+      "silhouetteImpression": "左に頭を突き出して翼を広げる鳥に見えた。",
+      "candidates": [
+        {
+          "rank": 1,
+          "noun": "飛んでいるカモ",
+          "posture": "翼を広げて飛ぶ",
+          "direction": "頭が左上、翼が右上と右下",
+          "confidence": "中",
+          "parts": [
+            {
+              "id": "P1",
+              "role": "胴体と手前の翼",
+              "evidence": "中央から右下に広がる大きな三角形"
+            },
+            {
+              "id": "P2",
+              "role": "首",
+              "evidence": "左上の頭と胴体を斜めにつなぐ"
+            },
+            {
+              "id": "P3",
+              "role": "頭",
+              "evidence": "左端の四角"
+            },
+            {
+              "id": "P4",
+              "role": "奥の翼",
+              "evidence": "中央から右上へ伸びる細長い部分"
+            }
+          ],
+          "evidence": "頭から斜めの首が胴体につながり、両側に翼を広げて見える。",
+          "weaknesses": "嘴と尾がはっきり分かれず、翼の形も非対称。"
+        }
+      ],
+      "noConstrual": false,
+      "noConstrualReason": "",
+      "uncertainty": "右下の大きな三角形は翼と胴体の両方にまたがると見た。"
+    },
+    {
+      "item": "item-03",
+      "silhouetteImpression": "右に縦長の塊があり、左へ短い突起が出ている形に見えた。",
+      "candidates": [],
+      "noConstrual": true,
+      "noConstrualReason": "右の大きな六角形と左の突起を、特定の品物の部位として無理なく対応できない。",
+      "uncertainty": "突起を柄と見る道具の読みもあるが、右側の形と釣り合わない。"
+    },
+    {
+      "item": "item-04",
+      "silhouetteImpression": "上の逆三角形と右下の尖った部分がつながった形に見えた。",
+      "candidates": [],
+      "noConstrual": true,
+      "noConstrualReason": "上と右下の尖り、左の四角を合わせて特定のものと判断できない。",
+      "uncertainty": "漏斗などを連想したが、左の四角と右に張り出す輪郭が決め手にならない。"
+    },
+    {
+      "item": "item-05",
+      "silhouetteImpression": "左下に頭を下げ、右に尾を上げた鳥に見えた。",
+      "candidates": [
+        {
+          "rank": 1,
+          "noun": "餌をついばむカモ",
+          "posture": "頭を下げて立つ",
+          "direction": "頭が左下、尾が右上",
+          "confidence": "低",
+          "parts": [
+            {
+              "id": "P1",
+              "role": "胴体と上がった翼",
+              "evidence": "中央の大きな斜めの領域が背中から翼に広がる"
+            },
+            {
+              "id": "P2",
+              "role": "脚",
+              "evidence": "胴体の下へ細く尖って伸びる"
+            },
+            {
+              "id": "P3",
+              "role": "首",
+              "evidence": "左下の四角と中央をつなぐ三角形"
+            },
+            {
+              "id": "P4",
+              "role": "頭",
+              "evidence": "左下端の四角"
+            },
+            {
+              "id": "P5",
+              "role": "尾",
+              "evidence": "胴体右側から右上へ突き出る"
+            }
+          ],
+          "evidence": "左下に下がった頭と右上の尾の間に、翼を立てた胴体があるように見える。",
+          "weaknesses": "頭が四角く嘴がなく、脚も一本だけで翼が極端に大きい。"
+        }
+      ],
+      "noConstrual": false,
+      "noConstrualReason": "",
+      "uncertainty": "左下の四角は頭でなく脚とも読める。"
+    },
+    {
+      "item": "item-06",
+      "silhouetteImpression": "平らな底と右に傾く大きな面、左の突起がある形に見えた。",
+      "candidates": [],
+      "noConstrual": true,
+      "noConstrualReason": "大きな台形に付く二つの突起の役割が定まらない。",
+      "uncertainty": "アイロンのようにも見えるが、左下の四角や上の突起の役割が定まらない。"
+    },
+    {
+      "item": "item-07",
+      "silhouetteImpression": "右に縦の辺があり、左へ折れながら突き出る細長い形に見えた。",
+      "candidates": [],
+      "noConstrual": true,
+      "noConstrualReason": "縦長の輪郭から特定の姿勢や品物を確信できない。",
+      "uncertainty": "人の横姿も考えたが頭と手足の区別に確信が持てない。"
+    },
+    {
+      "item": "item-08",
+      "silhouetteImpression": "左を向く魚のように見えた。",
+      "candidates": [],
+      "noConstrual": true,
+      "noConstrualReason": "魚のような輪郭には見えるが、種類を示せる形の手掛かりがなく、特定の名詞に絞れない。",
+      "uncertainty": "左向きの矢印としても読め、魚の種類までは見分けられない。"
+    },
+    {
+      "item": "item-09",
+      "silhouetteImpression": "右に首と頭を下げた馬のように見えた。",
+      "candidates": [
+        {
+          "rank": 1,
+          "noun": "馬",
+          "posture": "頭を下げて立つ",
+          "direction": "頭が右、後ろが左",
+          "confidence": "低",
+          "parts": [
+            {
+              "id": "P1",
+              "role": "胴体と後ろ脚",
+              "evidence": "左側の大きな三角形が胴体から下端に及ぶ"
+            },
+            {
+              "id": "P2",
+              "role": "脚",
+              "evidence": "中央左から下へ垂れる台形"
+            },
+            {
+              "id": "P3",
+              "role": "首",
+              "evidence": "中央から右上に立ち上がる台形"
+            },
+            {
+              "id": "P4",
+              "role": "頭",
+              "evidence": "首から右下へ折れた細長い部分"
+            }
+          ],
+          "evidence": "右側の折れた首と頭、その左の胴体と下向きの脚が四足動物を連想させる。",
+          "weaknesses": "胴体が大きな三角形で、脚や耳が十分に分かれない。"
+        }
+      ],
+      "noConstrual": false,
+      "noConstrualReason": "",
+      "uncertainty": "左の大きな三角形を尾や翼と見る読みもある。"
+    },
+    {
+      "item": "item-10",
+      "silhouetteImpression": "左向きに座る犬の横姿に見えた。",
+      "candidates": [
+        {
+          "rank": 1,
+          "noun": "座っている犬",
+          "posture": "前脚を伸ばして座る",
+          "direction": "顔が左、背中が右",
+          "confidence": "低",
+          "parts": [
+            {
+              "id": "P1",
+              "role": "頭と胴体",
+              "evidence": "上に尖り右側を占める大きな五角形"
+            },
+            {
+              "id": "P2",
+              "role": "前脚",
+              "evidence": "体の左下から斜め左下へ伸びる"
+            },
+            {
+              "id": "P3",
+              "role": "鼻先",
+              "evidence": "頭の左に突き出す四角"
+            }
+          ],
+          "evidence": "尖った耳のような上端と左の鼻先、斜め下の脚が座る犬を思わせる。",
+          "weaknesses": "耳と胴体が一続きで、後脚や尾がはっきりしない。"
+        }
+      ],
+      "noConstrual": false,
+      "noConstrualReason": "",
+      "uncertainty": "左上の四角を頭と見ると人物の姿にも見える。"
+    },
+    {
+      "item": "item-11",
+      "silhouetteImpression": "右に頭を下げた鳥が横向きにいるように見えた。",
+      "candidates": [
+        {
+          "rank": 1,
+          "noun": "餌をついばむカモ",
+          "posture": "頭を下げる",
+          "direction": "頭が右下、尾が左",
+          "confidence": "低",
+          "parts": [
+            {
+              "id": "P1",
+              "role": "尾",
+              "evidence": "左端に尖る三角形"
+            },
+            {
+              "id": "P2",
+              "role": "胴体",
+              "evidence": "中央の大きな五角形"
+            },
+            {
+              "id": "P3",
+              "role": "首の付け根",
+              "evidence": "胴体右上につながる四角"
+            },
+            {
+              "id": "P4",
+              "role": "首と頭",
+              "evidence": "右端から斜め下へ垂れる"
+            }
+          ],
+          "evidence": "左の尾から中央の胴、右に下げた首と頭へと連なって見える。",
+          "weaknesses": "脚と明確な嘴がなく、首の境目も角張っている。"
+        }
+      ],
+      "noConstrual": false,
+      "noConstrualReason": "",
+      "uncertainty": "右の突起は頭でなく別の部位とも読める。"
+    },
+    {
+      "item": "item-12",
+      "silhouetteImpression": "山形の上に四角い突起が立つ形に見えた。",
+      "candidates": [],
+      "noConstrual": true,
+      "noConstrualReason": "三角形状の大きな部分と上の二つの突起を特定のものにまとめられない。",
+      "uncertainty": "屋根と煙突を連想するが、左上の尖りと下の幅広さを含めた建物の輪郭が定まらない。"
+    },
+    {
+      "item": "item-13",
+      "silhouetteImpression": "左に機首を向けた飛行機を上から見たように見えた。",
+      "candidates": [
+        {
+          "rank": 1,
+          "noun": "飛行機",
+          "posture": "水平に飛ぶ",
+          "direction": "機首が左、尾が右",
+          "confidence": "中",
+          "parts": [
+            {
+              "id": "P1",
+              "role": "胴体中央と手前の翼",
+              "evidence": "中央から下に大きく張り出す五角形"
+            },
+            {
+              "id": "P2",
+              "role": "機首",
+              "evidence": "左へ細く尖る台形"
+            },
+            {
+              "id": "P3",
+              "role": "奥の翼",
+              "evidence": "中央上に突き出る三角形"
+            },
+            {
+              "id": "P4",
+              "role": "尾部",
+              "evidence": "右端の四角"
+            }
+          ],
+          "evidence": "左右に細長く伸びる胴体と上下の翼が飛行機の平面形を思わせる。",
+          "weaknesses": "尾が四角く、上下の翼の大きさがかなり違う。"
+        }
+      ],
+      "noConstrual": false,
+      "noConstrualReason": "",
+      "uncertainty": "魚にも見えるが、左右に伸びる胴体と翼を優先した。"
+    },
+    {
+      "item": "item-14",
+      "silhouetteImpression": "左に尖った頭と右下に折れた尾の魚に見えた。",
+      "candidates": [],
+      "noConstrual": true,
+      "noConstrualReason": "魚のような輪郭には見えるが、種類を示せる形の手掛かりがなく、特定の名詞に絞れない。",
+      "uncertainty": "飛行機の機首と尾翼という読みもある。"
+    },
+    {
+      "item": "item-15",
+      "silhouetteImpression": "右に尖ったくちばしを出した鳥の横顔に見えた。",
+      "candidates": [
+        {
+          "rank": 1,
+          "noun": "カモ",
+          "posture": "体を丸めて浮かぶ",
+          "direction": "くちばしが右",
+          "confidence": "低",
+          "parts": [
+            {
+              "id": "P1",
+              "role": "胴体と頭",
+              "evidence": "下が幅広く右上へ立ち上がる大きな領域"
+            },
+            {
+              "id": "P2",
+              "role": "くちばし",
+              "evidence": "右上端の小さな三角形"
+            },
+            {
+              "id": "P3",
+              "role": "頭の上の羽",
+              "evidence": "上へ尖る小さな三角形"
+            }
+          ],
+          "evidence": "丸い胴に近い下部と、右に伸びる三角のくちばしが浮かぶカモを思わせる。",
+          "weaknesses": "胴体が角張り、頭頂の羽はカモらしさを弱める。"
+        }
+      ],
+      "noConstrual": false,
+      "noConstrualReason": "",
+      "uncertainty": "尖った部分を耳と見ると横向きの猫にも見える。"
+    },
+    {
+      "item": "item-16",
+      "silhouetteImpression": "左に向かう魚のように見えた。",
+      "candidates": [],
+      "noConstrual": true,
+      "noConstrualReason": "魚のような輪郭には見えるが、種類を示せる形の手掛かりがなく、特定の名詞に絞れない。",
+      "uncertainty": "下の突起を翼と見れば飛行機にも見える。"
+    },
+    {
+      "item": "item-17",
+      "silhouetteImpression": "右を向いたキツネの顔と、左下に伸びる体に見えた。",
+      "candidates": [
+        {
+          "rank": 1,
+          "noun": "キツネ",
+          "posture": "横向きに立つ",
+          "direction": "顔が右、体が左下",
+          "confidence": "低",
+          "parts": [
+            {
+              "id": "P1",
+              "role": "顔と左側の耳",
+              "evidence": "中央の大三角形が右の顔へ集まり、左上に尖る"
+            },
+            {
+              "id": "P2",
+              "role": "首",
+              "evidence": "顔の左側にある短い台形"
+            },
+            {
+              "id": "P3",
+              "role": "体の後ろ側",
+              "evidence": "左下へ斜めに延びる部分"
+            },
+            {
+              "id": "P4",
+              "role": "右側の耳",
+              "evidence": "顔の上の鋭い三角形"
+            },
+            {
+              "id": "P5",
+              "role": "鼻先",
+              "evidence": "右へ突き出す三角形"
+            }
+          ],
+          "evidence": "上の二つの尖りが耳、右の尖りが鼻先に見え、キツネの横顔を思わせる。",
+          "weaknesses": "脚や尾が独立して見えず、頭が体に比べて非常に大きい。"
+        }
+      ],
+      "noConstrual": false,
+      "noConstrualReason": "",
+      "uncertainty": "顔の輪郭を優先した読みで、左下の部分の解釈は不確か。"
+    },
+    {
+      "item": "item-18",
+      "silhouetteImpression": "左上から右下へ折れ曲がる細長い形に見えた。",
+      "candidates": [],
+      "noConstrual": true,
+      "noConstrualReason": "左右の突起を一貫した頭・胴・尾などに対応できない。",
+      "uncertainty": "鳥の首や尾を考えたが、頭と胴体を無理なく一続きに対応できない。"
+    },
+    {
+      "item": "item-19",
+      "silhouetteImpression": "左に上下の突起があり、右に四角が突き出た形に見えた。",
+      "candidates": [],
+      "noConstrual": true,
+      "noConstrualReason": "左の上下の尖りと右端の四角を特定の対象に対応できない。",
+      "uncertainty": "飛ぶ鳥や飛行機に見えなくもないが、右端の四角と左上の形の役割が定まらない。"
+    },
+    {
+      "item": "item-20",
+      "silhouetteImpression": "三角の帆を立てた船に見えた。",
+      "candidates": [
+        {
+          "rank": 1,
+          "noun": "帆船",
+          "posture": "水面に浮かぶ",
+          "direction": "船首が右、帆は左側",
+          "confidence": "低",
+          "parts": [
+            {
+              "id": "P1",
+              "role": "帆",
+              "evidence": "船体上の大きな三角形"
+            },
+            {
+              "id": "P2",
+              "role": "船体",
+              "evidence": "下側に横長に伸び両端が尖る台形"
+            },
+            {
+              "id": "P3",
+              "role": "甲板上の構造物",
+              "evidence": "船体右寄りに立つ四角"
+            }
+          ],
+          "evidence": "大きな三角の帆と、その下に細長い船体の組み合わせが帆船を思わせる。",
+          "weaknesses": "帆が船体の左へ大きくはみ出し、四角い構造物も目立つ。"
+        }
+      ],
+      "noConstrual": false,
+      "noConstrualReason": "",
+      "uncertainty": "右の四角は煙突にも見え、帆船としてはやや不自然。"
+    },
+    {
+      "item": "item-21",
+      "silhouetteImpression": "上に二つの突起、右下に四角が付いた縦長の形に見えた。",
+      "candidates": [],
+      "noConstrual": true,
+      "noConstrualReason": "上と右下の突起を自然な部位として対応できない。",
+      "uncertainty": "耳のある生き物にも見えるが、下端の四角を頭や足として納得できない。"
+    },
+    {
+      "item": "item-22",
+      "silhouetteImpression": "右上へ柄が伸びるフライパンに見えた。",
+      "candidates": [
+        {
+          "rank": 1,
+          "noun": "フライパン",
+          "posture": "柄を斜め上に向けて置かれる",
+          "direction": "本体が左下、柄が右上",
+          "confidence": "中",
+          "parts": [
+            {
+              "id": "P1",
+              "role": "パンの本体",
+              "evidence": "左下に大きく広がる五角形"
+            },
+            {
+              "id": "P2",
+              "role": "柄",
+              "evidence": "本体から右上へ伸びる細長い台形"
+            }
+          ],
+          "evidence": "広い本体から細い柄が一本伸びる形がフライパンを思わせる。",
+          "weaknesses": "本体が深い五角形で、通常の浅く丸い鍋底とは違う。"
+        }
+      ],
+      "noConstrual": false,
+      "noConstrualReason": "",
+      "uncertainty": "シャベルやラケットにも見えるが、柄と本体の太さの対比からフライパンと見た。"
+    },
+    {
+      "item": "item-23",
+      "silhouetteImpression": "左を向いて座るウサギの横姿に見えた。",
+      "candidates": [
+        {
+          "rank": 1,
+          "noun": "ウサギ",
+          "posture": "座っている",
+          "direction": "頭が左、体が右下",
+          "confidence": "中",
+          "parts": [
+            {
+              "id": "P1",
+              "role": "胴体",
+              "evidence": "中央から右下へ大きく広がる三角形"
+            },
+            {
+              "id": "P2",
+              "role": "顔",
+              "evidence": "胴体左上に接し左へ尖る三角形"
+            },
+            {
+              "id": "P3",
+              "role": "耳",
+              "evidence": "頭上から左上へ長く伸びる台形"
+            },
+            {
+              "id": "P4",
+              "role": "後ろ足",
+              "evidence": "胴体の右下につく四角"
+            }
+          ],
+          "evidence": "左に突き出た顔と長い耳、右下に広がる胴体が座ったウサギを思わせる。",
+          "weaknesses": "後ろ足が四角く、耳は一本しか見えない。"
+        }
+      ],
+      "noConstrual": false,
+      "noConstrualReason": "",
+      "uncertainty": "右下の四角は足でなく尾と読むこともできる。"
+    },
+    {
+      "item": "item-24",
+      "silhouetteImpression": "左上に首を伸ばして飛ぶ鳥のように見えた。",
+      "candidates": [
+        {
+          "rank": 1,
+          "noun": "飛んでいるカモ",
+          "posture": "首を伸ばして飛ぶ",
+          "direction": "頭が左上、尾が右下",
+          "confidence": "低",
+          "parts": [
+            {
+              "id": "P1",
+              "role": "胴体と翼",
+              "evidence": "中央に斜めに広がる台形"
+            },
+            {
+              "id": "P2",
+              "role": "尾",
+              "evidence": "右下に張り出す三角形"
+            },
+            {
+              "id": "P3",
+              "role": "首",
+              "evidence": "中央と左上の先端をつなぐ四角"
+            },
+            {
+              "id": "P4",
+              "role": "頭",
+              "evidence": "左上端へ伸びる細い部分"
+            }
+          ],
+          "evidence": "左上へ伸びる首と右下の尾の間に、斜め向きの胴体が見える。",
+          "weaknesses": "頭が細長すぎて嘴と区別できず、翼も明瞭でない。"
+        }
+      ],
+      "noConstrual": false,
+      "noConstrualReason": "",
+      "uncertainty": "折れた階段状の輪郭にも見える。"
+    },
+    {
+      "item": "item-25",
+      "silhouetteImpression": "左上の頭と右上に上げた翼を持つ鳥に見えた。",
+      "candidates": [
+        {
+          "rank": 1,
+          "noun": "飛んでいるカモ",
+          "posture": "翼を上げて飛ぶ",
+          "direction": "頭が左上、尾が右",
+          "confidence": "低",
+          "parts": [
+            {
+              "id": "P1",
+              "role": "胴体と下側の翼",
+              "evidence": "中央から左下と右へ広がる大きな台形"
+            },
+            {
+              "id": "P2",
+              "role": "首",
+              "evidence": "左上の頭と胴体の間の三角形"
+            },
+            {
+              "id": "P3",
+              "role": "頭",
+              "evidence": "左上端の四角"
+            },
+            {
+              "id": "P4",
+              "role": "上げた翼",
+              "evidence": "胴体から右上に伸びる細長い部分"
+            }
+          ],
+          "evidence": "左上の頭から胴体が続き、上下に羽を開いたように見える。",
+          "weaknesses": "頭が四角く、尾と翼の区別も曖昧。"
+        }
+      ],
+      "noConstrual": false,
+      "noConstrualReason": "",
+      "uncertainty": "右上の二つの先端を尾羽と見ることもできる。"
+    },
+    {
+      "item": "item-26",
+      "silhouetteImpression": "左上に頭があり右に腕を上げた人に見えた。",
+      "candidates": [
+        {
+          "rank": 1,
+          "noun": "手を上げて立つ人",
+          "posture": "腕を上げ、脚を曲げる",
+          "direction": "頭が左上、上げた手が右上",
+          "confidence": "低",
+          "parts": [
+            {
+              "id": "P1",
+              "role": "足元",
+              "evidence": "下端の三角形が水平な接地面を作る"
+            },
+            {
+              "id": "P2",
+              "role": "胴体と曲げた脚",
+              "evidence": "中央の大きな三角形が腰から下まで広がる"
+            },
+            {
+              "id": "P3",
+              "role": "肩と首",
+              "evidence": "頭の下から中央へ広がる三角形"
+            },
+            {
+              "id": "P4",
+              "role": "頭",
+              "evidence": "左上端の四角"
+            },
+            {
+              "id": "P5",
+              "role": "上げた腕",
+              "evidence": "中央右から右上へ突き出る細長い部分"
+            }
+          ],
+          "evidence": "左上の頭から胴が続き、右上へ腕を上げた姿に見える。",
+          "weaknesses": "胴と脚の境目がなく、もう一方の腕も見えない。"
+        }
+      ],
+      "noConstrual": false,
+      "noConstrualReason": "",
+      "uncertainty": "頭の四角が胴の真上からずれており、姿勢の読みには幅がある。"
+    },
+    {
+      "item": "item-27",
+      "silhouetteImpression": "左向きの尖った顔に二つの耳があるキツネに見えた。",
+      "candidates": [
+        {
+          "rank": 1,
+          "noun": "キツネ",
+          "posture": "横向きに伏せる",
+          "direction": "顔が左、尾が右下",
+          "confidence": "低",
+          "parts": [
+            {
+              "id": "P1",
+              "role": "頭と右側の耳",
+              "evidence": "中央の大きな三角形が上に尖り顔に続く"
+            },
+            {
+              "id": "P2",
+              "role": "左側の耳",
+              "evidence": "左上に尖る三角形"
+            },
+            {
+              "id": "P3",
+              "role": "鼻先",
+              "evidence": "左へ長く尖る三角形"
+            },
+            {
+              "id": "P4",
+              "role": "胴体",
+              "evidence": "顔の右にある四角"
+            },
+            {
+              "id": "P5",
+              "role": "尾",
+              "evidence": "胴の右下へ斜めに伸びる"
+            }
+          ],
+          "evidence": "二つの尖った耳と左に伸びる鼻先、右下に続く尾がキツネを思わせる。",
+          "weaknesses": "頭に対して胴が小さく、脚が区別できない。"
+        }
+      ],
+      "noConstrual": false,
+      "noConstrualReason": "",
+      "uncertainty": "正面に近い猫の顔としても読める。"
+    },
+    {
+      "item": "item-28",
+      "silhouetteImpression": "右上へ細長く伸び、上に二つの尖りがある形に見えた。",
+      "candidates": [],
+      "noConstrual": true,
+      "noConstrualReason": "上の尖りと左の四角が一つの対象としてまとまらない。",
+      "uncertainty": "鳥や飛行機も考えたが、左の四角と上下の突起が自然な部位にまとまらない。"
+    },
+    {
+      "item": "item-29",
+      "silhouetteImpression": "左を向き尾を上げて立つ犬のように見えた。",
+      "candidates": [
+        {
+          "rank": 1,
+          "noun": "犬",
+          "posture": "立って尾を上げる",
+          "direction": "頭が左上、尾が右上",
+          "confidence": "低",
+          "parts": [
+            {
+              "id": "P1",
+              "role": "脚",
+              "evidence": "左下に垂直に伸びる台形"
+            },
+            {
+              "id": "P2",
+              "role": "頭と胴体",
+              "evidence": "左上の先から中央へ斜めに広がる台形"
+            },
+            {
+              "id": "P3",
+              "role": "腰",
+              "evidence": "胴体右端の小さな三角形"
+            },
+            {
+              "id": "P4",
+              "role": "上げた尾",
+              "evidence": "腰から右上へ細長く伸びる"
+            }
+          ],
+          "evidence": "左上の頭から胴が続き、右に尾を上げた四足動物の横姿を連想させる。",
+          "weaknesses": "頭と胴体の境界がなく、脚は一本しか見えない。"
+        }
+      ],
+      "noConstrual": false,
+      "noConstrualReason": "",
+      "uncertainty": "左上の部分を長い首や別の突起と見る読みもある。"
+    },
+    {
+      "item": "item-30",
+      "silhouetteImpression": "右へ四角く伸び、左上と下に尖りがある形に見えた。",
+      "candidates": [],
+      "noConstrual": true,
+      "noConstrualReason": "右端の四角と左・下の張り出しの役割が定まらない。",
+      "uncertainty": "魚や鳥にも見えるが、頭と尾の位置を自然に決められない。"
+    }
+  ]
+}

@@ -1,5 +1,8 @@
 // Decision 0002: private visual material, never a name agreement or an answer key.
 import type { LocalAspect, LocalOwnAnchor, LocalOwnImage } from "../local-grounding/contract.ts";
+import type { PartGeometry } from "../stimuli/part-geometry.ts";
+import type { OwnRotationMemory } from "../stimuli/rotation-memory-shape.ts";
+import type { OwnPartObservation } from "./parts.ts";
 
 export type ObservationRegion = LocalOwnAnchor["bbox"];
 export type ObservationIssue = {
@@ -28,6 +31,10 @@ export type ObservationFigure = {
   analytic: AnalyticObservation;
   unknowns: string[];
   reobservations: ReobservationEntry[];
+  /** Complete geometry-derived candidates, program-owned rather than model-authored. */
+  parts?: PartGeometry;
+  /** Pre-made memory of what this figure looks like turned (relative views). Program-owned; a figure may lack it. */
+  rotation?: OwnRotationMemory;
 };
 export type ObservationMemo = { observedAt: string; figures: ObservationFigure[] };
 export type ReobservationResult = {
@@ -35,7 +42,7 @@ export type ReobservationResult = {
   issue: ObservationIssue;
   figures: ReobservedFigure[];
 };
-export type ObservationInput = { ownImage: LocalOwnImage; ownAnchors: readonly LocalOwnAnchor[] };
+export type ObservationInput = { ownImage: LocalOwnImage; ownAnchors: readonly LocalOwnAnchor[]; ownParts?: readonly OwnPartObservation[] };
 export type ReobservationInput = ObservationInput & {
   memo: ObservationMemo;
   figureIds: readonly string[];

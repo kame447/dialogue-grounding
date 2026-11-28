@@ -1,0 +1,1038 @@
+{
+  "observer": "DewyLinnaeus",
+  "model": "claude-opus-5-5",
+  "effort": "max",
+  "viewedImages": true,
+  "items": [
+    {
+      "item": "item-01",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [
+            {"rank": 1, "noun": "くちばし", "owner": "鳥", "basis": "両方", "confidence": "中", "evidence": "右向きに尖った直角三角形が本体の右上から外へ突き出し、図形の前端になっている", "weaknesses": "隣の P2 が大きな五角形で、頭部らしいまとまりがない"},
+            {"rank": 2, "noun": "耳", "owner": "猫", "basis": "全体との関係", "confidence": "低", "evidence": "上の角が P2 の頂と同じ高さに並び、間に V 字の切れ込みをつくる", "weaknesses": "主な尖りは右を向いており、上向きの耳としては向きが合わない"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P2",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "全体の6割を占める中心の家形五角形で、領域全体として一つの部分の形をもたない"
+        },
+        {
+          "id": "P3",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "下辺に並ぶ正方形で尖りも突出もなく、単独でも位置からも部分に見えにくい"
+        },
+        {
+          "id": "P4",
+          "candidates": [
+            {"rank": 1, "noun": "尾", "owner": "猫", "basis": "両方", "confidence": "中", "evidence": "左下の端から左上へ斜めに立ち上がる細長い帯で、本体の後ろで跳ね上がっている", "weaknesses": "先端が垂直に切れていて細くならない"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-02",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [
+            {"rank": 1, "noun": "帆", "owner": "帆船", "basis": "単独", "confidence": "中", "evidence": "垂直な右辺と左上へ傾く長い斜辺をもつ大きな直角三角形で、上端が鋭く尖る", "weaknesses": "下に船体らしい領域がない"},
+            {"rank": 2, "noun": "背びれ", "owner": "サメ", "basis": "単独", "confidence": "低", "evidence": "斜めの前縁と垂直な後縁をもち、上へ尖る輪郭がサメの背びれに似る", "weaknesses": "全体の半分以上を占め、ひれにしては大きすぎる"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P2",
+          "candidates": [
+            {"rank": 1, "noun": "脚", "owner": "", "basis": "全体との関係", "confidence": "低", "evidence": "大きな三角形の右下から斜め右下へ伸びる帯で、先に P3 が付く", "weaknesses": "帯は短く、上の三角形が胴に見えるとは限らない"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P3",
+          "candidates": [
+            {"rank": 1, "noun": "足", "owner": "", "basis": "全体との関係", "confidence": "低", "evidence": "斜めの帯 P2 の先端に付いて右へ張り出し、足先のように見える", "weaknesses": "正方形で尖りがなく、足らしさは位置だけによる"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P4",
+          "candidates": [
+            {"rank": 1, "noun": "脚", "owner": "", "basis": "全体との関係", "confidence": "低", "evidence": "大きな三角形の底辺から左下へ斜めに垂れ、図形の最下端に届く", "weaknesses": "先端が垂直に切れており、P2 と対の脚かどうかは不確か"},
+            {"rank": 2, "noun": "尾", "owner": "", "basis": "全体との関係", "confidence": "低", "evidence": "本体の下から後方（左下）へ斜めに伸びる帯", "weaknesses": "左右どちらが前かは決まらず、尾としては太い"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-03",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "下端が二股に分かれて脚らしさはあるが、領域全体は図形の大半を占める本体で一つの部分に当たらない"
+        },
+        {
+          "id": "P2",
+          "candidates": [
+            {"rank": 1, "noun": "翼", "owner": "鳥", "basis": "全体との関係", "confidence": "低", "evidence": "頭のように見える上部の下で右へ張り出し、反対側の P5 と対になる", "weaknesses": "下向きの頂点もあり、翼としては幅が短い"},
+            {"rank": 2, "noun": "くちばし", "owner": "鳥", "basis": "単独", "confidence": "低", "evidence": "水平な上辺の右端が鋭く尖って右へ突き出す", "weaknesses": "頭らしい P4 とは P3 をはさんで離れている"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P3",
+          "candidates": [
+            {"rank": 1, "noun": "くちばし", "owner": "鳥", "basis": "両方", "confidence": "低", "evidence": "最上部の正方形 P4 の右に付き、右下へ尖る小三角形", "weaknesses": "先端が P2 の上辺に接して外へ突き出さない"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P4",
+          "candidates": [
+            {"rank": 1, "noun": "頭", "owner": "人", "basis": "全体との関係", "confidence": "低", "evidence": "図形の最上端に載る正方形で、下の本体とは細いつながりで分かれる", "weaknesses": "正方形で頭らしい丸みや向きの手がかりがない"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P5",
+          "candidates": [
+            {"rank": 1, "noun": "翼", "owner": "鳥", "basis": "全体との関係", "confidence": "低", "evidence": "上部の左脇に張り出し、右側の P2 と対になる", "weaknesses": "小さく、付け根が本体の側面だけ"},
+            {"rank": 2, "noun": "くちばし", "owner": "鳥", "basis": "単独", "confidence": "低", "evidence": "左へ鋭く尖る小三角形が側面から突き出す", "weaknesses": "頭らしい P4 と接しておらず、その下に離れて付く"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-04",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "全体の半分を占める下向きの大きな三角形で、特定の部分としての手がかりが乏しい"
+        },
+        {
+          "id": "P2",
+          "candidates": [
+            {"rank": 1, "noun": "屋根", "owner": "家", "basis": "単独", "confidence": "中", "evidence": "下辺が長く上辺が短い台形で、両端が斜めに張り出して図形の上に載る", "weaknesses": "下の P3 は家の壁としては小さく、右は大きな P1 に続く"},
+            {"rank": 2, "noun": "かさ", "owner": "きのこ", "basis": "全体との関係", "confidence": "低", "evidence": "台形が下の正方形 P3 の上に広がって傘のように載る", "weaknesses": "P3 は台形の中心ではなく左寄りに付く"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P3",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "P2 の左寄りの下に垂れる正方形で、形の手がかりが乏しく特定の部分に絞れない"
+        }
+      ]
+    },
+    {
+      "item": "item-05",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "全体の半分を占める中心の台形で、領域全体として一つの部分に当たらない"
+        },
+        {
+          "id": "P2",
+          "candidates": [
+            {"rank": 1, "noun": "くちばし", "owner": "鳥", "basis": "両方", "confidence": "中", "evidence": "図形の左端で左へ鋭く尖る三角形が本体の左上から突き出す", "weaknesses": "全体の4分の1と大きく、上にも尖りがある"},
+            {"rank": 2, "noun": "耳", "owner": "", "basis": "単独", "confidence": "低", "evidence": "垂直な右辺の上端が図形の最上端で上へ鋭く尖る", "weaknesses": "左への尖りの方が目立ち、領域が耳にしては大きい"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P3",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "P1 の右下に段状に付く正方形で、尖りや突出がなく部分に見えにくい"
+        },
+        {
+          "id": "P4",
+          "candidates": [
+            {"rank": 1, "noun": "尾", "owner": "", "basis": "両方", "confidence": "中", "evidence": "図形の右下端で斜め下へ細長く伸びる帯で、本体の後端から垂れる", "weaknesses": "先端が垂直に切れていて細くならない"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-06",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "全体の半分を占める中心の三角形で、領域全体として一つの部分に当たらない"
+        },
+        {
+          "id": "P2",
+          "candidates": [
+            {"rank": 1, "noun": "脚", "owner": "", "basis": "全体との関係", "confidence": "低", "evidence": "P1 の左下の角と並んで下端にもう一つの尖りを作り、W 字の底の片側になる", "weaknesses": "横向きの三角形で、脚にしては太く短い"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P3",
+          "candidates": [
+            {"rank": 1, "noun": "くちばし", "owner": "鳥", "basis": "単独", "confidence": "低", "evidence": "上辺が水平で右端が鋭く尖る三角形が、本体の右上から右へ張り出す", "weaknesses": "くちばしにしては大きく、下向きの頂点もある"},
+            {"rank": 2, "noun": "頭", "owner": "", "basis": "全体との関係", "confidence": "低", "evidence": "本体の右上端に付いて右へ突き出し、図形の前端に見える", "weaknesses": "三角形で頭らしい丸みがない"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P4",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "P5 と P1 をつなぐ正方形で、単独でも位置からも特定の部分に見えにくい"
+        },
+        {
+          "id": "P5",
+          "candidates": [
+            {"rank": 1, "noun": "尾", "owner": "", "basis": "両方", "confidence": "中", "evidence": "左上端へ斜めに跳ね上がる細長い帯で、本体の後方から立ち上がる", "weaknesses": "先端が水平に切れて細くならない"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-07",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [
+            {"rank": 1, "noun": "砲身", "owner": "大砲", "basis": "単独", "confidence": "低", "evidence": "右上へ斜めに長く伸びる太い帯で、先端が帯の向きに直角に切れている", "weaknesses": "全体の6割を占めて太く、下端が水平に切れて筒らしさが弱い"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P2",
+          "candidates": [
+            {"rank": 1, "noun": "脚", "owner": "", "basis": "全体との関係", "confidence": "低", "evidence": "P1 の下で P4 と逆 V 字に開き、下端の床に届く", "weaknesses": "三角形で、脚にしては短く太い"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P3",
+          "candidates": [
+            {"rank": 1, "noun": "足", "owner": "", "basis": "全体との関係", "confidence": "低", "evidence": "右下の床面で P2 の下端から右へ張り出し、足先のように見える", "weaknesses": "正方形で尖りがなく、足らしさは位置だけによる"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P4",
+          "candidates": [
+            {"rank": 1, "noun": "脚", "owner": "", "basis": "全体との関係", "confidence": "低", "evidence": "P1 の下端から左下へ斜めに伸びて床に届き、P2 と逆 V 字をつくる", "weaknesses": "先端が水平に切れており、細長さが弱い"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-08",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "全体の8割を占める縦長の家形の本体で、一つの部分に当たらない"
+        },
+        {
+          "id": "P2",
+          "candidates": [
+            {"rank": 1, "noun": "くちばし", "owner": "鳥", "basis": "両方", "confidence": "中", "evidence": "本体の右側面から水平に突き出し、先端の上側が鋭く尖る", "weaknesses": "下辺は短く平らで、尖りが上側だけ"},
+            {"rank": 2, "noun": "ひさし", "owner": "建物", "basis": "単独", "confidence": "低", "evidence": "垂直な壁面から水平に張り出す板状の形", "weaknesses": "壁の中ほどより下に付き、ひさしとしては厚い"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-09",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [
+            {"rank": 1, "noun": "船体", "owner": "船", "basis": "単独", "confidence": "低", "evidence": "上辺が長く下辺が短い逆台形で、船の胴のように左右へ張り出す", "weaknesses": "下辺の中央から P3 が垂れ、船底としては形が乱れる"},
+            {"rank": 2, "noun": "翼", "owner": "鳥", "basis": "単独", "confidence": "低", "evidence": "図形の最上部で左右いっぱいに広がり、両端が鋭く尖る", "weaknesses": "左右が一続きの一枚で、翼の切れ目や胴の区別がない"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P2",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "P1 の右下に付く三角形で、尖りが内側を向き外への突出が弱い"
+        },
+        {
+          "id": "P3",
+          "candidates": [
+            {"rank": 1, "noun": "柄", "owner": "", "basis": "全体との関係", "confidence": "低", "evidence": "広い P1 の細くなった下端から真下へ伸びる正方形で、支えの軸のように見える", "weaknesses": "正方形で短く、柄にしては細長さがない"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-10",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "全体の半分を占める底辺の広い三角形で、特定の部分に見えにくい"
+        },
+        {
+          "id": "P2",
+          "candidates": [
+            {"rank": 1, "noun": "耳", "owner": "", "basis": "両方", "confidence": "低", "evidence": "垂直な右辺の上端が上へ鋭く尖り、図形の最上端になる", "weaknesses": "全体の4割近くを占め、耳にしては大きすぎる"},
+            {"rank": 2, "noun": "頭", "owner": "", "basis": "全体との関係", "confidence": "低", "evidence": "下の大きな三角形の上に載り、右に P3 が付く", "weaknesses": "上と左に尖りがあり、頭らしい丸みがない"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P3",
+          "candidates": [
+            {"rank": 1, "noun": "鼻", "owner": "", "basis": "全体との関係", "confidence": "低", "evidence": "上端の尖りの下で、垂直な辺から右へ四角く突き出す", "weaknesses": "正方形で先が尖らず、顔の向きは位置からの推測による"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-11",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "全体の6割を占める右向きの家形五角形の本体で、領域全体として一つの部分に当たらない"
+        },
+        {
+          "id": "P2",
+          "candidates": [
+            {"rank": 1, "noun": "足", "owner": "", "basis": "全体との関係", "confidence": "低", "evidence": "本体の右寄りの下に垂れる正方形で、床に接する脚のように見える", "weaknesses": "正方形で短く、一本だけ"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P3",
+          "candidates": [
+            {"rank": 1, "noun": "頭", "owner": "ウサギ", "basis": "全体との関係", "confidence": "低", "evidence": "本体の左上に付く正方形で、上に耳のような P4 が立つ", "weaknesses": "正方形で頭らしい丸みがない"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P4",
+          "candidates": [
+            {"rank": 1, "noun": "耳", "owner": "ウサギ", "basis": "両方", "confidence": "中", "evidence": "小さな正方形 P3 の上から右上へ斜めに長く立ち上がる細い帯", "weaknesses": "先端が水平に切れて尖らない"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-12",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [
+            {"rank": 1, "noun": "刃", "owner": "斧", "basis": "全体との関係", "confidence": "低", "evidence": "柄のような P2 の反対側に大きく広がり、右端が尖る", "weaknesses": "全体の8割を占め、上辺と左辺がまっすぐで刃らしい縁は右側だけ"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P2",
+          "candidates": [
+            {"rank": 1, "noun": "柄", "owner": "斧", "basis": "両方", "confidence": "中", "evidence": "大きな P1 の左下から斜め左下へ細く伸びる帯で、握りのように見える", "weaknesses": "先端が水平に切れ、P1 の左辺の下端だけに付く"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-13",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "全体の半分を占める中心の三角形で、領域全体として一つの部分に当たらない"
+        },
+        {
+          "id": "P2",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "本体の右側面に付く台形で、上の P3 との間に切れ込みはあるが単独では特定の部分に見えにくい"
+        },
+        {
+          "id": "P3",
+          "candidates": [
+            {"rank": 1, "noun": "尾", "owner": "鳥", "basis": "両方", "confidence": "中", "evidence": "本体の背の斜線の延長で右上へ細長く立ち上がる帯で、図形の最上端になる", "weaknesses": "先端が垂直に切れて細くならない"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P4",
+          "candidates": [
+            {"rank": 1, "noun": "脚", "owner": "", "basis": "全体との関係", "confidence": "低", "evidence": "下端に尖りをつくり、P1 の下の角と並んで二本の脚のように見える", "weaknesses": "三角形で太く短い"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P5",
+          "candidates": [
+            {"rank": 1, "noun": "くちばし", "owner": "鳥", "basis": "両方", "confidence": "中", "evidence": "図形の左端で、水平な上辺のまま左へ鋭く尖る小三角形", "weaknesses": "頭らしい領域が別になく、本体に直接付く"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-14",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [
+            {"rank": 1, "noun": "船体", "owner": "船", "basis": "単独", "confidence": "中", "evidence": "上辺が長く下辺が短い逆台形で、船の胴のように左右へ張り出し左端が尖る", "weaknesses": "全体の4分の3を占め、下に P2 が垂れる"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P2",
+          "candidates": [
+            {"rank": 1, "noun": "舵", "owner": "船", "basis": "全体との関係", "confidence": "低", "evidence": "船体のような P1 の右端の下に垂れる三角形", "weaknesses": "尖りが左を向き、舵にしては船底より下へ大きく出る"},
+            {"rank": 2, "noun": "脚", "owner": "", "basis": "全体との関係", "confidence": "低", "evidence": "本体の右下から下へ垂れ、図形の最下端になる", "weaknesses": "一本だけで、三角形の向きが横向き"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P3",
+          "candidates": [
+            {"rank": 1, "noun": "頭", "owner": "カモ", "basis": "全体との関係", "confidence": "低", "evidence": "平らな上辺の右端から上へ四角く突き出し、図形の最上端になる", "weaknesses": "正方形で頭らしい丸みや向きの手がかりがない"},
+            {"rank": 2, "noun": "船室", "owner": "船", "basis": "全体との関係", "confidence": "低", "evidence": "船体のような P1 の甲板の端に載る四角", "weaknesses": "甲板の端に寄りすぎ、小さい"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-15",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [
+            {"rank": 1, "noun": "くちばし", "owner": "鳥", "basis": "両方", "confidence": "低", "evidence": "図形の最上部で右へ尖り、下の P2 の尖りとの間に開いた口のような切れ込みをつくる", "weaknesses": "水平な上辺が広く、くちばしにしては幅がある"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P2",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "全体の半分を占める大三角形で、右の尖りはあるが領域全体として一つの部分に当たらない"
+        },
+        {
+          "id": "P3",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "P2 と P4 の間を埋める小三角形で、外へ突き出す尖りがない"
+        },
+        {
+          "id": "P4",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "下部の直角三角形で、斜辺が右下へ下るが単独でも位置からも特定の部分に見えにくい"
+        },
+        {
+          "id": "P5",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "右下端で下へ尖る小三角形だが、先端の部分として何に当たるか絞れない"
+        }
+      ]
+    },
+    {
+      "item": "item-16",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "全体の6割を占める右向きの家形五角形の本体で、領域全体として一つの部分に当たらない"
+        },
+        {
+          "id": "P2",
+          "candidates": [
+            {"rank": 1, "noun": "足", "owner": "", "basis": "全体との関係", "confidence": "低", "evidence": "本体の右寄りの下に垂れる正方形で、床に接する脚のように見える", "weaknesses": "正方形で短く、一本だけ"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P3",
+          "candidates": [
+            {"rank": 1, "noun": "尾", "owner": "", "basis": "全体との関係", "confidence": "低", "evidence": "右へ尖る本体の反対側の左端から四角く突き出す", "weaknesses": "正方形で短く、尾らしい細長さがない"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P4",
+          "candidates": [
+            {"rank": 1, "noun": "耳", "owner": "", "basis": "両方", "confidence": "低", "evidence": "本体の上辺から右上へ斜めに細長く立ち上がる帯", "weaknesses": "頭らしい領域が別になく、帯が前（右）へ傾く"},
+            {"rank": 2, "noun": "翼", "owner": "鳥", "basis": "全体との関係", "confidence": "低", "evidence": "本体の背から斜め上へ持ち上がる板状の形", "weaknesses": "細長い帯で、翼らしい広がりがない"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-17",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "全体の半分を占める中心の三角形で、上端の尖りはあるが領域全体として一つの部分に当たらない"
+        },
+        {
+          "id": "P2",
+          "candidates": [
+            {"rank": 1, "noun": "鼻", "owner": "", "basis": "全体との関係", "confidence": "低", "evidence": "本体の右上で、上端の尖りの下から右へ四角く突き出す", "weaknesses": "正方形で先が尖らず、顔の向きは位置からの推測による"},
+            {"rank": 2, "noun": "頭", "owner": "", "basis": "全体との関係", "confidence": "低", "evidence": "本体の右上端から前へ突き出す四角", "weaknesses": "本体に比べて小さく、丸みがない"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P3",
+          "candidates": [
+            {"rank": 1, "noun": "足", "owner": "", "basis": "全体との関係", "confidence": "低", "evidence": "本体の右下で、床近くから右へ尖って張り出す", "weaknesses": "小さく、足先らしい厚みがない"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P4",
+          "candidates": [
+            {"rank": 1, "noun": "脚", "owner": "", "basis": "全体との関係", "confidence": "低", "evidence": "下端に尖りをつくり、P1 の下の角と並んで脚のように見える", "weaknesses": "三角形で太く短い"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P5",
+          "candidates": [
+            {"rank": 1, "noun": "尾", "owner": "", "basis": "両方", "confidence": "中", "evidence": "本体の背の斜線をそのまま左下へ延ばす帯で、床まで垂れる", "weaknesses": "下辺が床に沿って平らで、先が細くならない"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-18",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [
+            {"rank": 1, "noun": "煙突", "owner": "家", "basis": "両方", "confidence": "中", "evidence": "縦に立つ四角い形の下辺が斜めに切れ、斜めに下る P2 の上辺に載って上へ突き出す", "weaknesses": "P2 の上辺の端に寄って立つ"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P2",
+          "candidates": [
+            {"rank": 1, "noun": "屋根", "owner": "家", "basis": "全体との関係", "confidence": "低", "evidence": "上に煙突のような P1 を載せて斜めに下る広い面", "weaknesses": "全体の6割を占めて厚く、下側にも斜めの辺があって屋根の下の壁がない"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P3",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "P2 と P4 の間を埋める小三角形で、外へ尖りを出さない"
+        },
+        {
+          "id": "P4",
+          "candidates": [
+            {"rank": 1, "noun": "脚", "owner": "", "basis": "全体との関係", "confidence": "低", "evidence": "P2 の下端と逆 V 字に開いて左下へ伸びる帯", "weaknesses": "先端が水平に切れ、P2 と太さが大きく違う"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-19",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "全体の半分を占める中心の三角形で、上端の尖りはあるが領域全体として一つの部分に当たらない"
+        },
+        {
+          "id": "P2",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "P1 と P4 の間の段を埋める小三角形で、外へ尖りを出さない"
+        },
+        {
+          "id": "P3",
+          "candidates": [
+            {"rank": 1, "noun": "鼻", "owner": "", "basis": "全体との関係", "confidence": "低", "evidence": "本体の右側に付き、右へ細くなって平らな先端で終わる", "weaknesses": "先が尖らず、幅が広い"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P4",
+          "candidates": [
+            {"rank": 1, "noun": "首", "owner": "", "basis": "全体との関係", "confidence": "低", "evidence": "大きな本体の左下から左へ水平に伸びる帯", "weaknesses": "短く太く、先に何も付かない"},
+            {"rank": 2, "noun": "尾", "owner": "", "basis": "全体との関係", "confidence": "低", "evidence": "本体の後ろ（左）へ突き出す", "weaknesses": "四角く太く、尾らしい細さがない"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-20",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "図形の9割近くを占める丸みのある本体で、領域全体を一つの部分として見立てにくい"
+        },
+        {
+          "id": "P2",
+          "candidates": [
+            {"rank": 1, "noun": "尾", "owner": "", "basis": "全体との関係", "confidence": "低", "evidence": "丸みのある本体の左下から左へ尖って突き出す", "weaknesses": "小さく、本体の下端に付くので尾としては低い位置"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P3",
+          "candidates": [
+            {"rank": 1, "noun": "足", "owner": "", "basis": "全体との関係", "confidence": "低", "evidence": "本体の下から真下へ尖って垂れる", "weaknesses": "一本だけで、足にしては尖りすぎる"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-21",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [
+            {"rank": 1, "noun": "帆", "owner": "帆船", "basis": "単独", "confidence": "中", "evidence": "垂直な左辺と右下へ下る長い斜辺をもつ大きな直角三角形で、上端が鋭く尖る", "weaknesses": "下に船体らしい領域がない"},
+            {"rank": 2, "noun": "背びれ", "owner": "サメ", "basis": "単独", "confidence": "低", "evidence": "垂直な辺と斜めの辺で上へ尖る輪郭が背びれに似る", "weaknesses": "全体の半分以上を占め、ひれにしては大きすぎる"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P2",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "P1 の右端と P3 をつなぐ小三角形で、外へ尖りを出さない"
+        },
+        {
+          "id": "P3",
+          "candidates": [
+            {"rank": 1, "noun": "尾", "owner": "", "basis": "全体との関係", "confidence": "低", "evidence": "図形の右下で本体の後端から右へ四角く突き出す", "weaknesses": "正方形で短く、尾らしい細長さがない"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P4",
+          "candidates": [
+            {"rank": 1, "noun": "脚", "owner": "", "basis": "全体との関係", "confidence": "低", "evidence": "大きな三角形の底辺から左下へ斜めに垂れ、図形の最下端に届く", "weaknesses": "先端が垂直に切れている"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P5",
+          "candidates": [
+            {"rank": 1, "noun": "くちばし", "owner": "鳥", "basis": "両方", "confidence": "低", "evidence": "本体の垂直な左辺の下部から左へ鋭く尖って突き出す小三角形", "weaknesses": "頭らしい領域がなく、図形の上端から遠い"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-22",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "全体の半分以上を占める中心の三角形で、領域全体として一つの部分に当たらない"
+        },
+        {
+          "id": "P2",
+          "candidates": [
+            {"rank": 1, "noun": "膝", "owner": "人", "basis": "全体との関係", "confidence": "低", "evidence": "本体の右側面の下部から右へ尖って張り出し、下の P3 との間に切れ込みをつくる", "weaknesses": "膝に見えるのは下の P3 を脚の先と見たときだけで、単独では手がかりが弱い"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P3",
+          "candidates": [
+            {"rank": 1, "noun": "脚", "owner": "", "basis": "全体との関係", "confidence": "低", "evidence": "本体の下端から右下へ斜めに伸び、平らな下辺で床に接する", "weaknesses": "太く短い"},
+            {"rank": 2, "noun": "尾", "owner": "", "basis": "全体との関係", "confidence": "低", "evidence": "本体の後ろ下へ斜めに垂れる帯", "weaknesses": "下辺が水平で床に沿う"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P4",
+          "candidates": [
+            {"rank": 1, "noun": "頭", "owner": "", "basis": "全体との関係", "confidence": "低", "evidence": "図形の左上端に載る正方形", "weaknesses": "正方形で頭らしい丸みや向きの手がかりがない"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-23",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [
+            {"rank": 1, "noun": "矢じり", "owner": "矢", "basis": "単独", "confidence": "低", "evidence": "垂直な辺で付いて右へ鋭く尖る大きな三角形", "weaknesses": "全体の半分を占め、矢柄に当たる細い部分がない"},
+            {"rank": 2, "noun": "くちばし", "owner": "鳥", "basis": "両方", "confidence": "低", "evidence": "図形の右端で右へ鋭く尖る", "weaknesses": "くちばしにしては大きすぎる"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P2",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "P1 と P3 の間をつなぐ縦長の台形で、単独でも位置からも特定の部分に見えにくい"
+        },
+        {
+          "id": "P3",
+          "candidates": [
+            {"rank": 1, "noun": "尾", "owner": "", "basis": "全体との関係", "confidence": "低", "evidence": "右へ尖る大きな三角形の反対側の左端から四角く突き出す", "weaknesses": "正方形で短く、尾らしい細長さがない"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-24",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "全体の6割を占める中心の家形五角形で、領域全体として一つの部分に当たらない"
+        },
+        {
+          "id": "P2",
+          "candidates": [
+            {"rank": 1, "noun": "翼", "owner": "鳥", "basis": "全体との関係", "confidence": "低", "evidence": "反対側の P4 と同じ高さで右へ水平に張り出し、先が尖る", "weaknesses": "上辺だけが長い台形で、翼としては厚い"},
+            {"rank": 2, "noun": "くちばし", "owner": "鳥", "basis": "単独", "confidence": "低", "evidence": "本体の右側面から水平に突き出し、先端の上側が尖る", "weaknesses": "本体の下寄りに付く"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P3",
+          "candidates": [
+            {"rank": 1, "noun": "足", "owner": "", "basis": "全体との関係", "confidence": "低", "evidence": "本体の下から下へ尖って垂れる小三角形", "weaknesses": "一本だけで、本体の中央からずれる"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P4",
+          "candidates": [
+            {"rank": 1, "noun": "翼", "owner": "鳥", "basis": "全体との関係", "confidence": "低", "evidence": "反対側の P2 と同じ高さで左へ張り出し、対になる", "weaknesses": "正方形で先が尖らず、短い"},
+            {"rank": 2, "noun": "尾", "owner": "", "basis": "全体との関係", "confidence": "低", "evidence": "本体の左側面の下部から左へ四角く突き出す", "weaknesses": "正方形で短く、尾らしい細長さがない"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-25",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [
+            {"rank": 1, "noun": "尾びれ", "owner": "魚", "basis": "両方", "confidence": "低", "evidence": "左の尖りで本体に付き、右へ扇形に広がる大きな三角形", "weaknesses": "全体の半分を占め、尾びれにしては大きい"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P2",
+          "candidates": [
+            {"rank": 1, "noun": "煙突", "owner": "家", "basis": "単独", "confidence": "低", "evidence": "縦に立つ四角い形の下辺が斜めに切れ、P1 の斜辺に載って上へ突き出す", "weaknesses": "屋根らしい面の上ではなく、二つの領域の継ぎ目に立つ"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P3",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "中央下の台形で、P4 と P2 をつなぐだけで特定の部分に見えにくい"
+        },
+        {
+          "id": "P4",
+          "candidates": [
+            {"rank": 1, "noun": "尾", "owner": "", "basis": "両方", "confidence": "低", "evidence": "左下から左上へ斜めに跳ね上がる細長い帯", "weaknesses": "先端が垂直に切れ、反対側にも尾びれのような大きな三角形がある"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-26",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [
+            {"rank": 1, "noun": "頭", "owner": "猫", "basis": "全体との関係", "confidence": "中", "evidence": "斜めの本体の右上端に載り、上へ尖る頂をもつ五角形", "weaknesses": "一般的な語で、向きの手がかりは上の尖りだけ"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P2",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "全体の半分を占める斜めの平行四辺形の本体で、領域全体として一つの部分に当たらない"
+        },
+        {
+          "id": "P3",
+          "candidates": [
+            {"rank": 1, "noun": "尾", "owner": "猫", "basis": "全体との関係", "confidence": "低", "evidence": "斜めの本体の左上端から上へ尖って立つ小三角形", "weaknesses": "短く、垂直な辺で立つ"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P4",
+          "candidates": [
+            {"rank": 1, "noun": "脚", "owner": "", "basis": "全体との関係", "confidence": "低", "evidence": "本体の右下端から左下へ斜めに伸びて図形の最下端に届く帯", "weaknesses": "一本だけで、先端が水平に切れる"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-27",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [
+            {"rank": 1, "noun": "くちばし", "owner": "鳥", "basis": "両方", "confidence": "低", "evidence": "図形の最上部で右へ尖り、下の P2 の尖りとの間に開いた口のような切れ込みをつくる", "weaknesses": "水平な上辺が広く、くちばしにしては幅がある"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P2",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "全体の半分を占める大三角形で、右の尖りはあるが領域全体として一つの部分に当たらない"
+        },
+        {
+          "id": "P3",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "P2 の下に付く三角形で、上向きの頂は切れ込みの中にあり外へ突き出さない"
+        },
+        {
+          "id": "P4",
+          "candidates": [
+            {"rank": 1, "noun": "足", "owner": "", "basis": "全体との関係", "confidence": "低", "evidence": "図形の右下端で床に接する正方形", "weaknesses": "正方形で尖りがなく、足らしさは位置だけによる"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P5",
+          "candidates": [
+            {"rank": 1, "noun": "尾", "owner": "鳥", "basis": "全体との関係", "confidence": "低", "evidence": "本体の左側面から左下へ斜めに垂れる帯", "weaknesses": "先端が垂直に切れ、尾にしては太い"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-28",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "全体の7割を占める縦長の本体で、下端は尖るが領域全体として一つの部分に当たらない"
+        },
+        {
+          "id": "P2",
+          "candidates": [
+            {"rank": 1, "noun": "尾", "owner": "", "basis": "全体との関係", "confidence": "低", "evidence": "本体の右側から右上へ斜めに立ち上がる帯で、本体との間に V 字の切れ込みをつくる", "weaknesses": "先端が水平に切れ、帯が太い"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P3",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "本体の右側面から四角く突き出すが、上下の手がかりが乏しく特定の部分に絞れない"
+        }
+      ]
+    },
+    {
+      "item": "item-29",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "全体の半分を占める斜めの平行四辺形の本体で、領域全体として一つの部分に当たらない"
+        },
+        {
+          "id": "P2",
+          "candidates": [
+            {"rank": 1, "noun": "耳", "owner": "猫", "basis": "両方", "confidence": "中", "evidence": "図形の最上端で上へ鋭く尖る三角形で、右の P4 との間に U 字の切れ込みをつくる", "weaknesses": "垂直な右辺で立ち、耳にしては大きい"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P3",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "耳のような P2 と P4 の間の下に付く逆三角形だが、頭部の一部にとどまり単独の部分に絞れない"
+        },
+        {
+          "id": "P4",
+          "candidates": [
+            {"rank": 1, "noun": "耳", "owner": "猫", "basis": "全体との関係", "confidence": "低", "evidence": "左の P2 と並んで上へ突き出し、間に U 字の切れ込みをつくる", "weaknesses": "正方形で先が尖らない"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P5",
+          "candidates": [
+            {"rank": 1, "noun": "尾", "owner": "", "basis": "全体との関係", "confidence": "低", "evidence": "本体の左側面から左下へ斜めに垂れる帯", "weaknesses": "先端が垂直に切れ、尾にしては太い"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-30",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [
+            {"rank": 1, "noun": "鼻", "owner": "", "basis": "全体との関係", "confidence": "低", "evidence": "大きな三角形の右下に付き、右へ細くなって平らな先端で終わる", "weaknesses": "先が尖らず、本体より下へはみ出す"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P2",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "全体の半分を占める中心の三角形で、上端の尖りはあるが領域全体として一つの部分に当たらない"
+        },
+        {
+          "id": "P3",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "P2 と P4 の間の段を埋める小三角形で、外へ尖りを出さない"
+        },
+        {
+          "id": "P4",
+          "candidates": [
+            {"rank": 1, "noun": "首", "owner": "", "basis": "全体との関係", "confidence": "低", "evidence": "大きな本体の左から左へ水平に伸びる帯", "weaknesses": "短く太く、先に何も付かない"},
+            {"rank": 2, "noun": "尾", "owner": "", "basis": "全体との関係", "confidence": "低", "evidence": "本体の後ろ（左）へ突き出す", "weaknesses": "四角く太く、尾らしい細さがない"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    }
+  ]
+}
