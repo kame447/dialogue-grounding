@@ -1,0 +1,988 @@
+{
+  "observer": "CherryLavoisier",
+  "reviewedProposal": "DapperEinstein, round2-request-to-terra.md",
+  "viewedImages": true,
+  "notes": "各候補は再観察後に私が支持するもの。合意の確定はDapperEinsteinによる。",
+  "items": [
+    {
+      "item": "item-01",
+      "judgment": "支持",
+      "consensusCandidates": [
+        {
+          "noun": "金魚",
+          "direction": "頭が左、尾が右",
+          "posture": "泳ぐ",
+          "confidence": "中",
+          "parts": [
+            {
+              "id": "P1",
+              "role": "尾びれ",
+              "evidence": "右に上下に広がる三角。"
+            },
+            {
+              "id": "P2",
+              "role": "頭と胴",
+              "evidence": "左端が尖り尾へ続く。"
+            },
+            {
+              "id": "P3",
+              "role": "背びれ",
+              "evidence": "胴の上の四角。"
+            }
+          ]
+        },
+        {
+          "noun": "リス",
+          "direction": "頭が左、尾が右",
+          "posture": "尾を立てて座る",
+          "confidence": "低",
+          "parts": [
+            {
+              "id": "P1",
+              "role": "尾",
+              "evidence": "右側に高く広がる。"
+            },
+            {
+              "id": "P2",
+              "role": "胴と脚",
+              "evidence": "頭の下から尾へ続く。"
+            },
+            {
+              "id": "P3",
+              "role": "頭",
+              "evidence": "胴の左上に載る四角。"
+            }
+          ]
+        }
+      ],
+      "partsRevision": "各候補の parts に対応と根拠を記載。",
+      "reason": "金魚を支持。P3を頭、P1を大きな尾とするリスも低い確信度で支持する。",
+      "discussion": "リスは耳がなく尾が上下に大きい。"
+    },
+    {
+      "item": "item-02",
+      "judgment": "支持",
+      "consensusCandidates": [],
+      "partsRevision": "各候補の parts に対応と根拠を記載。",
+      "reason": "稲妻は先端が四角く全体も太いので撤回する。白鳥や猫も頭が定まらず、見立てなしに同意。",
+      "discussion": ""
+    },
+    {
+      "item": "item-03",
+      "judgment": "支持",
+      "consensusCandidates": [],
+      "partsRevision": "各候補の parts に対応と根拠を記載。",
+      "reason": "飛び込み選手の頭と腕に当たる左下が大きく、身体の段差も不自然。見立てなしに同意。",
+      "discussion": ""
+    },
+    {
+      "item": "item-04",
+      "judgment": "支持",
+      "consensusCandidates": [
+        {
+          "noun": "リス",
+          "direction": "顔が右、尾が左",
+          "posture": "座る",
+          "confidence": "低",
+          "parts": [
+            {
+              "id": "P1",
+              "role": "胴",
+              "evidence": "中央の縦長の本体。"
+            },
+            {
+              "id": "P2",
+              "role": "顔",
+              "evidence": "胴の右上に四角く出る。"
+            },
+            {
+              "id": "P3",
+              "role": "足",
+              "evidence": "胴の下に伸びる。"
+            },
+            {
+              "id": "P4",
+              "role": "尾",
+              "evidence": "左下から左上に伸びる。"
+            }
+          ]
+        },
+        {
+          "noun": "カンガルー",
+          "direction": "右向き、尾が左",
+          "posture": "後脚で立ち前脚を出す",
+          "confidence": "低",
+          "parts": [
+            {
+              "id": "P1",
+              "role": "頭と胴",
+              "evidence": "上が尖る直立した本体。"
+            },
+            {
+              "id": "P2",
+              "role": "前脚",
+              "evidence": "胸の高さから右へ出る。"
+            },
+            {
+              "id": "P3",
+              "role": "後脚・足",
+              "evidence": "胴の下にある。"
+            },
+            {
+              "id": "P4",
+              "role": "尾",
+              "evidence": "足元から左後方へ伸びる。"
+            }
+          ]
+        }
+      ],
+      "partsRevision": "各候補の parts に対応と根拠を記載。",
+      "reason": "リスに加え、P2を前脚とするカンガルーも支持できる。",
+      "discussion": "どちらも頭の特徴が乏しく、尾が細く上向き。"
+    },
+    {
+      "item": "item-05",
+      "judgment": "修正案",
+      "consensusCandidates": [
+        {
+          "noun": "ラクダ",
+          "direction": "頭が右",
+          "posture": "立つ",
+          "confidence": "低",
+          "parts": [
+            {
+              "id": "P1",
+              "role": "尾",
+              "evidence": "左端で上に尖る。"
+            },
+            {
+              "id": "P2",
+              "role": "こぶのある胴",
+              "evidence": "中央に大きな山がある。"
+            },
+            {
+              "id": "P3",
+              "role": "首",
+              "evidence": "胴と頭の間にある。"
+            },
+            {
+              "id": "P4",
+              "role": "頭",
+              "evidence": "右上の四角。"
+            },
+            {
+              "id": "P5",
+              "role": "脚",
+              "evidence": "胴の下から右下へ伸びる。"
+            }
+          ]
+        }
+      ],
+      "partsRevision": "各候補の parts に対応と根拠を記載。",
+      "reason": "P2の山をこぶと見るラクダを支持。犬は山形の背と一本の脚が合わず取り下げる。",
+      "discussion": "尾が大きく、首が短い。"
+    },
+    {
+      "item": "item-06",
+      "judgment": "支持",
+      "consensusCandidates": [
+        {
+          "noun": "モーターボート",
+          "direction": "船首が右",
+          "posture": "水面を進む",
+          "confidence": "中",
+          "parts": [
+            {
+              "id": "P1",
+              "role": "船体",
+              "evidence": "底が平らで右端が尖る。"
+            },
+            {
+              "id": "P2",
+              "role": "旗",
+              "evidence": "船尾から左上へ伸びる。"
+            },
+            {
+              "id": "P3",
+              "role": "船室",
+              "evidence": "船体上の四角。"
+            }
+          ]
+        }
+      ],
+      "partsRevision": "各候補の parts に対応と根拠を記載。",
+      "reason": "船体・船室・船尾の突起の対応に同意する。",
+      "discussion": "P2は旗のほか煙や構造物とも読める。"
+    },
+    {
+      "item": "item-07",
+      "judgment": "支持",
+      "consensusCandidates": [
+        {
+          "noun": "飛行機",
+          "direction": "機首が左",
+          "posture": "飛行中の上面",
+          "confidence": "中",
+          "parts": [
+            {
+              "id": "P1",
+              "role": "機首と胴体",
+              "evidence": "左端が尖る本体。"
+            },
+            {
+              "id": "P2",
+              "role": "上側の主翼",
+              "evidence": "胴の上へ伸びる。"
+            },
+            {
+              "id": "P3",
+              "role": "尾翼",
+              "evidence": "右へ小さく尖る。"
+            },
+            {
+              "id": "P4",
+              "role": "下側の主翼",
+              "evidence": "P2と近い位置から下へ出る。"
+            }
+          ]
+        },
+        {
+          "noun": "ハト",
+          "direction": "頭が左、尾が右",
+          "posture": "翼を上げて飛ぶ",
+          "confidence": "低",
+          "parts": [
+            {
+              "id": "P1",
+              "role": "頭と胴",
+              "evidence": "左に尖る大きな本体。"
+            },
+            {
+              "id": "P2",
+              "role": "上げた翼",
+              "evidence": "胴の上に立つ。"
+            },
+            {
+              "id": "P3",
+              "role": "尾",
+              "evidence": "後方に小さく尖る。"
+            },
+            {
+              "id": "P4",
+              "role": "垂れた脚",
+              "evidence": "胴から下へ四角く伸びる。"
+            }
+          ]
+        }
+      ],
+      "partsRevision": "各候補の parts に対応と根拠を記載。",
+      "reason": "飛行機の上下の翼は読みやすい。左端をくちばしとするハトも低い確信度で支持。",
+      "discussion": "ハトは頭とくちばしが区別できず、脚が四角い。"
+    },
+    {
+      "item": "item-08",
+      "judgment": "修正案",
+      "consensusCandidates": [
+        {
+          "noun": "オウム",
+          "direction": "頭とくちばしが右上、尾が左下",
+          "posture": "止まる",
+          "confidence": "低",
+          "parts": [
+            {
+              "id": "P1",
+              "role": "翼",
+              "evidence": "左上へ大きく張る。"
+            },
+            {
+              "id": "P2",
+              "role": "胴と頭",
+              "evidence": "中央から右上へ続く。"
+            },
+            {
+              "id": "P3",
+              "role": "尾羽",
+              "evidence": "左下へ細く尖る。"
+            },
+            {
+              "id": "P4",
+              "role": "曲がったくちばし",
+              "evidence": "右上から右下へ折れる。"
+            }
+          ]
+        }
+      ],
+      "partsRevision": "各候補の parts に対応と根拠を記載。",
+      "reason": "オウムを支持。タツノオトシゴは吻が短く、P3の尾が直線的で巻いて見えず支持しない。",
+      "discussion": "オウムも頭と胴の区切りがなく、くちばしが大きい。"
+    },
+    {
+      "item": "item-09",
+      "judgment": "修正案",
+      "consensusCandidates": [
+        {
+          "noun": "ヨット",
+          "direction": "帆が上、船底が下、船首は未確定",
+          "posture": "帆を立てて浮かぶ",
+          "confidence": "中",
+          "parts": [
+            {
+              "id": "P1",
+              "role": "帆",
+              "evidence": "上に頂点を持つ大三角。"
+            },
+            {
+              "id": "P2",
+              "role": "船体",
+              "evidence": "帆の下で横に伸びる。"
+            },
+            {
+              "id": "P3",
+              "role": "キール",
+              "evidence": "船底から四角く下へ出る。"
+            }
+          ]
+        }
+      ],
+      "partsRevision": "各候補の parts に対応と根拠を記載。",
+      "reason": "帆・船体・キールは支持。右端を船首とする読みもあるが向きは断定しない。",
+      "discussion": ""
+    },
+    {
+      "item": "item-10",
+      "judgment": "支持",
+      "consensusCandidates": [],
+      "partsRevision": "各候補の parts に対応と根拠を記載。",
+      "reason": "P2をくちばしとするとP3との位置関係が曖昧で頭が見えない。オウムを支持せず見立てなし。",
+      "discussion": ""
+    },
+    {
+      "item": "item-11",
+      "judgment": "修正案",
+      "consensusCandidates": [
+        {
+          "noun": "キツネ",
+          "direction": "頭が左、尾と後脚が右",
+          "posture": "左へ走る",
+          "confidence": "低",
+          "parts": [
+            {
+              "id": "P1",
+              "role": "胴と尾・後脚",
+              "evidence": "右側が二股に分かれる。"
+            },
+            {
+              "id": "P2",
+              "role": "耳の立った頭",
+              "evidence": "左上に三角が尖る。"
+            },
+            {
+              "id": "P3",
+              "role": "鼻先",
+              "evidence": "頭の左下側の小三角。"
+            },
+            {
+              "id": "P4",
+              "role": "前脚",
+              "evidence": "左下に四角く伸びる。"
+            },
+            {
+              "id": "P5",
+              "role": "もう一方の前脚",
+              "evidence": "頭の下から右下に尖る。"
+            }
+          ]
+        }
+      ],
+      "partsRevision": "各候補の parts に対応と根拠を記載。",
+      "reason": "尖った耳と鼻先、前脚、右の尾と後脚で走るキツネの読みを支持。",
+      "discussion": "頭・鼻・脚が同じ場所に集まりP4は四角い。第1ラウンドは見立てなし。"
+    },
+    {
+      "item": "item-12",
+      "judgment": "修正案",
+      "consensusCandidates": [
+        {
+          "noun": "ハト",
+          "direction": "頭が右、尾が左",
+          "posture": "立つ",
+          "confidence": "低",
+          "parts": [
+            {
+              "id": "P1",
+              "role": "胴と尾",
+              "evidence": "左端が尖り頭の下に広がる。"
+            },
+            {
+              "id": "P2",
+              "role": "後ろ側の脚",
+              "evidence": "胴の左下に出る小三角。"
+            },
+            {
+              "id": "P3",
+              "role": "頭と背",
+              "evidence": "右端がくちばし状に尖る。"
+            },
+            {
+              "id": "P4",
+              "role": "脚",
+              "evidence": "胴の右下から垂直に伸びる。"
+            }
+          ]
+        }
+      ],
+      "partsRevision": "各候補の parts に対応と根拠を記載。",
+      "reason": "右端をくちばし、左端を尾とするハトを支持。ゾウは鼻と前脚の区別が難しく撤回。",
+      "discussion": "頭が大きく脚が太い。ハト固有の特徴は弱い。"
+    },
+    {
+      "item": "item-13",
+      "judgment": "修正案",
+      "consensusCandidates": [
+        {
+          "noun": "ハト",
+          "direction": "頭が右、尾が左",
+          "posture": "立つ",
+          "confidence": "低",
+          "parts": [
+            {
+              "id": "P1",
+              "role": "頭と首",
+              "evidence": "右上に伸び右端が尖る。"
+            },
+            {
+              "id": "P2",
+              "role": "胴と尾",
+              "evidence": "中央から左端へ尖って続く。"
+            },
+            {
+              "id": "P3",
+              "role": "後ろ側の脚",
+              "evidence": "胴の左下の小三角。"
+            },
+            {
+              "id": "P4",
+              "role": "脚",
+              "evidence": "胴の下に垂れる。"
+            }
+          ]
+        }
+      ],
+      "partsRevision": "各候補の parts に対応と根拠を記載。",
+      "reason": "P1右端をくちばしとしハトを支持。犬は後脚が短く頭が大きすぎるので撤回。",
+      "discussion": "P4は幅広くハト固有の特徴は弱い。"
+    },
+    {
+      "item": "item-14",
+      "judgment": "支持",
+      "consensusCandidates": [
+        {
+          "noun": "手鏡",
+          "direction": "鏡面が左上、柄が右下",
+          "posture": "斜めに置く",
+          "confidence": "中",
+          "parts": [
+            {
+              "id": "P1",
+              "role": "鏡面",
+              "evidence": "左上の幅広い部分。"
+            },
+            {
+              "id": "P2",
+              "role": "柄",
+              "evidence": "右下へ細く伸びる。"
+            }
+          ]
+        }
+      ],
+      "partsRevision": "各候補の parts に対応と根拠を記載。",
+      "reason": "面と柄の位置関係が明快で支持する。",
+      "discussion": "鏡面は尖り、柄が面の端に付く。"
+    },
+    {
+      "item": "item-15",
+      "judgment": "修正案",
+      "consensusCandidates": [
+        {
+          "noun": "タツノオトシゴ",
+          "direction": "頭が左上、尾先が左下",
+          "posture": "体を立て尾を前に曲げる",
+          "confidence": "低",
+          "parts": [
+            {
+              "id": "P1",
+              "role": "頭と吻・頭頂",
+              "evidence": "上の三角の左端が前へ尖る。"
+            },
+            {
+              "id": "P2",
+              "role": "腹",
+              "evidence": "中央が左へ張り出す。"
+            },
+            {
+              "id": "P3",
+              "role": "尾の付け根",
+              "evidence": "腹の右下の四角。"
+            },
+            {
+              "id": "P4",
+              "role": "曲がる尾先",
+              "evidence": "付け根から左下へ折れる。"
+            }
+          ]
+        }
+      ],
+      "partsRevision": "各候補の parts に対応と根拠を記載。",
+      "reason": "左向きの吻、腹の張り出し、左へ曲がる尾を連続して読めるので支持。",
+      "discussion": "尾は渦状に巻かず、頭頂は大きな三角。第1ラウンドは見立てなし。"
+    },
+    {
+      "item": "item-16",
+      "judgment": "修正案",
+      "consensusCandidates": [
+        {
+          "noun": "ロングスカートで踊る人",
+          "direction": "頭が上、脚が右下",
+          "posture": "片脚を大きく伸ばす",
+          "confidence": "中",
+          "parts": [
+            {
+              "id": "P1",
+              "role": "広がるスカート",
+              "evidence": "左下へ広がる。"
+            },
+            {
+              "id": "P2",
+              "role": "首・肩",
+              "evidence": "頭と裾の頂点をつなぐ。"
+            },
+            {
+              "id": "P3",
+              "role": "頭",
+              "evidence": "最上部の四角。"
+            },
+            {
+              "id": "P4",
+              "role": "伸ばした脚",
+              "evidence": "右下へ細長く伸びる。"
+            },
+            {
+              "id": "P5",
+              "role": "もう一方の足",
+              "evidence": "裾の下へ尖る。"
+            }
+          ]
+        }
+      ],
+      "partsRevision": "各候補の parts に対応と根拠を記載。",
+      "reason": "部品対応と脚を大きく伸ばす姿に同意。動作は踊る・大股で歩くの両読みがあり、性別は断定しない。",
+      "discussion": "腕が見えない。"
+    },
+    {
+      "item": "item-17",
+      "judgment": "修正案",
+      "consensusCandidates": [
+        {
+          "noun": "潜水艦",
+          "direction": "艦首の左右は未確定、塔が上",
+          "posture": "水平に進む",
+          "confidence": "中",
+          "parts": [
+            {
+              "id": "P1",
+              "role": "船体",
+              "evidence": "横長で左端が尖る。"
+            },
+            {
+              "id": "P2",
+              "role": "艦橋塔",
+              "evidence": "船体上に立つ。"
+            }
+          ]
+        }
+      ],
+      "partsRevision": "各候補の parts に対応と根拠を記載。",
+      "reason": "右を艦首とする説明にも筋が通るが、尖った左を先端とする読みも可能なので向きは決めない。",
+      "discussion": "シャチは頭と尾びれの対応が明確でなく支持しない。"
+    },
+    {
+      "item": "item-18",
+      "judgment": "支持",
+      "consensusCandidates": [
+        {
+          "noun": "踊っている人",
+          "direction": "頭が右上、脚が右下",
+          "posture": "片脚を斜めに伸ばす",
+          "confidence": "中",
+          "parts": [
+            {
+              "id": "P1",
+              "role": "広がるスカート",
+              "evidence": "左と下へ広がる三角。"
+            },
+            {
+              "id": "P2",
+              "role": "上半身・首",
+              "evidence": "裾から頭へつながる。"
+            },
+            {
+              "id": "P3",
+              "role": "頭",
+              "evidence": "最上部の四角。"
+            },
+            {
+              "id": "P4",
+              "role": "伸ばした脚",
+              "evidence": "右下へ細く伸びる。"
+            }
+          ]
+        }
+      ],
+      "partsRevision": "各候補の parts に対応と根拠を記載。",
+      "reason": "人の姿と部品対応に同意。",
+      "discussion": "腕ともう一方の脚は明瞭でない。"
+    },
+    {
+      "item": "item-19",
+      "judgment": "支持",
+      "consensusCandidates": [
+        {
+          "noun": "走っている人",
+          "direction": "頭が右上、腕が左、脚が右下",
+          "posture": "腕と脚を広げて走る",
+          "confidence": "低",
+          "parts": [
+            {
+              "id": "P1",
+              "role": "後ろへ伸ばした腕",
+              "evidence": "中央から左へ水平に出る。"
+            },
+            {
+              "id": "P2",
+              "role": "頭と前傾した胴",
+              "evidence": "右上端から中央下へ続く。"
+            },
+            {
+              "id": "P3",
+              "role": "腰・曲げた脚",
+              "evidence": "中央下の小三角。"
+            },
+            {
+              "id": "P4",
+              "role": "前へ出した脚",
+              "evidence": "腰から右下へ伸びる。"
+            }
+          ]
+        }
+      ],
+      "partsRevision": "各候補の parts に対応と根拠を記載。",
+      "reason": "頭から胴、左への腕、右下の脚の配置で支持。",
+      "discussion": "親の独立観察は候補に採用せず、DapperEinsteinが再観察で支持した提案。頭は独立せず。"
+    },
+    {
+      "item": "item-20",
+      "judgment": "支持",
+      "consensusCandidates": [
+        {
+          "noun": "カエデの葉",
+          "direction": "葉先が上と右、茎が左下",
+          "posture": "茎を付けて斜めに置く",
+          "confidence": "低",
+          "parts": [
+            {
+              "id": "P1",
+              "role": "葉の中央と裂片",
+              "evidence": "中央の大三角。"
+            },
+            {
+              "id": "P2",
+              "role": "右上の裂片",
+              "evidence": "右上へ尖る。"
+            },
+            {
+              "id": "P3",
+              "role": "上側の裂片",
+              "evidence": "上へ鋭く伸びる。"
+            },
+            {
+              "id": "P4",
+              "role": "葉の付け根",
+              "evidence": "葉の下で茎につながる。"
+            },
+            {
+              "id": "P5",
+              "role": "茎",
+              "evidence": "左下へ細く伸びる。"
+            }
+          ]
+        }
+      ],
+      "partsRevision": "各候補の parts に対応と根拠を記載。",
+      "reason": "複数の尖りと左下の茎の組合せから支持。",
+      "discussion": "親の独立観察は見立てなし、DapperEinsteinが再観察で支持。裂片の配置は通常と異なる。"
+    },
+    {
+      "item": "item-21",
+      "judgment": "支持",
+      "consensusCandidates": [],
+      "partsRevision": "各候補の parts に対応と根拠を記載。",
+      "reason": "P3を頭、P4を尾とすると共に右に寄り、進行方向と尾の位置が整理しにくい。ハトを撤回し見立てなしを支持。",
+      "discussion": ""
+    },
+    {
+      "item": "item-22",
+      "judgment": "支持",
+      "consensusCandidates": [],
+      "partsRevision": "各候補の parts に対応と根拠を記載。",
+      "reason": "竜巻は上が広く下が細いが、左の四角い張り出しと下部の折れが合わない。見立てなしに同意。",
+      "discussion": ""
+    },
+    {
+      "item": "item-23",
+      "judgment": "支持",
+      "consensusCandidates": [],
+      "partsRevision": "各候補の parts に対応と根拠を記載。",
+      "reason": "旗に見える大三角はあるが、下の四角と左の太い縦部が旗竿に合わない。見立てなしに同意。",
+      "discussion": ""
+    },
+    {
+      "item": "item-24",
+      "judgment": "支持",
+      "consensusCandidates": [
+        {
+          "noun": "金魚",
+          "direction": "頭が左、尾が右",
+          "posture": "横向きに泳ぐ",
+          "confidence": "中",
+          "parts": [
+            {
+              "id": "P1",
+              "role": "頭と胴",
+              "evidence": "左の幅広い本体。"
+            },
+            {
+              "id": "P2",
+              "role": "尾びれの下側",
+              "evidence": "右下に尖る。"
+            },
+            {
+              "id": "P3",
+              "role": "尾びれの上側",
+              "evidence": "右に尖る。"
+            }
+          ]
+        }
+      ],
+      "partsRevision": "各候補の parts に対応と根拠を記載。",
+      "reason": "胴と二股の尾びれの対応に同意する。",
+      "discussion": "胴の上の段差は四角い。"
+    },
+    {
+      "item": "item-25",
+      "judgment": "修正案",
+      "consensusCandidates": [
+        {
+          "noun": "ニワトリ",
+          "direction": "頭が右、尾羽が左上",
+          "posture": "立つ",
+          "confidence": "低",
+          "parts": [
+            {
+              "id": "P1",
+              "role": "胴とくちばし",
+              "evidence": "中央の逆三角の右角が前へ尖る。"
+            },
+            {
+              "id": "P2",
+              "role": "頭",
+              "evidence": "胴の上に張り出す。"
+            },
+            {
+              "id": "P3",
+              "role": "立てた尾羽",
+              "evidence": "左上へ長く伸びる。"
+            },
+            {
+              "id": "P4",
+              "role": "胸",
+              "evidence": "右側の下の三角。"
+            },
+            {
+              "id": "P5",
+              "role": "脚",
+              "evidence": "胴の下に小さく尖る。"
+            }
+          ]
+        }
+      ],
+      "partsRevision": "各候補の parts に対応と根拠を記載。",
+      "reason": "尾羽と頭・右端のくちばし・脚の配置でニワトリを支持。飛行機は機首が細すぎて撤回。",
+      "discussion": "右のP4も前に尖り、くちばしと胸の区別が曖昧。"
+    },
+    {
+      "item": "item-26",
+      "judgment": "支持",
+      "consensusCandidates": [
+        {
+          "noun": "アヒル",
+          "direction": "頭が左上、尾が右上",
+          "posture": "水に浮かんで泳ぐ",
+          "confidence": "低",
+          "parts": [
+            {
+              "id": "P1",
+              "role": "胴と上がった尾",
+              "evidence": "中央から右上へ尖る。"
+            },
+            {
+              "id": "P2",
+              "role": "胸",
+              "evidence": "胴の左下の三角。"
+            },
+            {
+              "id": "P3",
+              "role": "首",
+              "evidence": "頭の下で胴につながる。"
+            },
+            {
+              "id": "P4",
+              "role": "頭",
+              "evidence": "左上の四角。"
+            },
+            {
+              "id": "P5",
+              "role": "水をかく足",
+              "evidence": "胴の下から右下へ伸びる。"
+            }
+          ]
+        }
+      ],
+      "partsRevision": "各候補の parts に対応と根拠を記載。",
+      "reason": "カモとアヒルは同じ部品配置で、両方の読みを支持。種類は画像だけでは判別できない。",
+      "discussion": "くちばしがなく胴が傾きすぎる。"
+    },
+    {
+      "item": "item-27",
+      "judgment": "修正案",
+      "consensusCandidates": [
+        {
+          "noun": "フタコブラクダ",
+          "direction": "頭が右上",
+          "posture": "脚を折って座り首を伸ばす",
+          "confidence": "低",
+          "parts": [
+            {
+              "id": "P1",
+              "role": "後ろのこぶと尻",
+              "evidence": "左端に山形がある。"
+            },
+            {
+              "id": "P2",
+              "role": "前のこぶと胴",
+              "evidence": "中央の大きな山と平らな底。"
+            },
+            {
+              "id": "P3",
+              "role": "胸・首の付け根",
+              "evidence": "胴の右端の小三角。"
+            },
+            {
+              "id": "P4",
+              "role": "首",
+              "evidence": "右上に立つ大三角。"
+            },
+            {
+              "id": "P5",
+              "role": "頭",
+              "evidence": "首の先から右へ出る。"
+            }
+          ]
+        }
+      ],
+      "partsRevision": "各候補の parts に対応と根拠を記載。",
+      "reason": "二つの山をこぶ、平らな底を折りたたんだ脚とするラクダを支持。立つブラキオサウルスは脚が見えず撤回。",
+      "discussion": "首長竜は水面を輪郭外に仮定し、背の二山も説明しにくく支持しない。"
+    },
+    {
+      "item": "item-28",
+      "judgment": "支持",
+      "consensusCandidates": [],
+      "partsRevision": "各候補の parts に対応と根拠を記載。",
+      "reason": "逆三角の顔と耳の対応は分かるが左耳が四角く体が細すぎる。猫を支持せず見立てなしに同意。",
+      "discussion": "親の独立観察には低確信度の猫がある。"
+    },
+    {
+      "item": "item-29",
+      "judgment": "修正案",
+      "consensusCandidates": [
+        {
+          "noun": "リス",
+          "direction": "顔が右、尾が左上",
+          "posture": "座る",
+          "confidence": "低",
+          "parts": [
+            {
+              "id": "P1",
+              "role": "胴と頭の付け根",
+              "evidence": "中央の縦長の部分。"
+            },
+            {
+              "id": "P2",
+              "role": "顔",
+              "evidence": "右上の四角。"
+            },
+            {
+              "id": "P3",
+              "role": "下半身・足",
+              "evidence": "胴の下に伸びる。"
+            },
+            {
+              "id": "P4",
+              "role": "尾",
+              "evidence": "左上へ細く伸びる。"
+            }
+          ]
+        },
+        {
+          "noun": "手を振る人",
+          "direction": "正面またはやや右向き",
+          "posture": "片腕を上げ片腕を横に出す",
+          "confidence": "低",
+          "parts": [
+            {
+              "id": "P1",
+              "role": "頭と胴",
+              "evidence": "上端の尖りから中央へ続く。"
+            },
+            {
+              "id": "P2",
+              "role": "横に伸ばした腕",
+              "evidence": "右肩付近から出る。"
+            },
+            {
+              "id": "P3",
+              "role": "脚",
+              "evidence": "胴の下の四角。"
+            },
+            {
+              "id": "P4",
+              "role": "上げた腕",
+              "evidence": "左肩付近から左上へ伸びる。"
+            }
+          ]
+        }
+      ],
+      "partsRevision": "各候補の parts に対応と根拠を記載。",
+      "reason": "左右の肩付近から腕が出る配置で、手を振る人も低い確信度で支持。リスも支持。",
+      "discussion": "人の頭は胴から独立せず、リスは尾が細い。"
+    },
+    {
+      "item": "item-30",
+      "judgment": "支持",
+      "consensusCandidates": [],
+      "partsRevision": "各候補の parts に対応と根拠を記載。",
+      "reason": "左のベルと右の吹き口は読めるがP2の三角がバルブに見えず管も短い。ラッパを支持せず見立てなし。",
+      "discussion": ""
+    }
+  ]
+}

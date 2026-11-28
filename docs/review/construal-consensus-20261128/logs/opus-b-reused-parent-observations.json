@@ -1,0 +1,385 @@
+[
+  {
+    "item": "item-02",
+    "silhouetteImpression": "上に小さな四角、その下に左右へ広がる台形、さらに下へ尖る大きな逆三角があり、心棒のある独楽に見える。",
+    "candidates": [
+      {
+        "rank": 1,
+        "noun": "独楽（こま）",
+        "posture": "心棒を上にして立つ",
+        "direction": "心棒が上、軸先が下",
+        "confidence": "中",
+        "parts": [
+          {
+            "id": "P1",
+            "role": "胴の下半分と軸先",
+            "evidence": "下へ尖る大きな逆三角形"
+          },
+          {
+            "id": "P2",
+            "role": "胴の上半分",
+            "evidence": "左右へ広がる台形"
+          },
+          {
+            "id": "P3",
+            "role": "心棒",
+            "evidence": "最上部の正方形"
+          }
+        ],
+        "evidence": "上の心棒、最も幅の広い胴、下の一点に尖る軸先が独楽の形に合う。",
+        "weaknesses": "上半分が左にずれている。"
+      },
+      {
+        "rank": 2,
+        "noun": "アイスクリームのコーン",
+        "posture": "コーンを下にして持たれている",
+        "direction": "コーンが下",
+        "confidence": "低",
+        "parts": [
+          {
+            "id": "P1",
+            "role": "コーン",
+            "evidence": "下へ尖る逆三角形"
+          },
+          {
+            "id": "P2",
+            "role": "アイス",
+            "evidence": "コーンの上の台形"
+          },
+          {
+            "id": "P3",
+            "role": "上の飾り",
+            "evidence": "最上部の正方形"
+          }
+        ],
+        "evidence": "尖った円錐の上に塊が載る。",
+        "weaknesses": "アイスの部分が平たく角張る。"
+      }
+    ],
+    "noConstrual": false,
+    "noConstrualReason": "",
+    "uncertainty": "上半分のずれをどう見るか。"
+  },
+  {
+    "item": "item-04",
+    "silhouetteImpression": "下が尖った五角形の胴に、上の四角い頭、左の四角、右上から垂れる斜めの帯が付き、立つ小さな生き物に見えるが特定しにくい。",
+    "candidates": [
+      {
+        "rank": 1,
+        "noun": "ペンギン",
+        "posture": "片方のひれを上げて立つ",
+        "direction": "正面寄り",
+        "confidence": "低",
+        "parts": [
+          {
+            "id": "P1",
+            "role": "胴",
+            "evidence": "下が尖る大きな五角形"
+          },
+          {
+            "id": "P2",
+            "role": "左のひれ",
+            "evidence": "胴の左に付く正方形"
+          },
+          {
+            "id": "P3",
+            "role": "頭",
+            "evidence": "胴の上の正方形"
+          },
+          {
+            "id": "P4",
+            "role": "上げた右のひれ",
+            "evidence": "頭の右から右下へ伸びる平行四辺形"
+          }
+        ],
+        "evidence": "頭・胴・左右のひれの配置が立つペンギンに部分的に合う。",
+        "weaknesses": "足が無く胴の下が尖る。"
+      }
+    ],
+    "noConstrual": false,
+    "noConstrualReason": "",
+    "uncertainty": "見立てなしに近い。"
+  },
+  {
+    "item": "item-09",
+    "silhouetteImpression": "上に尖った耳のような三角、左へ尖る顔、底辺の広い胴、下に脚、右下へ伸びる尾があり、左を向いて座る猫に見える。",
+    "candidates": [
+      {
+        "rank": 1,
+        "noun": "猫",
+        "posture": "座ってしっぽを後ろへ伸ばす",
+        "direction": "左向き、しっぽが右下",
+        "confidence": "低",
+        "parts": [
+          {
+            "id": "P1",
+            "role": "胴",
+            "evidence": "底辺が広く上が尖る大きな三角形"
+          },
+          {
+            "id": "P2",
+            "role": "前脚",
+            "evidence": "胴の下の台形"
+          },
+          {
+            "id": "P3",
+            "role": "しっぽ",
+            "evidence": "胴の右下から右下へ伸びる平行四辺形"
+          },
+          {
+            "id": "P4",
+            "role": "顔（左端が鼻先）",
+            "evidence": "胴の左上で下へ尖る逆三角形"
+          },
+          {
+            "id": "P5",
+            "role": "耳",
+            "evidence": "最上部で上へ尖る小三角形"
+          }
+        ],
+        "evidence": "耳・顔・広い胴・後ろへ伸びるしっぽの並びが座る猫の横姿に合う。",
+        "weaknesses": "耳が一つしかなく、顔が胴に比べて小さい。"
+      }
+    ],
+    "noConstrual": false,
+    "noConstrualReason": "",
+    "uncertainty": "とさかのある鶏やキツネとも読める。"
+  },
+  {
+    "item": "item-11",
+    "silhouetteImpression": "左下から右上へ太い帯が伸び、右上端に小さな三角、右下に五角形、左下に小さな帯がある。首を上げた生き物にも見えるが部分の役割が定まらない。",
+    "candidates": [],
+    "noConstrual": true,
+    "noConstrualReason": "太い斜めの帯を首とも胴とも決めにくく、頭・体・脚の対応が一つにまとまらない。",
+    "uncertainty": "右上を向いて首を伸ばすキリンや遠吠えする狼が弱い候補。"
+  },
+  {
+    "item": "item-12",
+    "silhouetteImpression": "下が尖った五角形の胴の上に四角い頭、左右に四角と斜めの帯が付く。小さく立つ生き物のように見えるが特定しにくい。",
+    "candidates": [
+      {
+        "rank": 1,
+        "noun": "ペンギン",
+        "posture": "立っている",
+        "direction": "正面寄り、頭が右上",
+        "confidence": "低",
+        "parts": [
+          {
+            "id": "P1",
+            "role": "胴",
+            "evidence": "中央の大きな五角形で下へすぼまる"
+          },
+          {
+            "id": "P2",
+            "role": "左のひれ",
+            "evidence": "胴の左に付く正方形"
+          },
+          {
+            "id": "P3",
+            "role": "頭",
+            "evidence": "胴の右上に載る正方形"
+          },
+          {
+            "id": "P4",
+            "role": "右のひれ",
+            "evidence": "胴の右側から下へ下がる平行四辺形"
+          }
+        ],
+        "evidence": "頭・胴・左右に張り出すひれの配置が立つペンギンに部分的に合う。",
+        "weaknesses": "頭が中心からずれ、足が無く胴の下が尖る。"
+      }
+    ],
+    "noConstrual": false,
+    "noConstrualReason": "",
+    "uncertainty": "見立てなしに近い。"
+  },
+  {
+    "item": "item-14",
+    "silhouetteImpression": "左の小さな四角から右へ大きく広がり右辺が垂直に切れる形で、下に三角の握りがあり、メガホンに見える。",
+    "candidates": [
+      {
+        "rank": 1,
+        "noun": "メガホン",
+        "posture": "横に向けて構えられている",
+        "direction": "口が右、握りが下",
+        "confidence": "中",
+        "parts": [
+          {
+            "id": "P1",
+            "role": "広がる筒（右辺が開口部）",
+            "evidence": "左から右へ広がり右辺が垂直な大きな台形"
+          },
+          {
+            "id": "P2",
+            "role": "握り",
+            "evidence": "筒の左下に付く三角形"
+          },
+          {
+            "id": "P3",
+            "role": "口に当てる部分",
+            "evidence": "筒の細い端に付く左の正方形"
+          }
+        ],
+        "evidence": "細い吹き口から右へ広がる筒と、下の握りの組み合わせがメガホンの横姿に合う。",
+        "weaknesses": "筒の上下の広がり方が非対称。"
+      }
+    ],
+    "noConstrual": false,
+    "noConstrualReason": "",
+    "uncertainty": "ラッパやスピーカーにも近い。"
+  },
+  {
+    "item": "item-17",
+    "silhouetteImpression": "右へ尖る矢じり形の胴の上下に突起、左に小さな三角があり、上から見た機体や右向きの魚のような十字形に見える。",
+    "candidates": [
+      {
+        "rank": 1,
+        "noun": "飛行機（上から見た姿）",
+        "posture": "飛んでいる",
+        "direction": "機首が右",
+        "confidence": "低",
+        "parts": [
+          {
+            "id": "P1",
+            "role": "胴体と機首",
+            "evidence": "右へ尖る大きな五角形"
+          },
+          {
+            "id": "P2",
+            "role": "下側の主翼",
+            "evidence": "胴の下へ長く伸び先が尖る部分"
+          },
+          {
+            "id": "P3",
+            "role": "尾翼",
+            "evidence": "胴の左端の小三角形"
+          },
+          {
+            "id": "P4",
+            "role": "上側の主翼",
+            "evidence": "胴の上の正方形"
+          }
+        ],
+        "evidence": "尖った先端・上下に張り出す翼・後端の小さな尾の並びが機体の平面形に対応する。",
+        "weaknesses": "上下の翼の長さと形が大きく違う。"
+      }
+    ],
+    "noConstrual": false,
+    "noConstrualReason": "",
+    "uncertainty": "上下のひれと尾びれを持つ右向きの魚にも見えるが、尾が小さすぎる。"
+  },
+  {
+    "item": "item-19",
+    "silhouetteImpression": "右辺が垂直な高い三角形の下に、左へ尖る三角と右下の四角が付く。つま先が左の長靴にも見えるが弱い。",
+    "candidates": [
+      {
+        "rank": 1,
+        "noun": "長靴",
+        "posture": "立てて置かれている",
+        "direction": "つま先が左",
+        "confidence": "低",
+        "parts": [
+          {
+            "id": "P1",
+            "role": "筒（脚を入れる部分）",
+            "evidence": "上へ高く伸びる大きな五角形"
+          },
+          {
+            "id": "P2",
+            "role": "つま先",
+            "evidence": "下端で左へ尖る三角形"
+          },
+          {
+            "id": "P3",
+            "role": "かかと",
+            "evidence": "右下へ突き出る正方形"
+          }
+        ],
+        "evidence": "高い筒・前へ出たつま先・後ろのかかとの位置関係が長靴の横姿に合う。",
+        "weaknesses": "筒の上端が尖り、つま先が筒より高い位置にある。"
+      }
+    ],
+    "noConstrual": false,
+    "noConstrualReason": "",
+    "uncertainty": "見立てなしに近い。左を向いて座る動物とも読める。"
+  },
+  {
+    "item": "item-25",
+    "silhouetteImpression": "左側が段々になった太い帯が右上へ上がり、その上端に旗のような三角が立つ。物としてまとまりにくい。",
+    "candidates": [],
+    "noConstrual": true,
+    "noConstrualReason": "三角を旗、段を階段と見ても一つの物にならず、生き物としての頭・胴の対応も無い。",
+    "uncertainty": "旗を立てた階段や山の頂上という場面の読みは可能だが、具体物の名前にならない。"
+  },
+  {
+    "item": "item-27",
+    "silhouetteImpression": "下に逆台形、その上に左右へ張り出す大きな三角、てっぺんに細い縦の柱と小さな出っ張りがあり、帆を張った船に見える。",
+    "candidates": [
+      {
+        "rank": 1,
+        "noun": "帆船",
+        "posture": "水に浮かぶ",
+        "direction": "帆が上、船体が下",
+        "confidence": "中",
+        "parts": [
+          {
+            "id": "P1",
+            "role": "帆",
+            "evidence": "中央の大きな二等辺三角形"
+          },
+          {
+            "id": "P2",
+            "role": "旗",
+            "evidence": "帆の頂部右の小三角形"
+          },
+          {
+            "id": "P3",
+            "role": "船体",
+            "evidence": "上辺が長く下辺が短い逆台形"
+          },
+          {
+            "id": "P4",
+            "role": "帆柱の先端",
+            "evidence": "頂部の縦長の平行四辺形"
+          }
+        ],
+        "evidence": "逆台形の船体の上に三角の帆が載る構成は船として読みやすい。",
+        "weaknesses": "帆が船体より右へ大きくはみ出し、帆柱が帆の左寄りにある。"
+      },
+      {
+        "rank": 2,
+        "noun": "独楽（こま）",
+        "posture": "立って回る",
+        "direction": "心棒が上",
+        "confidence": "低",
+        "parts": [
+          {
+            "id": "P1",
+            "role": "胴の上半分",
+            "evidence": "左右に張り出す三角形"
+          },
+          {
+            "id": "P2",
+            "role": "心棒の付け根",
+            "evidence": "上部の小三角形"
+          },
+          {
+            "id": "P3",
+            "role": "胴の下半分",
+            "evidence": "下へすぼまる逆台形"
+          },
+          {
+            "id": "P4",
+            "role": "心棒",
+            "evidence": "上へ伸びる縦長の部分"
+          }
+        ],
+        "evidence": "中央が最も太く上下へすぼまり、上に棒が立つ。",
+        "weaknesses": "心棒が中心から左にずれている。"
+      }
+    ],
+    "noConstrual": false,
+    "noConstrualReason": "",
+    "uncertainty": "上部の縦の柱を煙突と見れば屋根の家にも近い。"
+  }
+]

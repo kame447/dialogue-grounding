@@ -1,0 +1,303 @@
+[
+  {
+    "item": "item-01",
+    "silhouetteImpression": "右に縦に高くそびえる大きな三角、左に低い胴と小さな四角い頭があり、ふさふさの尾を立てたリスの横姿に見える。",
+    "candidates": [
+      {
+        "rank": 1,
+        "noun": "リス",
+        "posture": "尾を立てて座る",
+        "direction": "左向き、尾が右上",
+        "confidence": "中",
+        "parts": [
+          {
+            "id": "P1",
+            "role": "立てた大きな尾",
+            "evidence": "右端で上へ高く伸びる大きな三角形"
+          },
+          {
+            "id": "P2",
+            "role": "胴と脚",
+            "evidence": "左下の低い五角形で下端が尖る"
+          },
+          {
+            "id": "P3",
+            "role": "頭",
+            "evidence": "胴の左上に載る正方形"
+          }
+        ],
+        "evidence": "体より大きく立ち上がる尾と、前に小さな頭がある配置がリスに合う。",
+        "weaknesses": "耳が無く、尾が直線的。"
+      },
+      {
+        "rank": 2,
+        "noun": "帆船",
+        "posture": "浮かぶ",
+        "direction": "帆が右",
+        "confidence": "低",
+        "parts": [
+          {
+            "id": "P1",
+            "role": "帆（右辺が帆柱）",
+            "evidence": "縦の辺を持つ大きな三角形"
+          },
+          {
+            "id": "P2",
+            "role": "船体",
+            "evidence": "上辺が水平で下へ尖る部分"
+          },
+          {
+            "id": "P3",
+            "role": "船室",
+            "evidence": "船体の上の正方形"
+          }
+        ],
+        "evidence": "船体・帆・船室の三要素がそろう。",
+        "weaknesses": "帆が船体の端に寄りすぎている。"
+      }
+    ],
+    "noConstrual": false,
+    "noConstrualReason": "",
+    "uncertainty": "尾を立てた猫とも読めるが尾が太すぎる。"
+  },
+  {
+    "item": "item-05",
+    "silhouetteImpression": "横長の体の上縁が三つの山と谷のぎざぎざで、右上に四角い頭、下に斜めの脚が一本あり、右を向く四つ足の動物か背にとげのある恐竜に見える。",
+    "candidates": [
+      {
+        "rank": 1,
+        "noun": "ラクダ",
+        "posture": "立っている",
+        "direction": "右向き、頭が右上",
+        "confidence": "低",
+        "parts": [
+          {
+            "id": "P1",
+            "role": "しっぽ",
+            "evidence": "左端で縦に立つ三角形"
+          },
+          {
+            "id": "P2",
+            "role": "こぶのある胴",
+            "evidence": "中央で上へ尖る大きな三角形"
+          },
+          {
+            "id": "P3",
+            "role": "首",
+            "evidence": "胴と頭をつなぐ三角形"
+          },
+          {
+            "id": "P4",
+            "role": "頭",
+            "evidence": "右上の正方形"
+          },
+          {
+            "id": "P5",
+            "role": "脚",
+            "evidence": "胴の下から右下へ伸びる平行四辺形"
+          }
+        ],
+        "evidence": "山形の胴と前に出た頭が、こぶのある動物の横姿に対応する。",
+        "weaknesses": "脚が一本で、首が短い。"
+      },
+      {
+        "rank": 2,
+        "noun": "ステゴサウルス",
+        "posture": "歩いている",
+        "direction": "右向き",
+        "confidence": "低",
+        "parts": [
+          {
+            "id": "P1",
+            "role": "背中の板（後ろ）",
+            "evidence": "左端の尖り"
+          },
+          {
+            "id": "P2",
+            "role": "胴と背中の板",
+            "evidence": "中央の大きな山"
+          },
+          {
+            "id": "P3",
+            "role": "背中の板（前）",
+            "evidence": "右の尖り"
+          },
+          {
+            "id": "P4",
+            "role": "頭",
+            "evidence": "右上の正方形"
+          },
+          {
+            "id": "P5",
+            "role": "脚",
+            "evidence": "下へ伸びる平行四辺形"
+          }
+        ],
+        "evidence": "上縁の三つの尖りが背中の板の列に見える。",
+        "weaknesses": "頭が高い位置にあり、尾が無い。"
+      }
+    ],
+    "noConstrual": false,
+    "noConstrualReason": "",
+    "uncertainty": "三つの尖りを何と見るかで動物が変わる。"
+  },
+  {
+    "item": "item-16",
+    "silhouetteImpression": "上に四角い頭、左へ大きく広がる三角形、右下へ伸びる脚のような斜めの帯があり、人が裾の広い服で右へ歩く姿に見える。",
+    "candidates": [
+      {
+        "rank": 1,
+        "noun": "ロングスカートの女性",
+        "posture": "歩いている（脚を右下へ踏み出す）",
+        "direction": "頭が上、進行方向は右",
+        "confidence": "低",
+        "parts": [
+          {
+            "id": "P1",
+            "role": "左へ広がるスカート・胴",
+            "evidence": "頭の下から左下へ大きく広がる直角三角形"
+          },
+          {
+            "id": "P2",
+            "role": "首・肩",
+            "evidence": "頭の真下の小さな三角形"
+          },
+          {
+            "id": "P3",
+            "role": "頭",
+            "evidence": "最上部の正方形"
+          },
+          {
+            "id": "P4",
+            "role": "前に踏み出した脚",
+            "evidence": "胴の右側から右下へ伸びる平行四辺形"
+          },
+          {
+            "id": "P5",
+            "role": "後ろ脚の先",
+            "evidence": "胴の下に下向きに尖る小三角形"
+          }
+        ],
+        "evidence": "頭・胴・二本の脚の配置が人の立ち姿に対応する。",
+        "weaknesses": "胴が左にだけ広がり左右非対称で、腕に当たる部分が無い。"
+      }
+    ],
+    "noConstrual": false,
+    "noConstrualReason": "",
+    "uncertainty": "帆（P1）と旗（P3）の帆船にも見えるが船体が無い。"
+  },
+  {
+    "item": "item-19",
+    "silhouetteImpression": "左上に水平な帯、中央から右上へ太い帯が伸び、下に小さな三角と右下へ伸びる帯がある。前のめりに走る人にも見えるが弱い。",
+    "candidates": [],
+    "noConstrual": true,
+    "noConstrualReason": "右上へ伸びる太い帯を胴と見ても頭の区別が無く、腕・脚の対応が一つに決まらない。",
+    "uncertainty": "腕を後ろへ伸ばして走る人、首を伸ばした水鳥が弱い候補。"
+  },
+  {
+    "item": "item-20",
+    "silhouetteImpression": "上部と右に複数の尖りがある星形に近い塊で、左下に斜めの帯が伸びる。何に見えるか定まらない。",
+    "candidates": [],
+    "noConstrual": true,
+    "noConstrualReason": "尖りが四方に出て頭・尾・脚の役割が決まらず、物としても輪郭が合わない。",
+    "uncertainty": "右上を顔、左上を立てた尾と見る座るキツネが弱い候補。"
+  },
+  {
+    "item": "item-21",
+    "silhouetteImpression": "左上から右下へ太く長い帯が傾き、右上に四角と逆三角、右下に斜めの帯が付く。部分の役割がまとまらない。",
+    "candidates": [],
+    "noConstrual": true,
+    "noConstrualReason": "太い斜めの帯を胴と見ると頭が後ろ側に来るなど、生き物としても物としても対応が成り立たない。",
+    "uncertainty": "長い板（スキー）に乗る人などが考えられるが根拠が弱い。"
+  },
+  {
+    "item": "item-26",
+    "silhouetteImpression": "左上に四角い頭、右へ長く伸びて右上端が尖る胴、左下に下へ尖る胸、下に脚があり、左を向いて水に浮かぶ鴨に見える。",
+    "candidates": [
+      {
+        "rank": 1,
+        "noun": "カモ",
+        "posture": "水に浮かんで泳ぐ",
+        "direction": "左向き、尾が右上",
+        "confidence": "低",
+        "parts": [
+          {
+            "id": "P1",
+            "role": "胴と上がった尾",
+            "evidence": "右上へ傾いた大きな平行四辺形で右上端が尖る"
+          },
+          {
+            "id": "P2",
+            "role": "胸",
+            "evidence": "胴の左下で下へ尖る三角形"
+          },
+          {
+            "id": "P3",
+            "role": "首",
+            "evidence": "頭と胴をつなぐ小三角形"
+          },
+          {
+            "id": "P4",
+            "role": "頭",
+            "evidence": "左上の正方形"
+          },
+          {
+            "id": "P5",
+            "role": "水をかく脚",
+            "evidence": "胴の下の平行四辺形"
+          }
+        ],
+        "evidence": "前の頭、後ろで上がる尾、下の脚の位置が泳ぐ水鳥の横姿に合う。",
+        "weaknesses": "くちばしが無く、胴が平たく傾きすぎる。"
+      }
+    ],
+    "noConstrual": false,
+    "noConstrualReason": "",
+    "uncertainty": "右へ走る人やほうきに乗る人とも読めるが、どれも弱い。"
+  },
+  {
+    "item": "item-28",
+    "silhouetteImpression": "上辺が水平な大きな逆三角の上に四角と小三角が載り、右側から右下へ細い帯が伸びる。耳の立った頭の下に体が続くようにも見えるが弱い。",
+    "candidates": [
+      {
+        "rank": 1,
+        "noun": "猫",
+        "posture": "顔を上に向け、体を右下へ伸ばす",
+        "direction": "頭が上、体が右下",
+        "confidence": "低",
+        "parts": [
+          {
+            "id": "P1",
+            "role": "顔",
+            "evidence": "上辺が水平で下へ尖る大きな逆三角形"
+          },
+          {
+            "id": "P2",
+            "role": "左耳",
+            "evidence": "顔の上辺左に載る正方形"
+          },
+          {
+            "id": "P3",
+            "role": "右耳",
+            "evidence": "顔の上辺右に載る小三角形"
+          },
+          {
+            "id": "P4",
+            "role": "胸・前脚",
+            "evidence": "顔の右下の小三角形"
+          },
+          {
+            "id": "P5",
+            "role": "胴・しっぽ",
+            "evidence": "右下へ伸びる平行四辺形"
+          }
+        ],
+        "evidence": "逆三角の顔に二つの耳が載る配置は猫の頭として読める。",
+        "weaknesses": "左耳が四角く、顔に比べて体が細く小さい。"
+      }
+    ],
+    "noConstrual": false,
+    "noConstrualReason": "",
+    "uncertainty": "見立てなしに近い。全体はくさび形の道具（ちり取りなど）とも読めるが決め手が無い。"
+  }
+]
