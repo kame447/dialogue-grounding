@@ -60,7 +60,8 @@ test('S0 独立性: parity-verify/ は runtime の rotation 系 module を値と
     // import … from '…'・export … from '…'・import('…')。type だけの import は消えるので数えない。
     const statements = [...text.matchAll(/^(?:import|export)\s+(type\s+)?[^;]*?from\s+['"]([^'"]+)['"]/gmu)].map(m => ({ typeOnly: m[1] !== undefined, target: m[2] }))
       .concat([...text.matchAll(/\bimport\(\s*['"]([^'"]+)['"]\s*\)/gu)].map(m => ({ typeOnly: false, target: m[1] })));
-    for (const { typeOnly, target } of statements) if (!typeOnly && FORBIDDEN_IMPORT.test(target)) offenders.push(`${file.slice(root.length)} → ${target}`);
+    // 検証器の中の file（./…）は S4 自身の写し（例: rotation-memory-records.ts）なので数えない。検証器の外（../…）の runtime の rotation 系だけが対象。
+    for (const { typeOnly, target } of statements) if (!typeOnly && target.startsWith('../') && FORBIDDEN_IMPORT.test(target)) offenders.push(`${file.slice(root.length)} → ${target}`);
   }
   assert.deepEqual(offenders, [], 'S4 の写しが runtime の実装を import している（独立の写しでない）');
 });
@@ -118,9 +119,11 @@ function mutationSites(segments: { profile: string; phase: string; path: string;
       const at = [...window].findIndex((c, i) => i >= Math.floor(window.length / 2) && CONTENT_CHAR.test(c));
       if (at < 0) continue;
       const chars = [...window]; chars[at] = chars[at] === '〇' ? '々' : '〇';
-      const holders = files.filter(file => file.text.includes(window));
-      if (holders.length !== 1 || holders[0].text.indexOf(window) !== holders[0].text.lastIndexOf(window)) continue;
-      const suffix = holders[0].path.slice(runtimeDir.length), key = suffix + '#' + holders[0].text.indexOf(window);
+      // 従来の文（jev-decision.ts など）と同じ書き出しの文は、回転別メモの module（rotation-memory*）の側の1か所を変える。
+      const holders = files.filter(file => file.text.includes(window)), own = holders.filter(file => /rotation-memory/u.test(file.path));
+      const holder = holders.length === 1 ? holders[0] : own.length === 1 ? own[0] : null;
+      if (!holder || holder.text.indexOf(window) !== holder.text.lastIndexOf(window)) continue;
+      const suffix = holder.path.slice(runtimeDir.length), key = suffix + '#' + holder.text.indexOf(window);
       if (!sites.has(key)) sites.set(key, { kind: 'text', suffix, from: window, to: chars.join(''), profile, note: `${phase} ${path}` });
     }
   }
@@ -138,6 +141,8 @@ const CODE_SITES: Site[] = [
   { kind: 'code', suffix: 'decision/rotation-memory-guidance.ts', profile: 'confirm', note: '領域の行（roles）の面積の記号', from: '${r.areaPercent}%${r.tip === undefined', to: '${r.areaPercent}％${r.tip === undefined' },
   { kind: 'code', suffix: 'decision/rotation-memory-guidance.ts', profile: 'confirm', note: '隣り合う領域の区切り（roles）', from: '隣:${r.adjacent.join("・")}', to: '隣:${r.adjacent.join("、")}' },
   { kind: 'code', suffix: 'stimuli/rotation-memory-shape.ts', profile: 'name_current_whole', note: '名前の候補の順（今の向き→回した向き）', from: '[rotation.current, ...rotation.turned].flatMap', to: '[...rotation.turned, rotation.current].flatMap' },
+  { kind: 'code', suffix: 'stimuli/rotation-memory-shape.ts', profile: 'name_current_whole', note: '名前の候補: 回した向きの名詞を含めない（今の向きだけ）', from: '[rotation.current, ...rotation.turned].flatMap', to: '[rotation.current].flatMap' },
+  { kind: 'code', suffix: 'stimuli/rotation-memory-shape.ts', profile: 'name_current_whole', note: '名前の候補: 先頭の1つを落とす', from: 'view.whole.map(c => c.noun)))];', to: 'view.whole.map(c => c.noun)))].slice(1);' },
 ];
 /** 各 file から最低1つ、残りは等間隔で `limit` 個まで。 */
 function sample(sites: Site[], limit: number): Site[] {
@@ -165,7 +170,7 @@ test('S2 rotation のために足された runtime の文・描画を1字変え�
   const segments = discovered.flatMap((outcome, i) => outcome.ok ? (outcome.result.segments ?? []).map(s => ({ profile: discoveryProfiles[i], ...s })) : []);
   assert.ok(segments.length > 100, '回転別メモのために足された文を集められない: ' + segments.length);
   const textSites = mutationSites(segments);
-  assert.ok(new Set(textSites.map(s => s.suffix)).size >= 2, '文の1字変更の場所が少なすぎる: ' + [...new Set(textSites.map(s => s.suffix))].join(', '));
+  assert.ok(textSites.length >= 20, '文の1字変更の場所が少なすぎる: ' + textSites.length);
   for (const site of CODE_SITES) {
     const text = readFileSync(runtimeDir + site.suffix, 'utf8');
     assert.equal(text.split(site.from).length - 1, 1, `描画の1字変更の anchor が source に1つだけ無い（code が変わったなら、この表を更新する）: ${site.suffix} ${site.note}`);

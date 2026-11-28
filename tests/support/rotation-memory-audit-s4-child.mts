@@ -70,12 +70,20 @@ if ((process.env.CHILD_MODE ?? 'verify') === 'segments') {
     else if (value && typeof value === 'object') for (const [key, child] of Object.entries(value)) leaves(child, [...path, key], into);
   };
   const split = (text: string) => text.split(/(?<=。)|\n/u).map(s => s.trim()).filter(s => s.length > 3);
+  const RUN = /[ぁ-ゟ゠-ヿ一-鿿々〇ー・、。「」（）／：；！？]{14,}/gu;
   const segments: { phase: string; path: string; segment: string }[] = [];
   for (const request of requestsOf(rotation)) {
     const mine = new Map<string, string>(), theirs = new Map<string, string>(); leaves(request.payload, [], mine);
     for (const other of requestsOf(base).filter(r => r.provider === request.provider && r.phase === request.phase)) leaves(other.payload, [], theirs);
-    const known = new Set([...theirs.values()].flatMap(split));
-    for (const [path, text] of mine) { if (/(^|\.)(role|type|model|purpose)$/u.test(path)) continue; for (const segment of split(text)) if (!known.has(segment)) segments.push({ phase: `${request.provider}/${request.phase}`, path, segment }); }
+    const known = new Set([...theirs.values()].flatMap(split)), knownText = [...theirs.values()].join('\n');
+    for (const [path, text] of mine) {
+      if (/(^|\.)(role|type|model|purpose)$/u.test(path)) continue;
+      for (const segment of split(text)) {
+        if (known.has(segment)) continue;
+        // 文が違っても、1字変更の場所（日本語の連なりの先頭40字）が従来の同じ種類の要求にもある文面なら、回転別メモのための文ではないので出さない。
+        for (const match of segment.matchAll(RUN)) { const window = match[0].slice(0, 40); if (!knownText.includes(window)) segments.push({ phase: `${request.provider}/${request.phase}`, path, segment: window }); }
+      }
+    }
   }
   out({ scenario, segments });
 } else {
