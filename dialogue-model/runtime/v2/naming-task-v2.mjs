@@ -438,6 +438,7 @@ export async function createNamingTaskV2({
     finalError = restore?.finalError ?? null;
   let persistencePending = false, recoveryReady = false;
   let durableEventCount = initialQueue?.events.length ?? 0;
+  let closedDurable = closed;
   let humanSubmissionDurable = humanSubmission !== null, aiSubmissionDurable = aiSubmission !== null, resultDurable = result !== null;
 
   function publicEvents() {
@@ -500,10 +501,12 @@ export async function createNamingTaskV2({
   async function guardedWrite() {
     persistStage = "build";
     const eventCount = queue.getSnapshot().events.length;
+    const savedClosed = closed;
     const savedHuman = humanSubmission, savedAi = aiSubmission, savedResult = result;
     try {
       await writeRecord();
       durableEventCount = eventCount;
+      closedDurable = savedClosed;
       humanSubmissionDurable = savedHuman !== null;
       aiSubmissionDurable = savedAi !== null;
       resultDurable = savedResult !== null;
@@ -642,7 +645,8 @@ export async function createNamingTaskV2({
   function hasRecoveryWork() {
     if (!recoveryAllowed()) return false;
     const snapshot = queue.getSnapshot();
-    return Boolean(persistencePending || submissionPending() || !closed && (openingPending() ||
+    const submitted = humanSubmission === null || humanSubmissionDurable;
+    return Boolean(persistencePending || submitted && submissionPending() || !closed && (openingPending() ||
       pendingPublicationId !== null || snapshot.pendingHumanEventIds.length ||
       deferredExtraction && queue.getPrivateState().deferredAiExtraction));
   }
@@ -717,6 +721,7 @@ export async function createNamingTaskV2({
   };
   function submitAI() {
     checkAdminInterruption();
+    if (humanSubmission !== null && !humanSubmissionDurable) throw new NamingTaskError("ai_busy");
     // Concurrent callers share the same final request.
     aiSubmitting ??= submitAIOnce().finally(() => { aiSubmitting = null; scheduleRecovery(); });
     return aiSubmitting;
@@ -788,17 +793,18 @@ export async function createNamingTaskV2({
       const recovering = recoveryAllowed() && Boolean(recoveryTimer || recoveryInFlight);
       const visibleEvents = publicEvents().slice(0, durableEventCount);
       const cutoff = pendingPublicationId === null ? -1 : visibleEvents.findIndex(event => event.id === pendingPublicationId);
-      const thinking = recovery === "active" && (recovering || cutoff >= 0 || queue.isRunning() || Boolean(aiSubmitting));
+      const savingSubmission = humanSubmission !== null && !humanSubmissionDurable;
+      const thinking = recovery === "active" && (recovering || savingSubmission || cutoff >= 0 || queue.isRunning() || Boolean(aiSubmitting));
       const visibleResult = resultDurable ? result : null;
       return clone({
         // No seed or seed-derived trial id: either would let a client regenerate the boards and key.
         version: VERSION, sessionId: recordId, scene, ...(openingMode ? { openingMode } : {}),
         events: openingUnavailable ? [] : cutoff < 0 ? visibleEvents : visibleEvents.slice(0, cutoff),
         aiStatus: recovery !== "active" ? "error" : thinking ? "thinking" : "idle",
-        submitted: humanSubmissionDurable, aiSubmitted: aiSubmissionDurable, closed,
+        submitted: humanSubmissionDurable, aiSubmitted: aiSubmissionDurable, closed: closedDurable,
         ...(dialogueRecoveryEnabled || recovering ? { dialogueRecovery: recovery } : {}),
         ...(recovering ? { recovering: true } : {}),
-        status: visibleResult ? "completed" : closed ? "submitting" : "dialogue",
+        status: visibleResult ? "completed" : closedDurable ? "submitting" : "dialogue",
         busy: thinking,
         // Participant-facing result: own slots and names only, never figure ids.
         ...(visibleResult ? { result: { provisional: visibleResult.provisional, success: visibleResult.success, matchedCount: visibleResult.matchedCount, total: visibleResult.total,

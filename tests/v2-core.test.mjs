@@ -136,6 +136,50 @@ test("administrative stop discards an in-flight final result and blocks new task
   assert.deepEqual(client.calls.map(({ phase }) => phase), ["final_submission"]);
 });
 
+test("a pending names write leaves the dialogue open in state until the resubmission is saved", async () => {
+  const { promise: writing, resolve: markWriting } = Promise.withResolvers();
+  const { promise: release, resolve: releaseWrite } = Promise.withResolvers();
+  const client = fakeClient();
+  let saved, scheduled;
+  const options = { client, strategy: "repair-first", seed: 24, runDir: "",
+    recoveryTimers: { set(callback) { scheduled = callback; }, clear() { scheduled = undefined; } },
+    async onPersist(record) { saved = structuredClone(record); } };
+  const task = await createNamingTaskV2({ ...options, async onPersist(record) {
+    if (record.humanSubmission) {
+      markWriting();
+      await release;
+      throw new Error("synthetic names write failure");
+    }
+    await options.onPersist(record);
+  } });
+  const names = Object.fromEntries(task.getState().scene.shapes.map(({ id }) => [id, "合成名"]));
+  const rejected = assert.rejects(task.submitHuman({ names }), /synthetic names write failure/);
+  const submissionView = ({ closed, submitted, status }) => ({ closed, submitted, status });
+  const pending = { closed: false, submitted: false, status: "dialogue" };
+  await writing;
+  try {
+    assert.deepEqual(submissionView(task.getState()), pending);
+    assert.equal(task.getState().busy, true);
+    assert.equal(scheduled, undefined);
+    assert.throws(() => task.submitAI(), { code: "ai_busy" });
+    assert.equal(client.calls.length, 0);
+  } finally { releaseWrite(); }
+  await rejected;
+  assert.deepEqual(submissionView(task.getState()), pending);
+  assert.ok(scheduled, "the failed write is scheduled for recovery");
+  assert.equal(saved.humanSubmission, null);
+  task.stopForAdmin();
+
+  const restored = await createNamingTaskV2({ ...options, restore: saved });
+  assert.equal(restored.getState().sessionId, task.getState().sessionId);
+  assert.deepEqual(submissionView(restored.getState()), pending);
+  await restored.submitHuman({ names });
+  assert.deepEqual(submissionView(restored.getState()), { closed: true, submitted: true, status: "completed" });
+  assert.deepEqual(saved.humanSubmission, names);
+  assert.equal(client.calls.filter(({ phase }) => phase === "final_submission").length, 1);
+  assert.equal(restored.getState().result.total, 6);
+});
+
 test("names validation and AI parsing reject foreign or missing ids", () => {
   const ids = ["s-0001", "s-0002", "s-0003", "s-0004", "s-0005", "s-0006"];
   assert.throws(() => validateNamesV2({ "上段左": "x" }, ids), /invalid_submission/);
@@ -175,12 +219,20 @@ for (const strategy of ["repair-first", "bypass-enabled"]) test(`direct v2 runti
 });
 
 test("the AI may submit first; the human submission then completes scoring", async () => {
-  const task = await createNamingTaskV2({ client: fakeClient(), strategy: "bypass-enabled", seed: 26, runDir: "" });
+  let saved;
+  const options = { client: fakeClient(), strategy: "bypass-enabled", seed: 26, runDir: "",
+    async onPersist(record) { saved = structuredClone(record); } };
+  const task = await createNamingTaskV2(options);
   await task.submitAI();
-  assert.equal(task.getState().result, undefined);
-  const ids = task.getState().scene.shapes.map((s) => s.id);
-  await task.submitHuman({ names: Object.fromEntries(ids.map((id) => [id, null])) });
-  assert.equal(task.getState().result.total, 6);
+  const restored = await createNamingTaskV2({ ...options, restore: saved });
+  assert.equal(restored.getState().result, undefined);
+  assert.equal(restored.getState().closed, true);
+  assert.equal(restored.getState().submitted, false);
+  assert.equal(restored.getState().status, "submitting");
+  const ids = restored.getState().scene.shapes.map((s) => s.id);
+  await restored.submitHuman({ names: Object.fromEntries(ids.map((id) => [id, null])) });
+  assert.equal(restored.getState().result.total, 6);
+  assert.equal(options.client.calls.filter(({ phase }) => phase === "final_submission").length, 1);
 });
 
 test("the human cannot submit while the AI is still answering; nothing is silently dropped", async () => {
