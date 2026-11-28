@@ -130,6 +130,9 @@ export const ROTATION_SOURCE_EXAMPLES: readonly (readonly (string | number)[])[]
 ]);
 export const ROTATION_FEATURE_SOURCES = "回転別メモを使った出所は、先頭を \"rotation\" にして、使った候補を指します。例は " +
   ROTATION_SOURCE_EXAMPLES.map(path => JSON.stringify(path)).join("、") + " です。whole・parts の添字は各向きの行に並んだ順で0から数え、turned の添字は0〜2です。";
+/** v25 (#275): the unit of a source when the public sentence uses a construal noun. A declaration names the candidate that has the noun, which is the unit an extraction reads from the sentence's nouns. */
+export const ROTATION_SOURCE_NOUN_UNIT_V25 = "公開文で見立ての名詞を使ったときは、向きや領域ではなく、その名詞を持つ候補1件を指します。「ペンギン」なら whole の1件、「くちばし」なら parts の領域のidと添字で決まる1件です。";
+export const ROTATION_FEATURE_SOURCES_V25 = ROTATION_FEATURE_SOURCES + ROTATION_SOURCE_NOUN_UNIT_V25;
 
 // ---- extraction and re-observation ----
 /** The re-observation request of a rotation-memo turn names only the topic (plus the public quote): how to read it (support, contradiction, unknown, no pandering) is said once, in the observer's system instruction. */
@@ -144,3 +147,5 @@ export const REOBSERVATION_ROTATION_USE = "figuresのrotationは自分の図形�
 /** Every rotation text a call can carry, for the guard that keeps instruction text out of public utterances. */
 export const ROTATION_PRIVATE_TEXTS: readonly string[] = Object.freeze([...Object.values(ROTATION_LEGENDS), ROTATION_MATCH_USE,
   EXTRACTION_ROTATION_USE, AI_EXTRACTION_ROTATION_USE, REOBSERVATION_ROTATION_USE, ROTATION_FEATURE_SOURCES, ...GENERATION_ROTATION_EDITS.map(([, to]) => to)]);
+/** What a v25 turn adds to the list above (only v25 requests carry it, so the earlier versions keep the list they had). */
+export const ROTATION_PRIVATE_TEXTS_V25: readonly string[] = Object.freeze([...ROTATION_PRIVATE_TEXTS, ROTATION_SOURCE_NOUN_UNIT_V25]);

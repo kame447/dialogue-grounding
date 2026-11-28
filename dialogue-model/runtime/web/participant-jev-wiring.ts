@@ -38,7 +38,7 @@ import { inferenceHistory } from '../v2/agreement-gate.ts';
 import { defaultGenerationRetryVersion, hasVersionedViewpoint, isGenerationV12, isGenerationV13, isGenerationV17, isGenerationV19, validGenerationRetryVersion, validAgreeNameScope } from '../v2/generation-guard.ts';
 import type { ShapeTerminologyVersion } from '../shape-terminology.ts';
 import type { GenerationRetryVersion } from '../v2/generation-guard.ts';
-import { isGenerationV24, isIssueHandlingGeneration, isPostGenerationCheck, type PostGenerationCheck, type DeferredAiExtractionGeneration } from '../v2/deferred-ai-extraction.ts';
+import { usesV24GenerationRules, isIssueHandlingGeneration, isPostGenerationCheck, type PostGenerationCheck, type DeferredAiExtractionGeneration } from '../v2/deferred-ai-extraction.ts';
 import { ISSUE_HANDLING_VERSION } from '../decision/issue-handling.ts';
 
 type ParticipantRunBudget = RunBudget<BudgetLimits | null>;
@@ -213,7 +213,7 @@ export function selectParticipantJev(restore: any, provided: unknown, context: {
         : (pinned?.generationRetryVersion ?? requestedGenerationVersion) as GenerationRetryVersion | undefined ?? defaultGenerationRetryVersion(profile.questionLayout, profile.dialoguePolicy)
       : undefined;
     const postGenerationCheck = v.postGenerationCheck;
-    if (isGenerationV24(generationRetryVersion)
+    if (usesV24GenerationRules(generationRetryVersion)
       ? !isPostGenerationCheck(postGenerationCheck) || restore && restore.options?.postGenerationCheck !== postGenerationCheck
       : Object.hasOwn(v, 'postGenerationCheck') || restore && Object.hasOwn(restore.options ?? {}, 'postGenerationCheck')) return invalid();
     const issueHandling = isIssueHandlingGeneration(generationRetryVersion);

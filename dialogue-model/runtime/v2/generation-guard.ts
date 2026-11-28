@@ -2,9 +2,9 @@
 // validated judgment determines state; detected wording never changes its act.
 import type { DialoguePolicy, DraftAct, JevExecutedDecision, PublicNameCandidate } from "../decision/contract.ts";
 import { isGenerationV18, type ShapeTerminologyVersion } from "../shape-terminology.ts";
-import { GENERATION_RETRY_V22, GENERATION_RETRY_V23, GENERATION_RETRY_V24, isDeferredAiExtractionGeneration, isGenerationV22, isGenerationV23, isGenerationV24, isIssueHandlingGeneration, usesV22GenerationRules } from "./deferred-ai-extraction.ts";
+import { GENERATION_RETRY_V22, GENERATION_RETRY_V23, GENERATION_RETRY_V24, GENERATION_RETRY_V25, isDeferredAiExtractionGeneration, isGenerationV22, isGenerationV23, isGenerationV24, isGenerationV25, isIssueHandlingGeneration, usesV22GenerationRules, usesV24GenerationRules } from "./deferred-ai-extraction.ts";
 import type { DeferredAiExtractionGeneration } from "./deferred-ai-extraction.ts";
-export { GENERATION_RETRY_V22, GENERATION_RETRY_V23, GENERATION_RETRY_V24, isGenerationV22, isGenerationV23, isGenerationV24 };
+export { GENERATION_RETRY_V22, GENERATION_RETRY_V23, GENERATION_RETRY_V24, GENERATION_RETRY_V25, isGenerationV22, isGenerationV23, isGenerationV24, isGenerationV25, usesV24GenerationRules };
 export const VISUAL_FEATURE_GENERATION = "jev_generation_retry_v19";
 type VisualFeatureGeneration = typeof VISUAL_FEATURE_GENERATION | DeferredAiExtractionGeneration;
 type GenerationV17Plus = "jev_generation_retry_v17" | ShapeTerminologyVersion | VisualFeatureGeneration;
@@ -564,7 +564,7 @@ export function findOrientationLeaks(text: string, policy?: DialoguePolicy, vers
     const quotable = new Set([...said, ...v11SaidWords(humanTexts, v5ExpandedOrientationTerms)]);
     const violations = v5OrientationLeaks(v11Unbracket(normalize(text), quotable, v5ExpandedOrientationTerms), true, true, true, true, word => said.has(word), true);
     // A missing lexical viewpoint marker does not establish a claim about the partner's screen.
-    return isGenerationV24(version) ? violations.filter(code => code !== "orientation_leak") : violations;
+    return usesV24GenerationRules(version) ? violations.filter(code => code !== "orientation_leak") : violations;
   }
   const unquoted = normalize(text).replace(/「[^」]*」|『[^』]*』/gu, "「」");
   const humanText = isGenerationV10(version) ? humanTexts.map(normalize).join("\n") : "";
@@ -686,7 +686,7 @@ export function rewriteReasons(codes: readonly string[], policy?: DialoguePolicy
     codes.includes("draft_shared_claim_unconfirmed") ? "前の下書きに名前以外の過大断定がないか確認できませんでした。候補の範囲と未確認・保留の細部を守り、大まかな共有見立ての範囲が明確になるように書き直してください。" : "",
     isGenerationV19(version) && codes.includes("visual_feature_mismatch") ? "前の下書きでは、公開文で使われた特徴の出所を観察メモと照合できませんでした。対象と論点を保ち、根拠のある特徴を使うか、不確かさを伝えてください。指定されたJSONの形で返してください。" : "",
     isGenerationV16(version) && !isGenerationV19(version) && codes.includes("confirmation_detail_mismatch") ? "前の下書きでは選んだ確認特徴を照合できませんでした。その特徴を尋ねる文を作り、指定されたJSONの形で返してください。" : "",
-    isGenerationV24(version) && codes.includes("draft_structure_mismatch") ? "前の下書きは指定の出力形式を満たしていませんでした。公開する内容を、上で指定された JSON の形で返してください。" : "",
+    usesV24GenerationRules(version) && codes.includes("draft_structure_mismatch") ? "前の下書きは指定の出力形式を満たしていませんでした。公開する内容を、上で指定された JSON の形で返してください。" : "",
   ].join("");
 }
 

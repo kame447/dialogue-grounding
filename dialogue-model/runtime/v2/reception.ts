@@ -45,9 +45,11 @@ export const PILOT012_V21_PARTICIPANT_PROFILE = 'participant_dialogue_v21_issue_
 export const PILOT012_V22_PARTICIPANT_PROFILE = 'participant_dialogue_v22_issue_fixes';
 export const PILOT012_V23_PARTICIPANT_PROFILE = 'participant_dialogue_v23_prompt_consolidation';
 export const PILOT012_V24_PARTICIPANT_PROFILE = 'participant_dialogue_v24_precheck_reduction';
+export const PILOT012_V25_PARTICIPANT_PROFILE = 'participant_dialogue_v25_generation_cleanup';
 type Pilot012ParticipantDialogueProfile = typeof PILOT012_PARTICIPANT_PROFILE | typeof PILOT012_V18_PARTICIPANT_PROFILE |
   typeof PILOT012_V19_PARTICIPANT_PROFILE | typeof PILOT012_V20_PARTICIPANT_PROFILE | typeof PILOT012_V21_PARTICIPANT_PROFILE |
-  typeof PILOT012_V22_PARTICIPANT_PROFILE | typeof PILOT012_V23_PARTICIPANT_PROFILE | typeof PILOT012_V24_PARTICIPANT_PROFILE;
+  typeof PILOT012_V22_PARTICIPANT_PROFILE | typeof PILOT012_V23_PARTICIPANT_PROFILE | typeof PILOT012_V24_PARTICIPANT_PROFILE |
+  typeof PILOT012_V25_PARTICIPANT_PROFILE;
 export type ParticipantDialogueProfile = 'participant_dialogue_v12' | 'participant_dialogue_v12_naming_v2' |
   'participant_dialogue_v12_naming_v3' | 'participant_dialogue_v12_naming_v4' | P5ParticipantDialogueProfile | Pilot012ParticipantDialogueProfile;
 export function isP5ParticipantDialogueProfile(value: unknown): value is P5ParticipantDialogueProfile {
@@ -61,7 +63,11 @@ export function isPilot012ParticipantDialogueProfile(value: unknown): value is P
   return value === PILOT012_PARTICIPANT_PROFILE || value === PILOT012_V18_PARTICIPANT_PROFILE ||
     value === PILOT012_V19_PARTICIPANT_PROFILE || value === PILOT012_V20_PARTICIPANT_PROFILE ||
     value === PILOT012_V21_PARTICIPANT_PROFILE || value === PILOT012_V22_PARTICIPANT_PROFILE ||
-    value === PILOT012_V23_PARTICIPANT_PROFILE || value === PILOT012_V24_PARTICIPANT_PROFILE;
+    value === PILOT012_V23_PARTICIPANT_PROFILE || value === PILOT012_V24_PARTICIPANT_PROFILE || value === PILOT012_V25_PARTICIPANT_PROFILE;
+}
+/** The profiles whose receptions carry the approved post-generation check setting (v24 and every later one). */
+export function hasPostGenerationCheckProfile(value: unknown): value is typeof PILOT012_V24_PARTICIPANT_PROFILE | typeof PILOT012_V25_PARTICIPANT_PROFILE {
+  return value === PILOT012_V24_PARTICIPANT_PROFILE || value === PILOT012_V25_PARTICIPANT_PROFILE;
 }
 export function isParticipantDialogueProfile(value: unknown): value is ParticipantDialogueProfile {
   return value === 'participant_dialogue_v12' || value === 'participant_dialogue_v12_naming_v2' ||
@@ -243,7 +249,7 @@ function participantPlan(value: unknown) {
   if (pin?.schemaVersion === 'participant_model_pin_v3' && !hasProfile) return fail();
   const dialogueProfile = p.participantDialogueProfile;
   const postGenerationCheck = p.postGenerationCheck;
-  if (hasPostGenerationCheck !== (dialogueProfile === PILOT012_V24_PARTICIPANT_PROFILE) ||
+  if (hasPostGenerationCheck !== hasPostGenerationCheckProfile(dialogueProfile) ||
       hasPostGenerationCheck && !isPostGenerationCheck(postGenerationCheck)) return fail();
   if (hasDialogueProfile && (pin?.schemaVersion !== 'participant_model_pin_v3' || !hasProfile ||
       !isParticipantDialogueProfile(dialogueProfile))) return fail();
@@ -403,8 +409,8 @@ export async function approveReception(value: unknown, options: ParticipantPlanS
   expectedRevision: number; order: number; protocol: unknown; expected?: unknown; approvedAt: string; randomSeed: () => number;
 }): Promise<Reception> {
   const r = validateReception(value);
-  const v24 = options.participantDialogueProfile === PILOT012_V24_PARTICIPANT_PROFILE;
-  if (options.postGenerationCheck !== undefined && (!v24 || !isPostGenerationCheck(options.postGenerationCheck))) return fail();
+  const hasCheckSetting = hasPostGenerationCheckProfile(options.participantDialogueProfile);
+  if (options.postGenerationCheck !== undefined && (!hasCheckSetting || !isPostGenerationCheck(options.postGenerationCheck))) return fail();
   const participant = {
     ...(options.preparedObservations !== undefined ? { preparedObservations: options.preparedObservations } : {}),
     ...(options.partObservationVersion !== undefined ? { partObservationVersion: options.partObservationVersion } : {}),
@@ -415,7 +421,7 @@ export async function approveReception(value: unknown, options: ParticipantPlanS
     ...(options.participantLimits !== undefined ? { participantLimits: options.participantLimits } : {}),
     ...(options.participantRuntimeProfile !== undefined ? { participantRuntimeProfile: options.participantRuntimeProfile } : {}),
     ...(options.participantDialogueProfile !== undefined ? { participantDialogueProfile: options.participantDialogueProfile } : {}),
-    ...(v24 ? { postGenerationCheck: options.postGenerationCheck ?? 'off' } : {}),
+    ...(hasCheckSetting ? { postGenerationCheck: options.postGenerationCheck ?? 'off' } : {}),
     ...(options.initialObservationGeneration !== undefined ? { initialObservationGeneration: options.initialObservationGeneration } : {}),
   };
   if (options.protocol && typeof options.protocol === 'object' && (options.protocol as { schemaVersion?: unknown }).schemaVersion === 'reception_protocol_v3') {

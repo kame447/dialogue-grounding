@@ -9,16 +9,22 @@ export const ISSUE_HANDLING_GENERATION = "jev_generation_retry_v21";
 export const GENERATION_RETRY_V22 = "jev_generation_retry_v22";
 export const GENERATION_RETRY_V23 = "jev_generation_retry_v23";
 export const GENERATION_RETRY_V24 = "jev_generation_retry_v24";
+/** v24's procedure with the generation instructions tidied (#273) and the independent source extraction of ON told what a source is (#275). */
+export const GENERATION_RETRY_V25 = "jev_generation_retry_v25";
 export type PostGenerationCheck = "off" | "on";
 export const isPostGenerationCheck = (value: unknown): value is PostGenerationCheck => value === "off" || value === "on";
 export const isGenerationV22 = (value: unknown): value is typeof GENERATION_RETRY_V22 => value === GENERATION_RETRY_V22;
 export const isGenerationV23 = (value: unknown): value is typeof GENERATION_RETRY_V23 => value === GENERATION_RETRY_V23;
 export const isGenerationV24 = (value: unknown): value is typeof GENERATION_RETRY_V24 => value === GENERATION_RETRY_V24;
-type GenerationV22Plus = typeof GENERATION_RETRY_V22 | typeof GENERATION_RETRY_V23 | typeof GENERATION_RETRY_V24;
+export const isGenerationV25 = (value: unknown): value is typeof GENERATION_RETRY_V25 => value === GENERATION_RETRY_V25;
+type GenerationV24Plus = typeof GENERATION_RETRY_V24 | typeof GENERATION_RETRY_V25;
+type GenerationV22Plus = typeof GENERATION_RETRY_V22 | typeof GENERATION_RETRY_V23 | GenerationV24Plus;
 type IssueHandlingGeneration = typeof ISSUE_HANDLING_GENERATION | GenerationV22Plus;
 export type DeferredAiExtractionGeneration = typeof DEFERRED_AI_EXTRACTION_GENERATION | IssueHandlingGeneration;
+/** v24 or later: the post-generation check setting, the direct-answer recovery and every procedure v24 introduced. v25 keeps all of them. */
+export const usesV24GenerationRules = (value: unknown): value is GenerationV24Plus => isGenerationV24(value) || isGenerationV25(value);
 export const usesV22GenerationRules = (value: unknown): value is GenerationV22Plus =>
-  isGenerationV22(value) || isGenerationV23(value) || isGenerationV24(value);
+  isGenerationV22(value) || isGenerationV23(value) || usesV24GenerationRules(value);
 export const isIssueHandlingGeneration = (value: unknown): value is IssueHandlingGeneration =>
   value === ISSUE_HANDLING_GENERATION || usesV22GenerationRules(value);
 export const isDeferredAiExtractionGeneration = (value: unknown): value is DeferredAiExtractionGeneration =>

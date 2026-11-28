@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import {
-  approveReception, createReception, effectiveFigureSelection, effectiveRotationMode, PILOT012_V24_PARTICIPANT_PROFILE, receptionProtocolSha256,
+  approveReception, createReception, effectiveFigureSelection, effectiveRotationMode, hasPostGenerationCheckProfile, receptionProtocolSha256,
   validateReceptionPlan, validateReceptionProtocolV2, validateReceptionProtocolV3,
 } from '../../../dialogue-model/runtime/v2/reception.ts';
 import type {
@@ -83,7 +83,7 @@ function request(value: PreparedObservationRequest): PreparedObservationRequest 
   // profile, generation and pruning versions. Unknown participant fields fail too.
   const checked = validateReceptionPlan({ ...supplied,
     // The template needs a valid plan, but the approved check setting is not observation material.
-    ...(supplied.participantDialogueProfile === PILOT012_V24_PARTICIPANT_PROFILE ? { postGenerationCheck: 'off' } : {}),
+    ...(hasPostGenerationCheckProfile(supplied.participantDialogueProfile) ? { postGenerationCheck: 'off' } : {}),
     schemaVersion: 'reception_plan_v2', protocolId: protocol.protocolId, protocolRevision: protocol.revision,
     protocolSha256: receptionProtocolSha256(JSON.stringify(protocol)), order: protocol.allowedOrders[orderIndex],
     betweenTrials: protocol.betweenTrials, approvedAt: PLACEHOLDER_DATE,

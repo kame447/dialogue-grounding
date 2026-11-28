@@ -47,14 +47,14 @@ import { findNamingActHints, hasOrientationWords, draftViolationCodes, deriveGen
 import { isGenerationV15, currentTurnNamingSource, semanticNamingCodes, namingCodesWithoutQuestion, contentPublicationRecovery, namingPublicationHold,
   type NamingHoldReason, type PublicationRecovery } from "./generation-guard.ts";
 import { isGenerationV16, isGenerationV17, isGenerationV19, confirmationDraftText, canReconsiderPublication, HUMAN_MOVE_ON_V17, PUBLICATION_RECOVERY_V17 } from "./generation-guard.ts";
-import { ISSUE_HANDLING_GENERATION, isGenerationV23, isGenerationV24, isIssueHandlingGeneration, usesV22GenerationRules, classificationExtraction, classificationMatchesPublication, extractionDigest,
+import { ISSUE_HANDLING_GENERATION, isGenerationV23, isGenerationV25, usesV24GenerationRules, isIssueHandlingGeneration, usesV22GenerationRules, classificationExtraction, classificationMatchesPublication, extractionDigest,
   isDeferredAiExtractionGeneration, isPostGenerationCheck, validDeferredAiPublicJob, type DeferredAiPublicJob, type PostGenerationCheck,
   type DeferredClassificationExtraction } from "./deferred-ai-extraction.ts";
 import { isJevVisualPurpose, SEMANTIC_DRAFT_ACTS, visualPurposeMatchesSource } from "../decision/contract.ts";
 import { createMemoAiExtractor, memoAiExtractionPrompt, AiPublicError, aiHash, emptyAiEvidence } from "../local-grounding/extract-ai.ts";
-import { hasRotationMemory, withRotationLayer, rotationLegendEntry, applyGenerationRotationEdits, ROTATION_LAYER_OF_CALL, ROTATION_PRIVATE_TEXTS } from "../decision/rotation-memory-guidance.ts";
+import { hasRotationMemory, withRotationLayer, rotationLegendEntry, applyGenerationRotationEdits, ROTATION_LAYER_OF_CALL, ROTATION_PRIVATE_TEXTS, ROTATION_PRIVATE_TEXTS_V25 } from "../decision/rotation-memory-guidance.ts";
 import { isGenerationV18, SHAPE_TERMINOLOGY_GENERATION, withShapeTerminology } from "../shape-terminology.ts";
-import { generationTaskV23, GENERATION_INSTRUCTIONS_V23, GENERATION_INSTRUCTIONS_V24, CONCISE_GENERATION_V23, generationActionPromptV23, MULTIPLE_CANDIDATES_V23, PRIVATE_NAMING_STATE_V23 } from "./generation-prompt-v23.ts";
+import { generationTaskV23, GENERATION_INSTRUCTIONS_V23, GENERATION_INSTRUCTIONS_V24, GENERATION_INSTRUCTIONS_V25, CONCISE_GENERATION_V23, generationActionPromptV23, MULTIPLE_CANDIDATES_V23, PRIVATE_NAMING_STATE_V23 } from "./generation-prompt-v23.ts";
 import { readVisualFeatureDraft, readVisualFeatureEvidence, sameVisualFeatureSources,
   VISUAL_FEATURE_SELECTION_V19, VISUAL_FEATURE_SOURCES_V19, VISUAL_FEATURE_DRAFT_V19 } from "./visual-feature-evidence.ts";
 import type { VisualFeatureEvidence, VisualFeatureSource } from "./visual-feature-evidence.ts";
@@ -1134,7 +1134,7 @@ function validateGeneratedPublication(j: CommittedAct, ledger: OwnLedger, ownSlo
   if (publication.agreementWithheld !== (agreementWithheld ? true : undefined)) throw Error();
   if (issueHandling && !stateSame(publication.close, execution.action === "close" ? closeContext(ledger, selected) : undefined)) throw Error();
   const items = executionItems(execution);
-  const visualDetail = isGenerationV19(generation) && !checksOff && (continuation ? isGenerationV24(generation) :
+  const visualDetail = isGenerationV19(generation) && !checksOff && (continuation ? usesV24GenerationRules(generation) :
     items.some(item => needsVisualFeatureEvidence(item.action, issueHandling)));
   const visualTargets = visualDetail ? (continuation ? continuationFeatureTargets(original, ownSlots) : planFeatureTargets(items, ownSlots, issueHandling)) : [];
   if (items.length > 1 ? !validIssuePublicationParts(publication.parts, items.length, undefined, transition?.start) : Object.hasOwn(publication, "parts")) throw Error();
@@ -1167,7 +1167,7 @@ function validateGeneratedPublication(j: CommittedAct, ledger: OwnLedger, ownSlo
   const lastDraft = j.jevTurn.draftActs?.at(-1);
   if (!checksOff && usesV22GenerationRules(generation) && (lastDraft?.status !== "ok" || !lastDraft.triggers.includes("topic_shift") ||
       !validDraftTopicShift(lastDraft.topicShift) || lastDraft.topicShift.choice !== "within_plan" || !digestShape(lastDraft.draftSha256))) throw Error();
-  if (!checksOff && isGenerationV24(generation) && execution.action === "propose_name" &&
+  if (!checksOff && usesV24GenerationRules(generation) && execution.action === "propose_name" &&
       (lastDraft?.choice !== "propose_chosen" || !lastDraft.triggers.includes("propose_action"))) throw Error();
   const turns = publicTurns ?? [{ turn: j.turnIndex, speaker: "human" as const, text: "" }];
   const proposedWithdrawal = recovery && execution.action === "repair" && recovery.reason !== "publication_mismatch"
@@ -1196,7 +1196,7 @@ function validateGeneratedPublication(j: CommittedAct, ledger: OwnLedger, ownSlo
 
 export function validateJevPrivateStateV2(value:unknown,ownSlots:readonly string[],intervention:RuntimePolicy,questionLayout:JevQuestionLayout='two_stage_v1',policy?:string,generation?:GenerationRetryVersion,usagePolicy?:ParticipantUsageOnly,events?:readonly Event[],replayHistory?:IssueHandlingReplayHistory,postGenerationCheck?:PostGenerationCheck):JevPrivateStateV2 {
  checkedIntervention(intervention);
- if(isGenerationV24(generation)?!isPostGenerationCheck(postGenerationCheck):postGenerationCheck!==undefined)throw new JevTurnError('invalid_state');
+ if(usesV24GenerationRules(generation)?!isPostGenerationCheck(postGenerationCheck):postGenerationCheck!==undefined)throw new JevTurnError('invalid_state');
  const checksOff=postGenerationCheck==='off';
  const reference=referenceForPolicy(intervention),version=reference.version,issueHandling=isIssueHandlingGeneration(generation);
  const humanLedMoveOn=version==='bypass_acceptance_v2'||issueHandling;
@@ -1565,7 +1565,9 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
   const visualFeatureGeneration = isGenerationV19(generationRetryVersion);
   const issueHandling = isIssueHandlingGeneration(generationRetryVersion);
   const hasV22Rules = usesV22GenerationRules(generationRetryVersion);
-  const generationV24 = isGenerationV24(generationRetryVersion);
+  const generationV24 = usesV24GenerationRules(generationRetryVersion);
+  // v25 differs from v24 only in the wording of the generation instructions and of the ON source extraction; every v24 procedure still applies.
+  const generationV25 = isGenerationV25(generationRetryVersion);
   const generationV23 = isGenerationV23(generationRetryVersion) || generationV24;
   const { postGenerationCheck } = options;
   if (generationV24 ? !isPostGenerationCheck(postGenerationCheck) : postGenerationCheck !== undefined) {
@@ -1584,7 +1586,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
       !/^[a-f0-9]{64}$/u.test(deferredProfile))) throw new JevTurnError("invalid_state");
   const terminology = isGenerationV18(generationRetryVersion) || visualFeatureGeneration ? SHAPE_TERMINOLOGY_GENERATION : undefined;
   const generationInstructions = withShapeTerminology(generationV23
-    ? (generationV24 ? GENERATION_INSTRUCTIONS_V24 : GENERATION_INSTRUCTIONS_V23) + (generation.concise ? "\n" + CONCISE_GENERATION_V23 : "")
+    ? (generationV25 ? GENERATION_INSTRUCTIONS_V25 : generationV24 ? GENERATION_INSTRUCTIONS_V24 : GENERATION_INSTRUCTIONS_V23) + (generation.concise ? "\n" + CONCISE_GENERATION_V23 : "")
     : visualFeatureGeneration ? generation.instructions.replace(
     "形の分析（部分の形・つながり・配置）は、判断にdiscriminatingFeatureがあるときだけ、その特徴を1つに絞って述べて相手の反応を待ってください。",
     "形の分析（部分の形・つながり・配置）は、相手が尋ねた点や判断で示された論点の解消に必要な範囲で、観察に根拠がある特徴を扱ってください。",
@@ -1633,7 +1635,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
   validateLocalGroundingOptions({ ...options.localGrounding, extractor: { async extract() { return []; } } });
   const aiEnabled = options.localGrounding.aiPublicClaims === true;
   if (checksOff && aiEnabled && deferredProfile === undefined) throw new JevTurnError("invalid_state");
-  const aiExtractor = aiEnabled ? createMemoAiExtractor(client, terminology) : null;
+  const aiExtractor = aiEnabled ? createMemoAiExtractor(client, terminology, generationV25) : null;
   const aiFunction = aiEnabled ? createJevAiFunctionClassifier({ ...options.localGrounding.aiPublicTransport, ...(options.localGrounding.researchLimits === undefined ? {} : { researchLimits: options.localGrounding.researchLimits }) }) : null;
   const aiSupport = aiEnabled ? createJevAiSupportChecker({ ...options.localGrounding.aiPublicTransport, ...(options.localGrounding.researchLimits === undefined ? {} : { researchLimits: options.localGrounding.researchLimits }) }) : null;
   const aiPromptBodies = [memoAiExtractionPrompt(terminology, false, hasParts), AI_FUNCTION_INSTRUCTIONS + "\n" + JSON.stringify(AI_FUNCTION_CRITERIA),
@@ -1647,11 +1649,11 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
     MEMO_LOCAL_EXTRACTION_INSTRUCTIONS, ...(researchV3 ? [memoExtractionPrompt(holisticV2, true, undefined, hasParts)] : []), ...(holisticV2 ? [MEMO_LOCAL_EXTRACTION_INSTRUCTIONS_HOLISTIC] : []),
     ...(terminology ? [memoExtractionPrompt(holisticV2, researchV3, terminology, hasParts)] : []), LOCAL_CLASSIFICATION_INSTRUCTIONS, observationInitialInstructions(slots.length),
     OBSERVATION_TARGETED_INSTRUCTIONS, ...(hasParts ? [PART_OBSERVATION_SOURCES_INSTRUCTIONS] : []), ...(aiEnabled ? aiPromptBodies : []),
-    ...(visualFeatureGeneration ? [VISUAL_FEATURE_SELECTION_V19, VISUAL_FEATURE_SOURCES_V19, VISUAL_FEATURE_DRAFT_V19, memoAiExtractionPrompt(terminology, true, hasParts)] : []),
+    ...(visualFeatureGeneration ? [VISUAL_FEATURE_SELECTION_V19, VISUAL_FEATURE_SOURCES_V19, VISUAL_FEATURE_DRAFT_V19, memoAiExtractionPrompt(terminology, true, hasParts, false, generationV25)] : []),
     ...(hasV22Rules ? [RETAINED_REFERENCE_EXTRACTION_INSTRUCTIONS, RETAINED_REFERENCE_GENERATION_INSTRUCTIONS,
       RECONFIRM_NAME_V22, AGREED_NAME_REFERENCE_V22, MULTI_ISSUE_STAY_V22, CONFIRM_SCOPE_V22] : []),
     ...(issueHandling ? [multiIssueInstructions, MULTI_ISSUE_INSTRUCTIONS, MULTI_ISSUE_REPAIR_SCOPE, MULTI_ISSUE_DRAFT] : []),
-    ...(p5Enabled ? [SHARED_CONSTRUAL_INSTRUCTIONS, SHARED_CONSTRUAL_CONFIRM_INSTRUCTIONS] : []), ...ROTATION_PRIVATE_TEXTS].map(content => ({ role: "system", content }));
+    ...(p5Enabled ? [SHARED_CONSTRUAL_INSTRUCTIONS, SHARED_CONSTRUAL_CONFIRM_INSTRUCTIONS] : []), ...(generationV25 ? ROTATION_PRIVATE_TEXTS_V25 : ROTATION_PRIVATE_TEXTS)].map(content => ({ role: "system", content }));
   function project<T>(value: T): T {
     let redacted = false;
     const safe = (item: unknown): unknown => {
@@ -2202,7 +2204,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
         items: items.map(publicationItem), visualDetail, omitVisualSources: checksOff, rotationSources: rotationTurn, humanLedTransition, closing,
         publicQuestions: repairQualityPublicQuestions(latest.seq, publicTurns, claims),
         reconsidered: reconsidered !== null, continuing: continuing !== null, namingRequest: record.namingRequest === true,
-        respondToRequest: generationV24,
+        respondToRequest: generationV24, tidied: generationV25,
         reconfirmation: reconfirmName ? RECONFIRM_NAME_V22 : undefined,
         namingConflict, withdrawnName: withdrawal?.prior.name ?? null,
       }) : actInstructions + "\n" + scope +
@@ -2625,7 +2627,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
       research.stages = { ai_extraction: savedExtraction ? research.stages.ai_extraction : emptyAiEvidence(),
         ai_function: emptyAiEvidence(), ai_support: emptyAiEvidence() };
       if (!savedExtraction) research.prompts.extraction = { version: verifyFeatures ? 3 : 2,
-        sha256: await aiHash(memoAiExtractionPrompt(terminology, Boolean(verifyFeatures), hasParts, hasRotationMemory(snapshot.observations))) };
+        sha256: await aiHash(memoAiExtractionPrompt(terminology, Boolean(verifyFeatures), hasParts, hasRotationMemory(snapshot.observations), generationV25)) };
     }
     const timeoutMs = options.localGrounding.timeoutMs ?? 20000, deadline = performance.now() + timeoutMs;
     // Reobservation installs a new memo. Only the unchanged memo can reuse the referent digest.
