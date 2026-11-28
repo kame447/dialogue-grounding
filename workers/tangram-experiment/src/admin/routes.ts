@@ -16,6 +16,7 @@ import type { AuditEntry } from "./index-store.ts";
 import type { ProtocolFields, ProtocolFormFields, ProtocolFormInput, ReceptionAdminPort, ReceptionSettingsPort } from './reception-port.ts';
 import { isFigurePresetId } from './figure-presets.ts';
 import type { FigurePresetPort } from './figure-presets.ts';
+import { ROTATION_CHOICES } from './rotation-choices.ts';
 import type { PreparedObservationPoolStatus } from './prepared-observation-port.ts';
 import { trialTerminationExpectation } from './trial-termination.ts';
 import type { TrialTerminationExpectation, TrialTerminationResult } from './trial-termination.ts';
@@ -248,7 +249,7 @@ async function receptionMutation(request: Request, port: ReceptionAdminPort, id:
 const ORDER_TOKENS: Readonly<Record<string, ProtocolFields['allowedOrders'][number]>> = Object.freeze({
   'rf-be': ['repair-first', 'bypass-enabled'], 'be-rf': ['bypass-enabled', 'repair-first'], rf: ['repair-first'], be: ['bypass-enabled'] });
 const SINGLE: Readonly<Record<string, readonly string[]>> = Object.freeze({ seedPolicy: ['shared', 'per_trial'], referenceMemory: ['on', 'off'],
-  betweenTrials: ['none', 'questionnaire_required'], rotationMode: ['relative_pm90', 'relative_0'], receptionNumberFormat: ['daily_seq3'] });
+  betweenTrials: ['none', 'questionnaire_required'], rotationMode: ROTATION_CHOICES.map(choice => choice.value), receptionNumberFormat: ['daily_seq3'] });
 const FIGURE_KEYS = ['figureMode', 'figureSetPolicy', 'figureSetId', 'selectionSeed', 'figureIds', 'figureCount'];
 const BANK_IDS = new Set(FIGURE_BANK.map(f => f.id));
 /** The figure source and its allocation, both explicit. Inputs that belong to another mode are ignored; per_trial needs the seeded mode. */

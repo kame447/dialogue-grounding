@@ -2180,10 +2180,14 @@ const legendForInput=(input:any)=>{
 };
 const LEGEND_V11='answerClaimsは、figuresの返答のclaim idがclaimsにない行動のためだけに添える行で、各行は [claim id, 出典の発話番号, act, 対象, 命題] です。グラフから外れた回答の出典の発話番号はnullになります。';
 const ROTATION_V5='課題の条件として、相手の盤面は自分の盤面と同じ図形を±90度ほど回転して提示しています（relative_pm90）。向きや方位を表す語（上・下・左・右・縦・横など）は、相手と自分で一致しない前提で扱い、向きに依存しない特徴で照合してください。';
+// relative_90_180_270 (#269): the sentence of the task contract, written here and not read from decision/jev-decision.ts, so a missing or different sentence in a recorded request is a mismatch.
+const ROTATION_V5_90_180_270='課題の条件として、相手の盤面は自分の盤面と同じ図形をそれぞれ90度・180度・270度のいずれかの角度で回転して提示しています（relative_90_180_270）。向きや方位を表す語（上・下・左・右・縦・横など）は、相手と自分で一致しない前提で扱い、向きに依存しない特徴で照合してください。';
+// The rotation premise a request must carry for the stimulus mode its own state records. relative_0 states none; a mode this table does not know states none either, so no other mode's sentence can pass for it.
+const rotationPremise=(mode:unknown):string=>mode==='relative_pm90'?'\n'+ROTATION_V5:mode==='relative_90_180_270'?'\n'+ROTATION_V5_90_180_270:'';
 const parseMaterial=(text:string):any=>{const x=JSON.parse(text);return x?.view==='judgment_v5'?decodeMaterialV5(x):x;};
 const usesPositionPrompt=(v:PromptVersion):boolean=>v.i172&&!(v.styleMode==='research_split'&&CTX.v3);
 const activeNative=():PromptVersion['native']=>CTX.prompt?(usesPositionPrompt(CTX.prompt)?CTX.prompt.native:NATIVE):CTX.v3?NATIVE:NATIVE_I172;
-const nativeInstructions=(s:any,layout='two_stage_v1',prospect=false)=>{const nat=activeNative();return(layout==='two_stage_v3'?nat.common.replace(NATIVE_V2.v1Stages,NATIVE_V3.stages):layout==='two_stage_v2'?nat.common.replace(NATIVE_V2.v1Stages,NATIVE_V2.stages):nat.common)+(Object.hasOwn(s,'humanReferent')?'\n'+nat.referent:'')+(prospect&&Object.hasOwn(s,'repairProspect')?'\n'+ADAPT.prospect:'')+(CTX.facts?'\n'+ADAPT.facts:'')+(s?.view==='judgment_v5'?'\n'+legendForInput(s)+(s.notationV11===true?'\n'+LEGEND_V11:'')+(s.rotationMode==='relative_pm90'?'\n'+ROTATION_V5:''):'')+(CTX.jevNaming?'\n'+NAMING_GUIDANCE:'')+
+const nativeInstructions=(s:any,layout='two_stage_v1',prospect=false)=>{const nat=activeNative();return(layout==='two_stage_v3'?nat.common.replace(NATIVE_V2.v1Stages,NATIVE_V3.stages):layout==='two_stage_v2'?nat.common.replace(NATIVE_V2.v1Stages,NATIVE_V2.stages):nat.common)+(Object.hasOwn(s,'humanReferent')?'\n'+nat.referent:'')+(prospect&&Object.hasOwn(s,'repairProspect')?'\n'+ADAPT.prospect:'')+(CTX.facts?'\n'+ADAPT.facts:'')+(s?.view==='judgment_v5'?'\n'+legendForInput(s)+(s.notationV11===true?'\n'+LEGEND_V11:'')+rotationPremise(s.rotationMode):'')+(CTX.jevNaming?'\n'+NAMING_GUIDANCE:'')+
  (s?.judgmentMaterialVersion===JEV_REPAIR_QUALITY_VERSION?'\n'+REPAIR_QUALITY_GUIDANCE:'');};
 const HUMAN_MOVE_ON_ACTION_NOTE = '\n今回の人間が話題の移行を明示的に主導したときは、命名や同定の解決を前提とせずmove_onで受け止めてください。';
 const MOVE_ON_SOURCE_INSTRUCTIONS = '今回の人間の公開発話と直前までの公開文脈から、話題の移行を誰が主導したか判定してください。図形の同定や名称の合意は問っていません。';
@@ -2629,7 +2633,7 @@ const PROSPECT_TEXT={base:"公開履歴・観察メモ・修復履歴だけを�
 const PROSPECT_CRITERIA={prospect:{progressing:"修復が進む見込みがある。",stalled:"修復が停滞する見込みがある。",uncertain:"見込みは不確か。",no_open_issue:"修復する対象がない。"},
  basis:{new_information:"新しい情報が得られた。",candidate_narrowed:"候補が狭まった。",candidate_widened:"候補が広がった。",repetition:"同じやり取りの反復。",partner_uncertain:"相手の不確かさ。",other_figure_benefit:"別の図形を扱う利点がある。",none:"該当する根拠なし（修復対象がない場合を含む）。"}};
 function prospectQuestions(input:any,facts:boolean,layout='two_stage_v1'){
- const issues=(input.repairHistory??[]).filter((r:any)=>r.turn<input.turn).slice().sort((a:any,b:any)=>a.turn-b.turn).slice(-8),ins=PROSPECT_TEXT.base+(facts?'\n'+ADAPT.facts:'')+(input.notationV6===true?'\n'+legendForInput(input)+(input.notationV11===true?'\n'+LEGEND_V11:'')+(input.rotationMode==='relative_pm90'?'\n'+ROTATION_V5:''):'');
+ const issues=(input.repairHistory??[]).filter((r:any)=>r.turn<input.turn).slice().sort((a:any,b:any)=>a.turn-b.turn).slice(-8),ins=PROSPECT_TEXT.base+(facts?'\n'+ADAPT.facts:'')+(input.notationV6===true?'\n'+legendForInput(input)+(input.notationV11===true?'\n'+LEGEND_V11:'')+rotationPremise(input.rotationMode):'');
  const q=(suffix:string,criteria:any)=>({type:'choice',instructions:ins+suffix,criteria});
  const quality=input.judgmentMaterialVersion===JEV_REPAIR_QUALITY_VERSION;
  const qualityInstructions=quality?'\n'+REPAIR_QUALITY_GUIDANCE+REPAIR_QUALITY_PROSPECT:'';
@@ -3444,6 +3448,25 @@ const PROMPT_VERSIONS:readonly PromptVersion[]=[
   'local-grounding/extract.ts':'0bf5f7969d79cbe2c71feea4281e1280139f291fee1c2186bcfaf8d3af27e88c',
   'local-grounding/jev-local-test.ts':'64084d50c6d5855cbe64665ad156c6af5d9d3bf061d5e2de372904e45e88df01',
   'decision/jev-decision.ts':'95a56e87f6c841b7738e4cccccfcbc8da227a1e96189616c1f1e174772b69f74',
+  'local-grounding/extract-ai.ts':'c2179cafb7ebdb88d3605b1c681fd20ca6705a1eab7d50dbf2ed7a845458fb24',
+  'local-grounding/jev-ai-public.ts':'6d3e05a7fb12778754a6cd8ba9c7b00e7045fa55daeded213a46a5a10375f1c7',
+  'shape-terminology.ts':'80fddf9e0947ae4e8dad85f3cf5e27700a070f0897225a565967623012ac3cf9',
+  'v2/visual-feature-evidence.ts':'414236b7823e690138899fec9f36ed766192b65d8e10b34b22865221d9d71ae0',
+  'v2/deferred-ai-extraction.ts':'10f7c9aa53242a55c75b6696be8dc193736b4b695b6016d768737ce0683efa08',
+  'v2/issue-publication.ts':'55c17c514d0257803276ee451eaf4279b00fde0bdced13dd09ae91c1f03259a9',
+  'decision/human-led-move-on.ts':'7c5dc7ff16877f1d9ff5cb6a777895c91aeb28fa6e31af1e7ab3d4ad5ed8d048',
+  'v2/generation-prompt-v23.ts':'2493816a3a3acf689c02a92df09966a39f7501a716df9e3fc6abca696049b9f5',
+ }},fixed:FIXED_I172,native:NATIVE_I172},
+ // #269 relative_90_180_270: v24's instruction text for every earlier mode; only decision/jev-decision.ts and v2/jev-turn.ts differ from the v24 sources above.
+ {id:'p5_pilot012_rotation_90_180_270_v24',i172:true,fourFigures:true,threeFigures:true,styleMode:'research_split',sources:{scheme:'complete_instruction_source_sha256',files:{
+  'v2/dialogue-v2.mjs':'2b7c59d9bb08026ff662946bb0668ac89049d1366fc488fd6601cd07c0fcc0c2',
+  'v2/jev-turn.ts':'82a9789ed2d00b55fb5eaf2c758167af0d9b83691630fe9d72a3d879e33212f1',
+  'v2/generation-guard.ts':'51359cb086b5a78f023a4dd5b801f31e13e60177efdd83cbf529bb6933a03b00',
+  'judgment/instructions.mjs':'eeb20c812729d04e52437a064b31fcd8af60ee2da8b1f6e73d99c4eb8dc8a785',
+  'observation/observe.ts':'eac863a50455665daa62812157d68512a7e33bed9fda271b4e7af4f44b38dde4',
+  'local-grounding/extract.ts':'0bf5f7969d79cbe2c71feea4281e1280139f291fee1c2186bcfaf8d3af27e88c',
+  'local-grounding/jev-local-test.ts':'64084d50c6d5855cbe64665ad156c6af5d9d3bf061d5e2de372904e45e88df01',
+  'decision/jev-decision.ts':'8a46d6253b764fae9ce0652a4a4cc15991e3ccbd75f34b68f5eefc156b3f24cc',
   'local-grounding/extract-ai.ts':'c2179cafb7ebdb88d3605b1c681fd20ca6705a1eab7d50dbf2ed7a845458fb24',
   'local-grounding/jev-ai-public.ts':'6d3e05a7fb12778754a6cd8ba9c7b00e7045fa55daeded213a46a5a10375f1c7',
   'shape-terminology.ts':'80fddf9e0947ae4e8dad85f3cf5e27700a070f0897225a565967623012ac3cf9',

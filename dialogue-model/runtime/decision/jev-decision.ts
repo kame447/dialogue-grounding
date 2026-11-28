@@ -1,4 +1,5 @@
 import { isSupportedFigureCount } from '../stimuli/figure-bank.ts';
+import { ROTATION_MODES } from '../stimuli/scatter-v2.mjs';
 import { ISSUE_HANDLING_MOVE_ON_CRITERIA, ISSUE_HANDLING_MOVE_ON_INSTRUCTIONS, MOVE_ON_SOURCE_QUESTION } from "./human-led-move-on.ts";
 import { COMMITMENT_STATES, ISSUE_HANDLING_VERSION, JEV_ACTIONS_V21, NON_BYPASS_ALTERNATIVES, SWITCH_FUNCTIONS, issueAlternativeTarget, issueHandlingMatchesSource, projectExtraHandling } from "./issue-handling.ts";
 import type { CarryDestination, ExecutedExtra, ExtraHandling, ExtraSelection, JevIssueRef } from "./issue-handling.ts";
@@ -180,6 +181,13 @@ const REPAIR_PROSPECT_GUIDANCE = "repairProspectは未校正の見込みと根�
 export const JEV_NAMING_GUIDANCE = "namingEvidence.namesは人が公開発話で述べた実在の名前です。名前の候補があることは、どの図形かが確定したことも、現在の合意も意味しません。公開発話を読み、局所の棄却、否定の論点、古い記述、対象推定は誤り得る材料として扱ってください。受け止めるだけならaccept、同定の確認が要るならconfirmなどを自分で選んでください。agreeを選んでも、後の判定で根拠が足りなければ名前は確定しません。";
 /** holistic_v5: a condition of the task (not an answer): the partner's board shows the same figures turned by about 90 degrees. */
 export const ROTATION_V5 = "課題の条件として、相手の盤面は自分の盤面と同じ図形を±90度ほど回転して提示しています（relative_pm90）。向きや方位を表す語（上・下・左・右・縦・横など）は、相手と自分で一致しない前提で扱い、向きに依存しない特徴で照合してください。";
+/** holistic_v5, relative_90_180_270: the same task condition with the turn named as 90, 180 or 270 degrees; the second sentence is ROTATION_V5's. */
+export const ROTATION_V5_90_180_270 = "課題の条件として、相手の盤面は自分の盤面と同じ図形をそれぞれ90度・180度・270度のいずれかの角度で回転して提示しています（relative_90_180_270）。向きや方位を表す語（上・下・左・右・縦・横など）は、相手と自分で一致しない前提で扱い、向きに依存しない特徴で照合してください。";
+/** The rotation condition a holistic_v5 request states: one sentence per mode and none for relative_0; omitted means relative_pm90. */
+const rotationPremise = (mode: JevDecisionInput["rotationMode"]) => {
+  const effective = mode ?? "relative_pm90";
+  return effective === "relative_pm90" ? "\n" + ROTATION_V5 : effective === "relative_90_180_270" ? "\n" + ROTATION_V5_90_180_270 : "";
+};
 export const REPAIR_FACTS_GUIDANCE = "repairHistoryの各項目のfactsは、プログラムが記録から機械的に数えた事実です（直前の明確化への返答と比べた候補集合、同じ特徴の文の再提示、局所記録の欠落と棄却の件数）。抽出の誤差を含む未検証の材料で、意味が同じか、修復が進んだか停滞したか、次に何をすべきかを判定したものではありません。閾値や規則にせず、公開発話と照合して判断してください。";
 const factsGuidance = (input: JevDecisionInput) => input.repairFacts === undefined ? "" : "\n" + REPAIR_FACTS_GUIDANCE;
 // two_stage_v2 changes only the sentence that describes the stages; every other v1 sentence is shared.
@@ -196,7 +204,7 @@ export const TWO_STAGE_V3_TARGET_INSTRUCTIONS = "stateのselected.actionが第1�
 export const TWO_STAGE_V2_CANDIDATE_SET_INSTRUCTIONS = "第1段で対象をmultiple（一つに絞れない）としました。この行動で対象候補として扱う自分の図形の集合を、2図形以上の組合せから一つ選んでください。公開発話と観察メモに根拠がある図形を含め、根拠のない図形は含めないでください。";
 export const TWO_STAGE_V2_CANDIDATE_SET_CRITERION = (figureIds: readonly string[]) => `自分の候補図形の集合 ${JSON.stringify(figureIds)}。観察メモを参照。`;
 /** holistic_v5: the notation legend and the task's rotation condition, for every question (the referent estimate included). */
-const v5Suffix = (input: JevDecisionInput) => input.judgmentLedger === undefined ? "" : "\n" + judgmentV5Legend(input.ownSlots.length) + (input.notationV11 === true ? "\n" + JUDGMENT_V11_ANSWER_LEGEND : "") + ((input.rotationMode ?? "relative_pm90") === "relative_pm90" ? "\n" + ROTATION_V5 : "") +
+const v5Suffix = (input: JevDecisionInput) => input.judgmentLedger === undefined ? "" : "\n" + judgmentV5Legend(input.ownSlots.length) + (input.notationV11 === true ? "\n" + JUDGMENT_V11_ANSWER_LEGEND : "") + rotationPremise(input.rotationMode) +
   (input.issueHandlingVersion === ISSUE_HANDLING_VERSION ? "\n" + ISSUE_HANDLING_LEGEND +
     (input.previousAction && input.judgmentLedger.some(a => a.turn === input.previousAction!.decisionTurn && a.extras?.length)
       ? "\n" + PREVIOUS_EXTRAS_LEGEND : "") : "");
@@ -595,7 +603,7 @@ function prepare(input: JevDecisionInput, layout: JevQuestionLayout = "two_stage
   if (!(input.notationV11 === undefined || input.notationV11 === true && input.notationV6 === true)) fail("invalid_input");
   if (!(input.featureReplyFilter === undefined || input.featureReplyFilter === true && input.notationV11 === true)) fail("invalid_input");
   if (!(input.discriminatingConfirmation === undefined || input.discriminatingConfirmation === true && input.p5Enabled === true)) fail("invalid_input");
-  if (!(input.rotationMode === undefined || input.rotationMode === "relative_pm90" || input.rotationMode === "relative_0")) fail("invalid_input");
+  if (!(input.rotationMode === undefined || ROTATION_MODES.some(mode => mode === input.rotationMode))) fail("invalid_input");
   let ledgerActions: LedgerAction[] | undefined;
   if (input.judgmentLedger !== undefined) {
     if (!Array.isArray(input.judgmentLedger) || input.judgmentLedger.length > JEV_DECISION_INPUT_LIMITS.repairHistory) fail("invalid_input");

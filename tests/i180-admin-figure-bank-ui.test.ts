@@ -106,7 +106,9 @@ test('settings form: a saved v2 protocol keeps its fields preselected but leaves
     figureSelection: { mode: 'seeded_random', selectionSeed: 41 } }) as any);
   assert.match(seeded, /name="selectionSeed"[^>]*value="41"/u); assert.match(seeded, /name="figureSetPolicy" value="per_trial" required checked/u);
   const unsaved = renderSettings({ protocol: null, mode: { value: 'unset', revision: 0 }, protocolHistory: [], modeHistory: [] });
-  assert.equal((unsaved.match(/ checked/gu) ?? []).length, 0, 'nothing is preselected before the first save');
+  assert.deepEqual([...unsaved.matchAll(/name="(\w+)" value="([^"]*)" required checked/gu)].map(match => match.slice(1)), [['rotationMode', 'relative_90_180_270']],
+    'before the first save only the default rotation is preselected');
+  assert.equal((unsaved.match(/ checked/gu) ?? []).length, 1);
   assert.doesNotMatch(unsaved, /name="figureSetId"/u);
   assert.match(unsaved, /<select name="figureCount"><option value="3">3<\/option><option value="4">4<\/option><option value="6">6<\/option>/u);
   assert.match(unsaved, /図形を選ぶ（3個・4個・6個）/u);
