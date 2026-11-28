@@ -15,3 +15,16 @@ node --test docs/review/orientation-app/orientation-review.test.ts
 
 ### 具体的な見立ての候補案（第2案）
 `concrete-construal-draft.json` は120方向の実際の輪郭と主要領域を参照して作成した具体的な候補（原則2件）と、第1候補に対応する部分の役割。見立ては未確認の仮説であり、別の候補や対象に当てはまらない場合も許す。 `apply-concrete-draft.ts` は元の案から未変更かつ未確認の行だけを確認ページの保存結果へ適用する。既に確認した行、変更した行、メモを付けた行は維持する。既存の確定分割と幾何情報、実験runtimeは変更しない。候補の具体性の改善は、実際の認識の正しさを保証するものではない。
+
+### 独立部分の見立て
+全体の見立てとその部分の役割（「全体の見立てでの役割」）とは別に、各領域が単独で、または全体の中の位置・形との関係で何の部分に見えるかを、領域ごとに候補0〜3件（名詞・何の部分か・確信度・根拠の種類・根拠・弱点）と「見立てなし」で持つ。AI案（未確認）・確認済み・編集済み・未作成を枠の色と札で区別する。「確認して次へ」でその方向のAI案が確認済みになり、欄を編集すると編集済みになる。方向の完了は、確認済みかつAI案の未確認が無いこと（進み具合と「未確認のみ」もこの意味）。
+- 保存: 状態ファイルのトップレベル `independentParts`（`results` とは別。`schemaVersion` と `sourceSha256` は不変）。旧版の保存内容は読み込み時にメモリ上だけで空の欄を補い、次の保存まで保存ファイルを書き換えない。`independentParts` を送らない旧版の画面・道具の保存は層を変えず、旧版のサーバーを通しても層は保たれる。層が壊れていれば起動を拒否し、空で置き換えない。
+- 書き出し: 各部分に `independentPart`（`reviewStatus`: `ai_unreviewed`・`researcher_confirmed`・`researcher_edited`、`candidates`（`rank`・`noun`・`owner`・`basis`・`confidence`・`evidence`・`weaknesses`）、`noCandidate`、`noCandidateReason`、`ai`（`agreementStatus`・`discussion`、AI案が無ければ `null`））とトップに `independentPartSchemaVersion`。名詞が空の下書きの候補は含めない。取り込みはこの形から層を復元し、層を持たない旧版の書き出しは現在の層を保つ。
+- AI案の反映: `docs/review/part-construal-20261128/apply-part-construal-to-review.ts`（`--dry-run` あり。確認済み・編集済みの欄、全体の見立て、メモ、現在位置は変えず、保存時に revision が変わっていれば上書きしない）。稼働中のページの切り替えは同じフォルダの `review-page-switch-runbook.md`、切り替え後の確認は `verify-switch.ts`。
+```sh
+node --test docs/review/orientation-app/independent-part-review.test.ts docs/review/part-construal-20261128/apply-part-construal-to-review.test.ts
+```
+実ブラウザでの確認は `browser-independent-parts.ts`（headless Chromium・使い捨てプロファイル・空きポートの `server.ts`。稼働中のページには触れない）。`PART_CONSTRUAL` に `part-construal-468.json`、`REVIEW_STATE_COPY` に状態ファイルの**写し**（任意）、`EVIDENCE_DIR` に新しい出力先を指定する。確認の前に `ps` で他の担当のブラウザが動いていないことを確かめ、一系列で実行する。
+```sh
+PLAYWRIGHT_CORE_PATH=<playwright-core> CHROMIUM_PATH=<chromium> PART_CONSTRUAL=<part-construal-468.json> node docs/review/orientation-app/browser-independent-parts.ts
+```

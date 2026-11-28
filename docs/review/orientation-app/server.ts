@@ -13,6 +13,15 @@ mkdirSync(directory,{recursive:true,mode:0o700});
 const statePath=join(directory,'review-state.json');
 const backupPath=join(directory,'review-state.previous.json');
 const schemaVersion='tangram_orientation_review_v1';
+// 独立部分の見立て: 全体の見立て（results の whole と部分の役割）とは別の層。
+// 旧版の保存内容には無く、読み込み時に空の欄を補う（次の保存まで保存ファイルは書き換えない）。
+// results とは別のトップレベルに置くので、この層を知らない旧版のサーバーや画面を通っても失われない。
+const independentVersion='tangram_independent_part_review_v1';
+const reviewStatuses=['ai_unreviewed','researcher_confirmed','researcher_edited'] as const;
+const confidences=['高','中','低'] as const;
+const bases=['単独','全体との関係','両方'] as const;
+const agreements=['合意','一部合意','未合意'] as const;
+const maxCandidates=3;
 const templates=PRIMARY_REGION_TEMPLATES.map(t=>({
  id:t.figureId+'@'+t.rotation,figureId:t.figureId,rotation:t.rotation,size:t.size,
  parts:t.regions.map(({construal,...geometry})=>({...geometry,candidates:construal.candidates})),
@@ -20,9 +29,13 @@ const templates=PRIMARY_REGION_TEMPLATES.map(t=>({
 }));
 const sourceSha256=createHash('sha256').update(JSON.stringify(templates)).digest('hex');
 const byId=new Map(templates.map(t=>[t.id,t]));
-const data={schemaVersion,sourceSha256,catalogRevision:PRIMARY_REGION_CATALOG_REVISION,templates};
+const data={schemaVersion,sourceSha256,catalogRevision:PRIMARY_REGION_CATALOG_REVISION,templates,
+ independentPart:{schemaVersion:independentVersion,maxCandidates,reviewStatuses,confidences,bases}};
 type ReviewRow={id:string;status:'未確認'|'確認済み'|'要修正';whole:string;wholeBasis:string[];parts:{id:string;description:string;candidates:string[]}[];note:string};
-type State={schemaVersion:string;sourceSha256:string;revision:number;updatedAt:string;currentId:string;results:ReviewRow[]};
+type IndependentCandidate={noun:string;owner:string;basis:typeof bases[number];confidence:typeof confidences[number];evidence:string;weaknesses:string};
+type IndependentPart={id:string;reviewStatus:typeof reviewStatuses[number];candidates:IndependentCandidate[];noCandidate:boolean;noCandidateReason:string;ai:{agreementStatus:typeof agreements[number];discussion:string}|null};
+type IndependentLayer={schemaVersion:string;rows:{id:string;parts:IndependentPart[]}[]};
+type State={schemaVersion:string;sourceSha256:string;revision:number;updatedAt:string;currentId:string;results:ReviewRow[];independentParts:IndependentLayer};
 const initialRows:ReviewRow[]=templates.map(t=>({id:t.id,status:'未確認',whole:t.whole.construal,wholeBasis:[...t.whole.basis],parts:t.parts.map(p=>({id:p.id,description:p.description,candidates:[...p.candidates]})),note:''}));
 function atomicWrite(path:string,value:unknown){
  const tmp=path+'.tmp-'+process.pid,fd=openSync(tmp,'w',0o600);
@@ -47,24 +60,73 @@ function rows(v:any):ReviewRow[]{
  const map=new Map<string,ReviewRow>();for(const entry of v){const r=row(entry);if(map.has(r.id))throw Error('重複した図形があります。');map.set(r.id,r)}
  return templates.map(t=>{const r=map.get(t.id);if(!r)throw Error('不足している図形があります。');return r});
 }
+function choice<T extends string>(v:unknown,list:readonly T[]):T{
+ if(typeof v!=='string'||!(list as readonly string[]).includes(v))throw Error('独立部分の見立ての値が正しくありません。');return v as T;
+}
+function independentCandidate(v:any):IndependentCandidate{
+ return {noun:string(v?.noun,40),owner:string(v?.owner,40),basis:choice(v?.basis,bases),confidence:choice(v?.confidence,confidences),evidence:string(v?.evidence,1000),weaknesses:string(v?.weaknesses,1000)};
+}
+function independentPart(v:any,id:string):IndependentPart{
+ if(v?.id!==id)throw Error('部分IDが一致しません。');
+ if(!Array.isArray(v.candidates)||v.candidates.length>maxCandidates)throw Error('独立部分の見立ては0〜'+maxCandidates+'件です。');
+ const candidates=v.candidates.map(independentCandidate);
+ if(typeof v.noCandidate!=='boolean'||(v.noCandidate&&candidates.length>0))throw Error('独立部分の見立てと「見立てなし」が両立しません。');
+ const ai=v.ai===null?null:{agreementStatus:choice(v.ai?.agreementStatus,agreements),discussion:string(v.ai?.discussion,4000)};
+ return {id,reviewStatus:choice(v.reviewStatus,reviewStatuses),candidates,noCandidate:v.noCandidate,noCandidateReason:string(v.noCandidateReason,1000),ai};
+}
+function independentRows(v:any):IndependentLayer['rows']{
+ if(!Array.isArray(v)||v.length!==templates.length)throw Error('全120方向の独立部分の見立てが必要です。');
+ const map=new Map<string,IndependentLayer['rows'][number]>();
+ for(const entry of v){
+  const t=byId.get(entry?.id);if(!t||map.has(t.id))throw Error('独立部分の見立ての図形・方向が正しくありません。');
+  if(!Array.isArray(entry.parts)||entry.parts.length!==t.parts.length)throw Error('独立部分の見立ての部分数が一致しません。');
+  map.set(t.id,{id:t.id,parts:t.parts.map((p,i)=>independentPart(entry.parts[i],p.id))});
+ }
+ return templates.map(t=>{const r=map.get(t.id);if(!r)throw Error('独立部分の見立てが不足しています。');return r});
+}
+function independentLayer(v:any):IndependentLayer{
+ if(v?.schemaVersion!==independentVersion)throw Error('独立部分の見立ての版が一致しません。');
+ return {schemaVersion:independentVersion,rows:independentRows(v.rows)};
+}
+function blankLayer():IndependentLayer{
+ return {schemaVersion:independentVersion,rows:templates.map(t=>({id:t.id,parts:t.parts.map(p=>({id:p.id,reviewStatus:'ai_unreviewed' as const,candidates:[],noCandidate:false,noCandidateReason:'',ai:null}))}))};
+}
 let state:State;
 if(existsSync(statePath)){
  const raw=JSON.parse(readFileSync(statePath,'utf8'));
  if(raw.schemaVersion!==schemaVersion||raw.sourceSha256!==sourceSha256||!Number.isSafeInteger(raw.revision)||raw.revision<0||!byId.has(raw.currentId))throw Error('既存の保存内容とデータが一致しません。上書きしません。');
- state={...raw,results:rows(raw.results)};
-}else{state={schemaVersion,sourceSha256,revision:0,updatedAt:new Date().toISOString(),currentId:templates[0].id,results:initialRows};atomicWrite(statePath,state)}
+ state={...raw,results:rows(raw.results),independentParts:raw.independentParts===undefined?blankLayer():independentLayer(raw.independentParts)};
+ if(raw.independentParts===undefined)console.log('独立部分の見立て: 旧版の保存内容に空の欄を補いました（次の保存まで保存ファイルは変わりません）。');
+}else{state={schemaVersion,sourceSha256,revision:0,updatedAt:new Date().toISOString(),currentId:templates[0].id,results:initialRows,independentParts:blankLayer()};atomicWrite(statePath,state)}
 function persist(next:State){
  const saved={...next,revision:state.revision+1,updatedAt:new Date().toISOString()};
  atomicWrite(backupPath,state);atomicWrite(statePath,saved);state=saved;return saved;
 }
+// 書き出し: 各部分に independentPart を付ける。名詞が空の下書きの候補は含めない。
+function exportedIndependent(p:IndependentPart){
+ return {reviewStatus:p.reviewStatus,candidates:p.candidates.filter(c=>c.noun.trim()!=='').map((c,i)=>({rank:i+1,...c})),noCandidate:p.noCandidate,noCandidateReason:p.noCandidateReason,ai:p.ai};
+}
 function exported(){
- return {...state,catalogRevision:PRIMARY_REGION_CATALOG_REVISION,partitionStatus:'all_30_user_confirmed',orientationCount:120,
+ const {independentParts,...base}=state;
+ const layers=new Map(independentParts.rows.map(r=>[r.id,r]));
+ return {...base,catalogRevision:PRIMARY_REGION_CATALOG_REVISION,partitionStatus:'all_30_user_confirmed',orientationCount:120,independentPartSchemaVersion:independentVersion,
  results:state.results.map(r=>{
-  const t=byId.get(r.id)!;
+  const t=byId.get(r.id)!,layer=layers.get(r.id)!;
   return {...r,figureId:t.figureId,rotation:t.rotation,size:t.size,
-   parts:r.parts.map((p,i)=>({...t.parts[i],...p,construal:{status:'hypothesis',candidates:p.candidates}})),
+   parts:r.parts.map((p,i)=>({...t.parts[i],...p,construal:{status:'hypothesis',candidates:p.candidates},independentPart:exportedIndependent(layer.parts[i])})),
    relations:t.relations,
   };
+ })};
+}
+// 取り込み: 書き出しの各部分の independentPart から層を作る。この層を持たない旧版の書き出しは、現在の層をそのまま保つ。
+function importedLayer(documentRows:any[]):IndependentLayer{
+ const current=new Map(state.independentParts.rows.map(r=>[r.id,r]));
+ const given=new Map<string,any>(documentRows.map(r=>[r.id,r]));
+ return {schemaVersion:independentVersion,rows:templates.map(t=>{
+  const parts:any[]=given.get(t.id).parts,have=parts.filter(p=>p?.independentPart!==undefined).length;
+  if(have===0)return current.get(t.id)!;
+  if(have!==parts.length)throw Error('独立部分の見立てが一部の部分にしかありません。');
+  return {id:t.id,parts:t.parts.map((p,i)=>independentPart({id:p.id,...parts[i].independentPart},p.id))};
  })};
 }
 async function body(req:any){
@@ -97,11 +159,14 @@ const server=createServer(async(req,res)=>{
   if(path==='/api/state'){
    if(input.sourceSha256!==sourceSha256||!byId.has(input.currentId))throw Error('図形データが一致しません。');
    const results=rows(input.results);
-   return send(200,persist({...state,currentId:input.currentId,results}));
+   // independentParts を送らない旧版の画面・道具は、保存済みの層を変えない。
+   const independentParts=input.independentParts===undefined?state.independentParts:independentLayer(input.independentParts);
+   return send(200,persist({...state,currentId:input.currentId,results,independentParts}));
   }
   const imported=input.document;
   if(imported?.schemaVersion!==schemaVersion||imported.sourceSha256!==sourceSha256||!byId.has(imported.currentId))throw Error('このページで書き出した同じ版のJSONを指定してください。');
-  return send(200,persist({...state,currentId:imported.currentId,results:rows(imported.results)}));
+  const results=rows(imported.results);
+  return send(200,persist({...state,currentId:imported.currentId,results,independentParts:importedLayer(imported.results)}));
  }catch(e){return send(400,{error:e instanceof Error?e.message:String(e)})}
 });
 server.listen(port,'127.0.0.1',()=>console.log('Orientation review: http://127.0.0.1:'+port+'/\nState: '+statePath));
