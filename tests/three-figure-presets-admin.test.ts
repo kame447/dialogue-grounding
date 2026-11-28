@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import type { ProtocolEntry, ReceptionSettings, SaveResult, SettingsStorage } from '../workers/tangram-experiment/src/admin/reception-settings.ts';
 import type { FigurePreset } from '../workers/tangram-experiment/src/admin/figure-presets.ts';
 import { renderReceptions } from '../workers/tangram-experiment/src/admin/render.ts';
+import { submittedFrom } from './support/settings-form.ts';
 
 registerHooks({ resolve(specifier, context, next) {
   if (specifier === 'cloudflare:workers') {
@@ -167,28 +168,48 @@ test('a preset revision is checked in the protocol transaction and only the thre
   assert.doesNotMatch(await (await h.request(SETTINGS)).text(), /trio-01-v1/u);
 });
 
-test('four- and six-figure settings are retained only for their existing selection', async () => {
+test('four- and six-figure settings are refused, never preselected or offered again, and choosing three figures migrates them with every other field kept', async () => {
   const cases = [
-    { selection: { mode: 'preset', setId: 'pilot-four-v1' }, choices: [['figureSetId', 'pilot-four-v1']] },
-    { selection: { mode: 'seeded_random', selectionSeed: 17 }, choices: [['figureCount', '6'], ['selectionSeed', '17']] },
-    { selection: { mode: 'seeded_random', selectionSeed: 17, figureCount: 4 }, choices: [['figureCount', '4'], ['selectionSeed', '17']] },
-    { selection: { mode: 'custom', figureIds: ['F4', 'F1', 'F3', 'F2'] }, choices: ['F1', 'F2', 'F3', 'F4'].map(id => ['figureIds', id]) },
-    { selection: { mode: 'custom', figureIds: ['F1', 'F2', 'F3', 'F4', 'F5', 'F6'] }, choices: ['F1', 'F2', 'F3', 'F4', 'F5', 'F6'].map(id => ['figureIds', id]) },
+    { selection: { mode: 'preset', setId: 'pilot-four-v1' }, choices: [['figureSetId', 'pilot-four-v1']], count: '4図形' },
+    { selection: { mode: 'seeded_random', selectionSeed: 17 }, choices: [['figureCount', '6'], ['selectionSeed', '17']], count: '6図形' },
+    { selection: { mode: 'seeded_random', selectionSeed: 17, figureCount: 4 }, choices: [['figureCount', '4'], ['selectionSeed', '17']], count: '4図形' },
+    { selection: { mode: 'custom', figureIds: ['F4', 'F1', 'F3', 'F2'] }, choices: ['F1', 'F2', 'F3', 'F4'].map(id => ['figureIds', id]), count: '4図形' },
+    { selection: { mode: 'custom', figureIds: ['F1', 'F2', 'F3', 'F4', 'F5', 'F6'] }, choices: ['F1', 'F2', 'F3', 'F4', 'F5', 'F6'].map(id => ['figureIds', id]), count: '6図形' },
   ];
-  for (const { selection, choices } of cases) {
+  for (const { selection, choices, count } of cases) {
     const h = harness();
-    assert.equal((await h.request(SETTINGS + '/protocol', protocolForm(0, selection.mode, choices))).status, 400);
+    // The form never saves a four- or six-figure setting, whether or not it matches a saved one.
+    const refused = await h.request(SETTINGS + '/protocol', protocolForm(0, selection.mode, choices));
+    assert.equal(refused.status, 400); assert.match(await refused.text(), /図形セットは3図形にしてください/u);
     assert.equal((await h.index.readReceptionSettings()).protocol, null);
+    // An earlier release saved it.
     assert.equal((await h.index.saveReceptionProtocol({ expectedRevision: 0, fields: { ...protocolFields, figureSelection: selection } })).ok, true);
     const previous = (await h.index.readReceptionSettings()).protocol!;
-    if (selection.mode === 'seeded_random') {
-      const html = await (await h.request(SETTINGS)).text();
-      assert.ok(html.includes(`<option value="${selection.figureCount ?? 6}" selected>`));
-    }
-    assert.equal((await h.request(SETTINGS + '/protocol', protocolForm(1, selection.mode, choices))).status, 303);
+    const page = await (await h.request(SETTINGS)).text();
+    assert.ok(page.includes(`<p class="bad">現在の設定は${count}のため、新しい受付を許可できません。図形セットで3図形を選んで保存してください。</p>`), count);
+    assert.equal((page.match(/name="figureMode" value="\w+" required checked/gu) ?? []).length, 0, 'no figure source is preselected');
+    assert.equal((page.match(/name="figureIds" value="F\d+" checked/gu) ?? []).length, 0);
+    assert.doesNotMatch(page, /name="selectionSeed"[^>]*value=|<option value="[46]"|name="figureSetId" value="(?:legacy-v1|pilot-four-v1|bank-set-)/u);
+    assert.equal((page.match(/name="figureSetId"/gu) ?? []).length, 10, 'only the three-figure presets are offered');
+    const stored = h.snapshot();
+    assert.equal((await h.request(SETTINGS + '/protocol', protocolForm(1, selection.mode, choices))).status, 400);
+    assert.equal(h.snapshot(), stored, 'saving the same setting again writes nothing');
+
+    // The researcher picks three figures; every other field is what the page showed from the saved setting.
+    const migration = submittedFrom(page);
+    migration.set('figureMode', 'preset'); migration.set('figureSetId', 'trio-01-v1:1');
+    assert.equal((await h.request(SETTINGS + '/protocol', migration)).status, 303);
+    const migrated = (await h.index.readReceptionSettings()).protocol!;
+    assert.equal(migrated.revision, 2); assert.equal(migrated.protocol.protocolId, previous.protocol.protocolId);
+    assert.deepEqual(migrated.protocol.schemaVersion === 'reception_protocol_v3' && migrated.protocol.figureSelection, { mode: 'custom', figureIds: ['F1', 'F2', 'F3'] });
+    const { figureSelection: now, revision: nowRevision, ...kept } = migrated.protocol as any, { figureSelection: was, revision: wasRevision, ...before } = previous.protocol as any;
+    assert.deepEqual(kept, before, 'orders, policies, rotation and the rest are unchanged');
+    assert.notDeepEqual(now, was); assert.deepEqual([nowRevision, wasRevision], [2, 1]);
     const history = await h.index.receptionProtocolHistory();
-    assert.equal(JSON.stringify(history[1]), JSON.stringify(previous));
-    assert.deepEqual(history[0].protocol, { ...previous.protocol, revision: 2 });
+    assert.equal(JSON.stringify(history[1]), JSON.stringify(previous), 'the earlier revision stays as it was');
+    const after = await (await h.request(SETTINGS)).text();
+    assert.doesNotMatch(after, /新しい受付を許可できません/u);
+    assert.deepEqual([...after.matchAll(/name="figureIds" value="(F\d+)" checked/gu)].map(match => match[1]), ['F1', 'F2', 'F3']);
   }
 });
 

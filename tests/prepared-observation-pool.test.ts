@@ -26,6 +26,9 @@ const protocol = validateReceptionProtocolV3({
   seedPolicy: 'shared', referenceMemory: true, betweenTrials: 'none', receptionNumberFormat: 'daily_seq3',
   rotationMode: 'relative_pm90', figureSelection: { mode: 'preset', setId: 'pilot-four-v1' }, figureSetPolicy: 'shared',
 });
+// The pool and recipe layers still serve four-figure settings (stock and claims made before #268 must stay readable), so the
+// pool-level tests keep this four-figure protocol. The coordinator prepares only for three figures: `trio` is its fixture.
+const trio = validateReceptionProtocolV3({ ...protocol, figureSelection: { mode: 'custom', figureIds: ['F1', 'F2', 'F3'] } });
 const participant = { participantModelPin: pin, participantRuntimeProfile: PARTICIPANT_PRODUCTION_PROFILE } as const;
 const spec: PreparedPoolSpec = { protocol, orderIndex: 0, participant, poolKey: await preparedObservationPoolKey({ protocol, orderIndex: 0, participant }) };
 let sequence = 1;
@@ -56,9 +59,9 @@ function memory() {
   };
   return storage;
 }
-const request = (receptionId = newId()): PreparedClaimRequest => ({
+const request = (receptionId = newId(), claimed: { revision: number } = protocol): PreparedClaimRequest => ({
   receptionId, objectId: 'a'.repeat(64), expectedRevision: 0, order: 0,
-  protocolSha256: receptionProtocolSha256(JSON.stringify(protocol)), participant,
+  protocolSha256: receptionProtocolSha256(JSON.stringify(claimed)), participant,
 });
 const failure = (code: string) => (error: unknown) => error instanceof PreparedObservationPoolError && error.code === code;
 async function ready(storage: PreparedPoolStorage, selected = spec) {
@@ -126,7 +129,7 @@ test('a new configuration cannot claim old stock and preserves old claims', asyn
   assert.equal((await claimPreparedObservation(storage, spec.poolKey, claimed, now)).recipe.bundleId, first.recipe.bundleId);
 });
 
-function coordinator() {
+function coordinator(base: typeof trio = trio) {
   const storage = memory(), alarms: number[] = [];
   const control = { posts: 0, policy: pin, fail: false };
   const unused = async () => { throw new Error('unexpected dialogue call'); };
@@ -141,7 +144,8 @@ function coordinator() {
       assert.equal(body.purpose, 'visual_observation');
       if (control.fail) return { status: 503, data: { error: 'unavailable' } };
       const input = JSON.parse(body.messages[1].content);
-      assert.equal(input.ownAnchors.length, 4);
+      const saved = settings.protocol.protocol.figureSelection;
+      assert.equal(input.ownAnchors.length, saved.mode === 'custom' ? saved.figureIds.length : 4);
       const figures = input.ownAnchors.map(({ id }: { id: string }) => ({
         id, holistic: [], analytic: { shapes: ['三角'], composition: '辺がつながる', relations: [] }, unknowns: [],
       }));
@@ -150,7 +154,7 @@ function coordinator() {
     },
   };
   const env = { PARTICIPANT_TERRA_ENABLED: 'on', PARTICIPANT_TERRA_PROFILE: PARTICIPANT_PRODUCTION_PROFILE, PARTICIPANT_AI_PROXY: proxy };
-  const settings = { protocol: { protocol, revision: protocol.revision, savedAt: now, sha256: receptionProtocolSha256(JSON.stringify(protocol)) },
+  const settings = { protocol: { protocol: base, revision: base.revision, savedAt: now, sha256: receptionProtocolSha256(JSON.stringify(base)) },
     mode: { value: 'on' as const, revision: 1, savedAt: now } };
   const service = new PreparedObservationCoordinator({ storage, env, readSettings: async () => structuredClone(settings), setAlarm: async time => { alarms.push(time); } });
   return { storage, env, settings, service, control, alarms };
@@ -167,8 +171,8 @@ test('status and preparation scheduling do not observe; only the pre-admission a
   await f.service.alarm();
   assert.equal(f.control.posts, 1, 'shared conditions reuse one exact prepared observation');
   assert.equal((await f.service.status()).orders[0].ready, 1);
-  const { participant: bound } = await resolveParticipantConfiguration(f.env, protocol);
-  const input = { ...request(), participant: bound };
+  const { participant: bound } = await resolveParticipantConfiguration(f.env, trio);
+  const input = { ...request(undefined, trio), participant: bound };
   const bundle = await f.service.claim(input);
   assert.equal(f.control.posts, 1, 'claim only reads; replenishment is queued for later');
   assert.equal(bundle.entries.length, 1);
@@ -184,8 +188,8 @@ test('failed preparation and changed model pins never fall through to observatio
   f.control.fail = true;
   await f.service.alarm();
   assert.equal((await f.service.status()).orders[0].failed, 1);
-  const { participant: bound } = await resolveParticipantConfiguration(f.env, protocol);
-  await assert.rejects(f.service.claim({ ...request(), participant: bound }), { message: 'prepared_observations_unavailable' });
+  const { participant: bound } = await resolveParticipantConfiguration(f.env, trio);
+  await assert.rejects(f.service.claim({ ...request(undefined, trio), participant: bound }), { message: 'prepared_observations_unavailable' });
   assert.equal(f.control.posts, 1);
   f.control.policy = { ...pin, terraModelId: 'gpt-6.1-terra-2026-11-02' };
   await f.service.alarm();
@@ -200,7 +204,7 @@ function deferred() {
   return { promise, resolve };
 }
 function revise(f: ReturnType<typeof coordinator>) {
-  const next = { ...protocol, revision: f.settings.protocol.revision + 1 };
+  const next = { ...trio, revision: f.settings.protocol.revision + 1 };
   f.settings.protocol = { protocol: next, revision: next.revision, savedAt: now, sha256: receptionProtocolSha256(JSON.stringify(next)) };
 }
 
@@ -235,8 +239,8 @@ test('an invalid ready memo is quarantined before claim so the same pending rece
   const [key, job] = [...rows].find(([, value]) => value.status === 'ready')!;
   job.bundle.entries[0].entry.memo.figures[0].analytic.composition = 'changed after preparation';
   await f.storage.put({ [key]: job });
-  const { participant: bound } = await resolveParticipantConfiguration(f.env, protocol);
-  const input = { ...request(), participant: bound };
+  const { participant: bound } = await resolveParticipantConfiguration(f.env, trio);
+  const input = { ...request(undefined, trio), participant: bound };
   await assert.rejects(f.service.claim(input), { message: 'prepared_observations_unavailable' });
   assert.equal(f.control.posts, 1);
   assert.equal((await f.service.status()).orders[0].failed, 1);
@@ -252,8 +256,8 @@ test('a lost owner write can be followed by an explicit approval of a new protoc
   const f = coordinator();
   await f.service.prepare({ expectedProtocolRevision: 1 });
   await f.service.alarm();
-  const { participant: bound } = await resolveParticipantConfiguration(f.env, protocol);
-  const input = { ...request(), participant: bound };
+  const { participant: bound } = await resolveParticipantConfiguration(f.env, trio);
+  const input = { ...request(undefined, trio), participant: bound };
   const first = await f.service.claim(input);
   revise(f);
   await f.service.prepare({ expectedProtocolRevision: 2 });
@@ -265,4 +269,45 @@ test('a lost owner write can be followed by an explicit approval of a new protoc
   const jobs = [...(await f.storage.list<any>({ prefix: 'prepared-observations:v1:job:' })).values()];
   assert.equal(jobs.find(job => job.recipe.bundleId === first.bundleId)?.status, 'claimed');
   assert.equal(f.control.posts, 2);
+});
+
+test('a three-figure setting is prepared for exactly as before, and a migration from a four-figure one starts preparing for the new revision', async () => {
+  const f = coordinator(validateReceptionProtocolV3({ ...protocol, figureSelection: { mode: 'custom', figureIds: ['F1', 'F2', 'F3', 'F4'] } }));
+  assert.deepEqual(await f.service.status(), { supported: false, protocolRevision: 1, targetPerOrder: PREPARED_OBSERVATION_TARGET, orders: [], errorCode: null });
+  // The researcher saves three figures as the next revision of the same protocol.
+  const migrated = { ...trio, revision: 2 };
+  f.settings.protocol = { protocol: migrated, revision: 2, savedAt: now, sha256: receptionProtocolSha256(JSON.stringify(migrated)) };
+  assert.deepEqual(await f.service.prepare({ expectedProtocolRevision: 2 }), { ok: true });
+  assert.equal((await f.service.status()).orders[0].queued, PREPARED_OBSERVATION_TARGET);
+  assert.equal(f.control.posts, 0, 'preparing only queues; the alarm observes');
+  await f.service.alarm();
+  assert.equal(f.control.posts, 1);
+  assert.equal((await f.service.status()).orders[0].ready, 1);
+});
+
+test('a four- or six-figure setting is never prepared for: status is unsupported, preparation and claim refuse, and no model is called (#268)', async () => {
+  for (const figureSelection of [{ mode: 'preset', setId: 'pilot-four-v1' }, { mode: 'preset', setId: 'legacy-v1' }, { mode: 'preset', setId: 'bank-set-a' },
+    { mode: 'custom', figureIds: ['F1', 'F2', 'F3', 'F4'] }, { mode: 'seeded_random', selectionSeed: 7, figureCount: 4 }, { mode: 'seeded_random', selectionSeed: 7 }] as const) {
+    const legacy = validateReceptionProtocolV3({ ...protocol, figureSelection });
+    const f = coordinator(legacy);
+    assert.deepEqual(await f.service.status(), { supported: false, protocolRevision: 1, targetPerOrder: PREPARED_OBSERVATION_TARGET, orders: [], errorCode: null });
+    assert.deepEqual(await f.service.prepare({ expectedProtocolRevision: 1 }), { ok: false, error: 'unconfigured' });
+    await f.service.alarm();
+    const { participant: bound } = await resolveParticipantConfiguration(f.env, legacy);
+    await assert.rejects(f.service.claim({ ...request(undefined, legacy), participant: bound }), { message: 'reception_conflict' });
+    assert.equal(f.control.posts, 0); assert.deepEqual(f.alarms, []);
+    assert.deepEqual([...(await f.storage.list({ prefix: 'prepared-observations:v1:' })).keys()], [], JSON.stringify(figureSelection));
+  }
+});
+
+test('a preparation that was running for three figures stops when the setting becomes a four-figure one, and spends nothing', async () => {
+  const f = coordinator();
+  assert.deepEqual(await f.service.prepare({ expectedProtocolRevision: 1 }), { ok: true });
+  const legacy = { ...protocol, revision: 2 };
+  f.settings.protocol = { protocol: legacy, revision: 2, savedAt: now, sha256: receptionProtocolSha256(JSON.stringify(legacy)) };
+  await f.service.alarm();
+  assert.equal(f.control.posts, 0);
+  assert.equal((await f.service.status()).supported, false);
+  const active = await f.storage.get<{ errorCode: string | null }>(PREPARED_OBSERVATION_ACTIVE);
+  assert.equal(active?.errorCode, 'configuration_changed');
 });
