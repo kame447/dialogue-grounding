@@ -8,7 +8,7 @@ import type { AuditEntry, DeletionReason } from "./index-store.ts";
 import { OBJECT_ID, RECORD_ID } from "./summary.ts";
 import { formatReceptionNumber, receptionNumberDay } from '../../../../dialogue-model/runtime/v2/reception.ts';
 import type { ReceptionSummary } from '../../../../dialogue-model/runtime/v2/reception.ts';
-import { modeHistory, protocolHistory, readSettings, saveMode, savePostGenerationCheck, saveProtocol, saveProtocolFromForm } from './reception-settings.ts';
+import { migrateRotationDefault, modeHistory, protocolHistory, readSettings, saveMode, savePostGenerationCheck, saveProtocol, saveProtocolFromForm } from './reception-settings.ts';
 import type { ModeEntry, ProtocolEntry, ReceptionSettings, SaveResult } from './reception-settings.ts';
 import { listFigurePresets, readFigurePreset, saveFigurePreset } from './figure-presets.ts';
 import type { FigurePresetMutation } from './figure-presets.ts';
@@ -25,6 +25,18 @@ export class AdminIndex extends DurableObject<ParticipantConfigurationEnv> {
     readSettings: tx => tx ? readSettings(tx) : this.readReceptionSettings(),
     setAlarm: time => this.ctx.storage.setAlarm(time),
   });
+  constructor(ctx: DurableObjectState, env: ParticipantConfigurationEnv) {
+    super(ctx, env);
+    // Before the first request, a saved ±90° rotation is switched to the new default, once (#269). A migrated revision gets the
+    // preparation any saved protocol gets, started after this startup step and never awaited. A bare test context has no hook.
+    const startup = ctx.blockConcurrencyWhile?.(async () => {
+      try { return await ctx.storage.transaction(tx => migrateRotationDefault(tx, Date.now())); }
+      catch { return null; } // Damaged settings stay unmarked and fail closed on every read; the next start tries again.
+    });
+    void startup?.then(revision => {
+      if (revision !== null) ctx.waitUntil(this.observations.prepare({ expectedProtocolRevision: revision }));
+    });
+  }
   async preparedObservationStatus() { return this.observations.status(); }
   async prepareObservations(input: { expectedProtocolRevision: number }) { return this.observations.prepare(input); }
   async claimPreparedObservations(input: PreparedClaimRequest) { return this.observations.claim(input); }

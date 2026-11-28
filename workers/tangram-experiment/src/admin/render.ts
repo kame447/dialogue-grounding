@@ -16,6 +16,7 @@ import { renderQrSvg } from './qr.ts';
 import { createTrialV2, participantView, ROTATION_MODES } from '../../../../dialogue-model/runtime/stimuli/scatter-v2.mjs';
 import { FIGURE_BANK, FIGURE_BANK_VERSION, FIGURE_SETS, FIGURE_SET_SIZE, SUPPORTED_FIGURE_COUNTS, validateResolvedFigureSelection } from '../../../../dialogue-model/runtime/stimuli/figure-bank.ts';
 import type { FigurePreset } from './figure-presets.ts';
+import { DEFAULT_ROTATION_MODE, ROTATION_CHOICES } from './rotation-choices.ts';
 import type { BankFigure } from '../../../../dialogue-model/runtime/stimuli/figure-bank.ts';
 
 export const ADMIN_CSS = `:root{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans JP",sans-serif;font-size:14px;line-height:1.5;color:#222;background:#f7f7f4;--line:#d8d8d2;--accent:#2a5d8f;--tint:#eaf1f8}
@@ -323,7 +324,7 @@ function adminNav(current: string): string {
 }
 /** One frozen set id, or `A → B` when the trials use different sets. */
 const figureSetSummary = (ids: readonly string[]) => ids.length && ids.every(id => id === ids[0]) ? ids[0] : ids.join(' → ');
-const ROTATION_LABELS: Record<string, string> = { relative_pm90: '±90°', relative_0: '0°' };
+const ROTATION_LABELS: Record<string, string> = Object.fromEntries(ROTATION_CHOICES.map(choice => [choice.value, choice.list]));
 const BETWEEN_LABELS: Record<string, string> = { none: '指定なし', questionnaire_required: 'アンケート必須' };
 
 /** Present only when the reception list updates itself: the version it was rendered from and the render time. */
@@ -416,7 +417,7 @@ const SETTING_CHOICES: [string, string, [string, string][]][] = [
   ['seedPolicy', 'seed', [['shared', '全試行で同じ'], ['per_trial', '試行ごとに別']]],
   ['referenceMemory', '参照メモリ', [['on', 'ON'], ['off', 'OFF']]],
   ['betweenTrials', '試行の間', [['none', '指定なし'], ['questionnaire_required', 'アンケートの提出後に次へ（対象：provisional-v0、研究者未承認の仮項目）']]],
-  ['rotationMode', '回転', [['relative_pm90', '相対 ±90°（従来）'], ['relative_0', '相対 0°（向きを一致）']]],
+  ['rotationMode', '回転', ROTATION_CHOICES.map(choice => [choice.value, choice.form])],
   ['receptionNumberFormat', '受付番号', [['daily_seq3', '日ごとの3桁の連番']]],
 ];
 const FIGURE_SET_LABELS: Record<string, string> = { 'pilot-four-v1': '4図形（F1–F4）', 'legacy-v1': 'legacy-v1（従来 F1–F6）', 'bank-set-a': 'bank-set-a（F7–F12）', 'bank-set-b': 'bank-set-b（F13–F18）',
@@ -444,11 +445,11 @@ function renderPreparedObservations(view: SettingsView, status: PreparedObservat
     `<form method="post" action="/admin/reception-settings/observations"><input type="hidden" name="expectedProtocolRevision" value="${escapeHtml(status.protocolRevision)}"><button>観察メモを準備</button></form>`;
 }
 
-/** Researcher settings form. Unsaved settings preselect nothing; saved settings preselect the current values. */
+/** Researcher settings form. Unsaved settings preselect only the default rotation; saved settings preselect the current values. */
 export function renderSettings(view: SettingsView, observations?: PreparedObservationPoolStatus | null, presets?: readonly FigurePreset[]): string {
   const p = view.protocol?.protocol;
   const current: Record<string, string> = p ? { figureSetPolicy: p.figureSetPolicy ?? '', seedPolicy: p.seedPolicy, referenceMemory: p.referenceMemory ? 'on' : 'off', betweenTrials: p.betweenTrials,
-    rotationMode: p.rotationMode, receptionNumberFormat: p.receptionNumberFormat } : {};
+    rotationMode: p.rotationMode, receptionNumberFormat: p.receptionNumberFormat } : { rotationMode: DEFAULT_ROTATION_MODE };
   const orders = new Set(p ? p.allowedOrders.map(o => o.join(',')) : []);
   // The source and allocation are explicit. A saved random selection without a count denotes the legacy size.
   const selection = p?.figureSelection, policy = p?.figureSetPolicy;

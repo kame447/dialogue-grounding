@@ -32,7 +32,7 @@ import { PARTICIPANT_STOP_HTML } from "../../../dialogue-model/runtime/v2/partic
 import { ReceptionError, validateReception, createReception, approveReception, validateReceptionApprovalInput, validateReceptionPlan, cancelReception, terminateReception,
   participantReception, receptionSummary, effectiveBetweenTrials, effectiveFigureSelection, effectiveRotationMode,
   validateParticipantLimits, isParticipantDialogueProfile, isPilot012ParticipantDialogueProfile,
-  participantMemoryPruneVersion, PILOT012_V24_PARTICIPANT_PROFILE } from '../../../dialogue-model/runtime/v2/reception.ts';
+  participantMemoryPruneVersion, PILOT012_V24_PARTICIPANT_PROFILE, ROTATION_MODES } from '../../../dialogue-model/runtime/v2/reception.ts';
 import { isAdminTermination, isIncompleteTrialStatus } from '../../../dialogue-model/runtime/v2/admin-termination.ts';
 import type { AdminTermination } from '../../../dialogue-model/runtime/v2/admin-termination.ts';
 import { isSubmittedQuestionnaire } from '../../../dialogue-model/runtime/v2/questionnaire-gate.ts';
@@ -1204,8 +1204,9 @@ export class TangramSession extends DurableObject<Env> {
         : { limits: binding.participantLimits ?? validateParticipantLimits(restore
           ? savedLimits : JSON.parse(this.env.PARTICIPANT_TERRA_LIMITS_JSON ?? 'null')) };
       if (binding.recoveringAdmission && !restore && runtimeMode.usage) await runtimeMode.usage.resumeAfterModelMismatch();
-      const rotationMode = restore?.options.rotationMode ?? binding.rotationMode ?? 'relative_pm90';
-      if (rotationMode !== 'relative_pm90' && rotationMode !== 'relative_0') throw new NamingTaskError('invalid_options');
+      const requestedRotation = restore?.options.rotationMode ?? binding.rotationMode ?? 'relative_pm90';
+      const rotationMode = ROTATION_MODES.find(mode => mode === requestedRotation);
+      if (rotationMode === undefined) throw new NamingTaskError('invalid_options');
       // The observer and dialogue must see the same board. A restore uses the validated record's selection.
       const figureSelection = restore ? restore.options.figureSelection : binding.figureSelection;
       const { trial, figures, own } = participantTrialMaterial(seed, rotationMode, figureSelection);

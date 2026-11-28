@@ -6,7 +6,9 @@
 //   "reception-mode:rev:<10>"        same as current, per revision
 //   "reception-post-generation-check:current" / "reception-post-generation-check:rev:<10>"
 //                                    {revision, value, savedAt}
-// No key exists until a researcher saves. A history without its current
+//   "reception-migration:rotation-90-180-270:v1"
+//                                    {at, outcome, fromRevision, toRevision}  one-time switch to the new rotation default (#269)
+// No settings key exists until a researcher saves. A history without its current
 // pointer, or a pointer that disagrees with its history, is damage: it fails
 // closed and is never read as "unsaved" or "off".
 import { ReceptionError, validateReceptionProtocolV2, validateReceptionProtocolV3, receptionProtocolSha256 } from '../../../../dialogue-model/runtime/v2/reception.ts';
@@ -14,6 +16,7 @@ import type { ReceptionProtocolV2, ReceptionProtocolV3 } from '../../../../dialo
 import { isPostGenerationCheck, type PostGenerationCheck } from '../../../../dialogue-model/runtime/v2/deferred-ai-extraction.ts';
 import { FIGURE_SET_SIZE } from '../../../../dialogue-model/runtime/stimuli/figure-bank.ts';
 import { readFigurePreset } from './figure-presets.ts';
+import { DEFAULT_ROTATION_MODE } from './rotation-choices.ts';
 import type { ProtocolFigureSelection, ProtocolFormInput } from './reception-port.ts';
 
 export type SettingsStorage = {
@@ -36,6 +39,7 @@ export type SaveResult = { ok: true; revision: number } | { ok: false; error: 'c
 const PROTOCOL = 'reception-protocol:current', PROTOCOL_REV = 'reception-protocol:rev:';
 const MODE = 'reception-mode:current', MODE_REV = 'reception-mode:rev:';
 const POST_GENERATION_CHECK = 'reception-post-generation-check:current', POST_GENERATION_CHECK_REV = 'reception-post-generation-check:rev:';
+const ROTATION_MIGRATION = 'reception-migration:rotation-90-180-270:v1';
 const FIELDS = ['allowedOrders', 'seedPolicy', 'referenceMemory', 'betweenTrials', 'receptionNumberFormat', 'rotationMode', 'figureSelection', 'figureSetPolicy'];
 const revKey = (prefix: string, revision: number) => prefix + String(revision).padStart(10, '0');
 const broken = (): never => { throw new ReceptionError('reception_unavailable'); };
@@ -146,11 +150,42 @@ export async function saveProtocol(storage: SettingsStorage, input: { expectedRe
       receptionNumberFormat: fields.receptionNumberFormat, rotationMode: fields.rotationMode,
       figureSelection: fields.figureSelection, figureSetPolicy: fields.figureSetPolicy });
   } catch { return { ok: false, error: 'invalid' }; }
-  if (await storage.get(revKey(PROTOCOL_REV, revision)) !== undefined) return { ok: false, error: 'unavailable' };
+  if (!await appendProtocol(storage, protocol, now)) return { ok: false, error: 'unavailable' };
+  return { ok: true, revision };
+}
+
+/** Appends one complete protocol as its own revision, with any extra keys in the same put. False when that revision's key is already taken. */
+async function appendProtocol(storage: SettingsStorage, protocol: StoredProtocol, now: number, extra: Record<string, unknown> = {}): Promise<boolean> {
+  const { revision } = protocol;
+  if (await storage.get(revKey(PROTOCOL_REV, revision)) !== undefined) return false;
   const savedAt = new Date(now).toISOString(), sha256 = receptionProtocolSha256(JSON.stringify(protocol));
   await storage.put({ [PROTOCOL]: { revision, protocolId: protocol.protocolId, sha256, savedAt },
-    [revKey(PROTOCOL_REV, revision)]: { revision, sha256, savedAt, protocol } });
-  return { ok: true, revision };
+    [revKey(PROTOCOL_REV, revision)]: { revision, sha256, savedAt, protocol }, ...extra });
+  return true;
+}
+
+/**
+ * One-time switch of the saved rotation to the new default (researcher-approved 2026-11-28, #269). Run it in a transaction at startup.
+ * A marker settles the question for good, so a researcher's later explicit choice is never rewritten.
+ * - a saved v3 protocol with ±90°: a new revision identical except for rotationMode; earlier revisions and their sha256 stay in the history
+ * - anything else (unsaved, 0°, already the new mode, a v2 protocol without figure fields): the marker only
+ * Damaged settings throw before anything is written: no migration, no marker, still failing closed.
+ * Returns the revision it saved, or null.
+ */
+export async function migrateRotationDefault(storage: SettingsStorage, now: number): Promise<number | null> {
+  if (await storage.get(ROTATION_MIGRATION) !== undefined) return null;
+  const { protocol: saved } = await readSettings(storage);
+  const marker = (outcome: 'unsaved' | 'kept' | 'migrated', toRevision: number | null) =>
+    ({ at: new Date(now).toISOString(), outcome, fromRevision: saved?.revision ?? null, toRevision });
+  const current = saved?.protocol;
+  if (!saved || current?.schemaVersion !== 'reception_protocol_v3' || current.rotationMode !== 'relative_pm90') {
+    await storage.put({ [ROTATION_MIGRATION]: marker(saved ? 'kept' : 'unsaved', null) });
+    return null;
+  }
+  const revision = saved.revision + 1;
+  const next = validateReceptionProtocolV3({ ...current, revision, rotationMode: DEFAULT_ROTATION_MODE });
+  if (!await appendProtocol(storage, next, now, { [ROTATION_MIGRATION]: marker('migrated', revision) })) return broken();
+  return revision;
 }
 
 function sameFigureSelection(a: ProtocolFigureSelection, b: ProtocolFigureSelection): boolean {

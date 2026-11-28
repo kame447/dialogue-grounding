@@ -5,6 +5,7 @@ import type { ParticipantRole, ParticipantRoleResult, ParticipantRoleView } from
 import type { PreobservationUsage } from '../participant-preobservation.ts';
 import type { participantStartTiming } from './latency.ts';
 import type { AdminTermination } from '../../../../dialogue-model/runtime/v2/admin-termination.ts';
+import type { RotationMode } from '../../../../dialogue-model/runtime/v2/reception.ts';
 import type { FigurePresetPort, FigurePresetReference } from './figure-presets.ts';
 
 /** Researcher-only projections. These types are not the persisted reception or protocol schema. */
@@ -18,7 +19,7 @@ export type ReceptionAdminRow = {
   revision: number;
   termination?: AdminTermination;
   /** Frozen plan values; a v1 plan reads as relative_pm90 / none. */
-  plan: { order: ReceptionStrategy[]; rotationMode: 'relative_pm90' | 'relative_0'; betweenTrials: 'none' | 'questionnaire_required';
+  plan: { order: ReceptionStrategy[]; rotationMode: RotationMode; betweenTrials: 'none' | 'questionnaire_required';
     /** Frozen figure set id per trial; plans before the figure bank read as the legacy set. */ figureSets?: string[] } | null;
   trials: { index: number; recordId: string | null; participantRole?: ParticipantRoleView; recordDeleted?: true }[];
   hasUnrecordedProductionAdmission?: true;
@@ -44,7 +45,7 @@ export type ReceptionProtocolStatus = { configured: false; mode: ReceptionMode }
   revision: number;
   sha256: string;
   allowedOrders: ReceptionStrategy[][];
-  rotationMode: 'relative_pm90' | 'relative_0';
+  rotationMode: RotationMode;
   betweenTrials: 'none' | 'questionnaire_required';
   /** Absent for a protocol saved before the figure bank (v2). */
   figureSelection?: ProtocolFigureSelection;
@@ -79,7 +80,7 @@ export type ReceptionAdminPort = {
 };
 
 export type ProtocolFields = { allowedOrders: ReceptionStrategy[][]; seedPolicy: 'shared' | 'per_trial'; referenceMemory: boolean;
-  betweenTrials: 'none' | 'questionnaire_required'; receptionNumberFormat: 'daily_seq3'; rotationMode: 'relative_pm90' | 'relative_0';
+  betweenTrials: 'none' | 'questionnaire_required'; receptionNumberFormat: 'daily_seq3'; rotationMode: RotationMode;
   figureSelection: ProtocolFigureSelection; figureSetPolicy: FigureSetPolicy };
 /** A saved v2 protocol has no figure fields; they are shown as unselected, never filled in. */
 export type SavedProtocol = { revision: number; savedAt: string; sha256: string;

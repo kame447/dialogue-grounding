@@ -134,9 +134,10 @@ test('save outcomes are closed: conflict, unconfigured protocol and backend fail
   const f = fixture(); f.fail(); const r = await handleAdmin(get(), f.deps); assert.equal(r.status, 503); assert.doesNotMatch(await r.text(), /PRIVATE/);
 });
 
-test('unsaved page preselects nothing; saved page preselects the current values and shows complete history', async () => {
+test('unsaved page preselects only the default rotation; saved page preselects the current values and shows complete history', async () => {
   const unsaved = await (await handleAdmin(get(), fixture('unsaved').deps)).text();
-  assert.doesNotMatch(unsaved, /\b(checked|selected)\b/); assert.match(unsaved, /未設定のため、受付を許可できません/); assert.match(unsaved, /既定（使う）/);
+  assert.deepEqual([...unsaved.matchAll(/<input\b[^>]*name="(\w+)"[^>]*value="([^"]*)"[^>]*\bchecked\b/g)].map(m => m[1] + '=' + m[2]), ['rotationMode=relative_90_180_270']);
+  assert.doesNotMatch(unsaved, /\bselected\b/); assert.match(unsaved, /未設定のため、受付を許可できません/); assert.match(unsaved, /既定（使う）/);
   assert.match(unsaved, /<select name="figureCount">\s*<option value="3">3<\/option>/u);
   assert.match(unsaved, /受付は既定で使います。試行の開始には、プロトコルの保存と研究者の許可が必要です。/); assert.doesNotMatch(unsaved, /未設定（使わない）/);
   assert.match(unsaved, /name="expectedRevision" value="0"/);
