@@ -1,6 +1,6 @@
 {
   "schemaVersion": "tangram_primary_groups_review_v1",
-  "status": "awaiting_round2_user_review",
+  "status": "awaiting_user_review_with_expression_editor",
   "confirmedFigureIds": [
     "F1"
   ],
@@ -1820,12 +1820,14 @@
     "separateImportRequired": false
   },
   "currentReview": {
-    "round": 2,
-    "reviewId": "tangram-regions-round2-20261128",
-    "proposalFile": "all-regions-review-v2.json",
-    "proposalSha256": "97f1fc831d923fc43bf0249adc5add519ca3c08873004e3dd118084134e0281a",
-    "initialReviewStatus": "all_30_unconfirmed",
-    "userRequest": "再度全部私に確認させてね",
-    "resultTransfer": "copy final review JSON into the conversation"
+    "reviewId": "tangram-expression-review-20261128",
+    "proposalFile": "region-expression-editor-data.json",
+    "dataSha256": "377d9eb85a53790c5b6c8429618be42b1af9f1e814188ba7142c0ce3ff15cde5",
+    "inputMethod": "plus joins atoms, slash separates groups",
+    "supersedes": "round2 note-only interface",
+    "userRequest": "前の選択が反映されていない。前の + / で区切る入力がよい。",
+    "previousSelectionStatus": "not_received; import original review export without guessing",
+    "importPolicy": "preserve 24 figures and confirmation status; update six explicitly corrected regions and retain original remainder groups; retain raw imported text",
+    "splitTokens": "a and b identify the two fragments of the cut source piece"
   }
 }
