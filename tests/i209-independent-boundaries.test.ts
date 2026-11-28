@@ -140,7 +140,7 @@ async function fixture(mode: 'on' | 'off' = 'on') {
       storage: store(id), id: { toString: () => id }, waitUntil(promise: Promise<unknown>) { pending.push(promise); },
     }, env);
     instance.createTrial = async (input: { restore?: ReturnType<typeof raw>; onPersist(value: unknown): Promise<unknown>;
-      seed: number; strategy: string; referenceMemory: boolean; rotationMode?: string; figureSelection?: unknown }) => {
+      seed: number; strategy: string; referenceMemory: boolean; rotationMode?: string; openingMode?: 'scripted_v1'; figureSelection?: unknown }) => {
       const record = clone(input.restore ?? raw());
       if (!input.restore) {
         record.recordId = crypto.randomUUID();
@@ -148,6 +148,7 @@ async function fixture(mode: 'on' | 'off' = 'on') {
         record.strategy = input.strategy;
         record.options.referenceMemory = input.referenceMemory;
         record.options.rotationMode = input.rotationMode;
+        if (input.openingMode) record.options.openingMode = input.openingMode;
         if (input.figureSelection) record.options.figureSelection = input.figureSelection;
         record.stimulus = { version: 'synthetic-stimulus-v1', rotationMode: input.rotationMode, angles: { human: { h1: 0 }, ai: { a1: 0 } } };
       }
