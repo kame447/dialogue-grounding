@@ -1,6 +1,8 @@
 import { isSupportedFigureCount } from '../stimuli/figure-bank.ts';
 import { ROTATION_MODES } from '../stimuli/scatter-v2.mjs';
 import { modelPartGeometry, hasPartGeometry, PART_INDEX_INSTRUCTIONS } from '../observation/part-consumers.ts';
+import { hasRotationMemory, modelRotation, rotationNameCandidates, ROTATION_MEMORY_LEGEND, ROTATION_LEGEND_KEY, COMMON_DIFFERENT_CONSTRUAL, COMMON_DIFFERENT_CONSTRUAL_ROTATION,
+  ROTATION_ACTION_USE, ROTATION_MATCH_USE, ROTATION_ACCEPT_ANSWER, ROTATION_ACCEPT_BACKCHANNEL, ROTATION_REQUEST_OBSERVATION } from "./rotation-memory-guidance.ts";
 import { ISSUE_HANDLING_MOVE_ON_CRITERIA, ISSUE_HANDLING_MOVE_ON_INSTRUCTIONS, MOVE_ON_SOURCE_QUESTION } from "./human-led-move-on.ts";
 import { COMMITMENT_STATES, ISSUE_HANDLING_VERSION, JEV_ACTIONS_V21, NON_BYPASS_ALTERNATIVES, SWITCH_FUNCTIONS, issueAlternativeTarget, issueHandlingMatchesSource, projectExtraHandling } from "./issue-handling.ts";
 import type { CarryDestination, ExecutedExtra, ExtraHandling, ExtraSelection, JevIssueRef } from "./issue-handling.ts";
@@ -98,9 +100,10 @@ const HOLISTIC_ACCEPT_V3 = "図形全体や見た目を初めて尋ねられた�
 const HOLISTIC_CONFIRM_V3 = "全体の見立てだけで対象が共有され命名に進めるとき、すでに肯定された特徴については選ばない。観察で答えられる細部の質問にはconfirmで聞き返さず、acceptで直接答える（分からない点は分からないと述べる）。聞き返すのは、対象や論点に具体的な未解決点があり、相手から情報を得る必要があるとき（相手が絞れない・相手との間で似た候補が残る・見立てが食い違うとき）に限り、区別に必要な特徴を一つ尋ねる。";
 const HOLISTIC_DEFER_V3 = "残りの数だけで保留を一律に禁止も許可もせず、その時点で有効な修復の手がかりと、後で再開できる見込みを考える。十分に共有できているのに話を延ばす目的では選ばない。";
 const HOLISTIC_REVISIT_V3 = "十分に共有できていて命名に進める場面で、話を延ばすためだけには選ばない。残りの数だけで決めず、その時点で有効な修復の手がかりと、再開できる見込みを考える。";
+const V3_ACCEPT_AFTER_RESOLUTION = "直前の図形で合意が成立したり問題が解決したりした後、相手が新しい図形へ進む場合の受け止めも含める。";
 const V3_ACTION_CRITERIA_LOOP: Readonly<Record<LegacyJevAction, string>> = Object.freeze({
   ...JEV_ACTION_CRITERIA,
-  accept: JEV_ACTION_CRITERIA.accept + "直前の図形で合意が成立したり問題が解決したりした後、相手が新しい図形へ進む場合の受け止めも含める。" + ACCEPT_DIRECT_ANSWER_V3 + ACCEPT_BACKCHANNEL_V3,
+  accept: JEV_ACTION_CRITERIA.accept + V3_ACCEPT_AFTER_RESOLUTION + ACCEPT_DIRECT_ANSWER_V3 + ACCEPT_BACKCHANNEL_V3,
   confirm: JEV_ACTION_CRITERIA.confirm + "相手が直前の確認特徴を明確に肯定し、矛盾なく呼び名を提案・確認した場合は、同じ特徴の確認を繰り返さず、公開の名称提案に基づくagreeなど次の段階へ進む。不確実な点が残る場合は別の弁別特徴を選ぶ。" + CONFIRM_UNRESOLVED_V3,
   propose_name: JEV_ACTION_CRITERIA.propose_name + PROPOSE_NAME_STAGE_V3,
   agree: JEV_ACTION_CRITERIA.agree + AGREE_PARTNER_NAME_V3,
@@ -116,9 +119,10 @@ const V3_ACTION_CRITERIA_HOLISTIC: Readonly<Record<LegacyJevAction, string>> = O
 });
 /** The criteria text of a two_stage_v3 request: the older text, or the holistic-first text for a trial created with dialoguePolicy holistic_v1. */
 const v3Criteria = (policy: DialoguePolicy | undefined) => isHolisticPolicy(policy) ? V3_ACTION_CRITERIA_HOLISTIC : V3_ACTION_CRITERIA_LOOP;
+const ISSUE_ACCEPT_BASE = "通常の受け止め・応答。相槌、問いへの直接の回答、全体の見立ての説明を含む。理解の成立や名称の採用は宣言しない。対象の同定、候補や呼び名の採否、理解の可否の表明が求められ、材料が足りなければ受け止めるだけで済ませない。確かめるならconfirmかrepair、判断を保留するならhold_openを選ぶ。未確認、言い方の違い、候補が複数あることだけでは確認や保留の理由にならない。" +
+  "合意や解決の後、相手が新しい図形へ進む場合の受け止めも含める。";
 const ISSUE_ACTION_CRITERIA: Readonly<Partial<Record<JevAction, string>>> = Object.freeze({
-  accept: "通常の受け止め・応答。相槌、問いへの直接の回答、全体の見立ての説明を含む。理解の成立や名称の採用は宣言しない。対象の同定、候補や呼び名の採否、理解の可否の表明が求められ、材料が足りなければ受け止めるだけで済ませない。確かめるならconfirmかrepair、判断を保留するならhold_openを選ぶ。未確認、言い方の違い、候補が複数あることだけでは確認や保留の理由にならない。" +
-    "合意や解決の後、相手が新しい図形へ進む場合の受け止めも含める。" + ACCEPT_DIRECT_ANSWER_V3 + ACCEPT_BACKCHANNEL_V3 + HOLISTIC_ACCEPT_V3,
+  accept: ISSUE_ACCEPT_BASE + ACCEPT_DIRECT_ANSWER_V3 + ACCEPT_BACKCHANNEL_V3 + HOLISTIC_ACCEPT_V3,
   hold_open: "相手の今回の提示が、対象の同定、候補や呼び名の採否、理解の可否について応答を求める位置にあり、自分の観察メモと公開対話だけでは材料が足りず、受け入れも、食い違いの指摘も、確認の依頼も確定できないときに選ぶ。提示に暫定的に反応して同じ問題の判断を保留し、相手が自分から補足できる状態を保つ。説明の途中の相槌、問いへの直接の回答、採用の表明、直接の聞き返しとは区別する。自分の観察と明確に食い違うとき、自分の画像を見直せば解けるとき、十分に共有できているときは選ばない。同じ問題で保留を重ねても補足が得られないときは、confirm、repair、carry_over、consultを検討する。別の対象や論点へは移らない。",
   carry_over: "いま扱う問題が未解決で、処理が停滞しているか困難であり、修復を続けるより進めることに利点があるとき、その問題を未解決のまま残し、別の図形、同じ図形の別の論点、または以前の未解決の問題へ処理を移す。移った先で何をするかにかかわらず、自分から処理を移すときはこの行動を選ぶ。合意・解決後の通常の進行、相手が移した先への応答、以前の問題そのものを解決するためのrevisitとは区別する。問題の解決を諦めない。残りの図形の数や回数だけで決めず、有効な修復の手がかりと再開の見込みを考える。今回の人が移行やいまの問題をいったん置くことを明示的に主導したときは、命名や同定の解決を前提とせずcarry_overで受け止める。",
   revisit: "以前に未解決のまま残した問題そのものを解決するため、明示的に取り上げ直す。いまの未解決の問題を切り上げて進むために以前の問題へ移るならcarry_overを選ぶ。以前に共有できた対象を説明の手がかりに使うだけなら選ばない。十分に共有できていて命名に進めるとき、話を延ばすためには選ばない。",
