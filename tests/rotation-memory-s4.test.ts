@@ -1,7 +1,7 @@
 // S4 and the pre-made rotation memory: a record whose requests carry a `rotation` memory is verified against the independent table in
 // diagnostics/parity-verify/turned-view-records.ts (the legends, the layers, the sentences each call adds, the name candidates), never against the runtime.
 // The records come from the real runtime and the offline replay (buildRecords); no key, network or study data.
-//   1. S4 passes them: four scenes, both strategies, the three stimulus rotation modes, 3/4/6 figures, a memo that lacks one figure's memory.
+//   1. S4 passes them: five scenes (an answer, a check, a check whose draft is regenerated, a name proposal, a second look), both strategies, the three stimulus rotation modes, 3/4/6 figures, a memo that lacks one figure's memory.
 //   2. A text or a layer line that says one character differently makes only the replay check disagree (mutateRecord rewrites it everywhere it is recorded and carries every hash through).
 //   3. The table does not drift from the runtime it copies: every text, the six generation replacements and the layers of all 120 (figure, current rotation) projections.
 //   4. The name candidates rule, and a record of an earlier version that carries the memory.
@@ -67,11 +67,11 @@ const finalTurn = (scene: Scene, check: Check, anchorId: string) => {
   return {
     accept: { human: 'もう一度さっきの図形に戻って特徴を教えてください。', plan: { ...base, action: 'accept', target: 'figure_0', speech: draft('さっきの図形ですね。', check, true) } },
     confirm: { human: 'もう一度さっきの図形に戻って特徴を教えてください。', plan: { ...base, action: 'confirm', target: 'figure_0', speech: draft('もう一つ特徴を確かめさせてください。', check) } },
-    // A name proposal is not a visual answer: its draft is plain text and the AI's own claims are an array even when the checks are on.
     // The first draft moves the topic, so the draft is regenerated: the retry message restates the whole action message (the observation sources line included).
     confirm_regenerated: { human: '細い部分はどうつながっていますか？', plan: { ...base, action: 'confirm', target: 'figure_0',
       drafts: [draft('この図形をいったん置いて、次のを見よう。', check), draft('もう一つ特徴を確かめさせてください。', check)],
       choose: (key: string, _criteria: unknown, { generationCalls }: { generationCalls: number }) => key === 'draft_topic_shift' ? generationCalls === 1 ? 'unsupported_shift' : 'within_plan' : choose(key) } },
+    // A name proposal is not a visual answer: its draft is plain text and the AI's own claims are an array even when the checks are on.
     propose_name: { human, plan: { ...base, action: 'propose_name', target: 'figure_0', name: firstName, speech: firstNameDraft(), aiExtraction: '[]', act: 'construe',
       extraction: JSON.stringify([{ segmentId: 'shape', quote: human, targets: [anchorId], aspect: 'construal', proposition: human, name: null, linkedIssueId: null, respondsToTurn: null }]),
       choose: (key: string) => key === 'draft_naming' ? 'propose_chosen' : choose(key) } },
@@ -110,7 +110,7 @@ test('a memo that lacks one own figure (the bundle does not know it) keeps that 
 });
 
 // ---- 2. One character of what the memory adds ----
-/** The texts of the table, with the scenes whose requests carry them (a text can be tried in any record that holds it). */
+/** The texts of the table. Each is tried in every record of MUTATION_RECORDS that holds it. */
 const TEXTS: [string, string][] = [
   ['nouns legend', table.ROTATION_LEGEND_NOUNS], ['roles legend', table.ROTATION_LEGEND_ROLES], ['common sentence', table.COMMON_DIFFERENT_CONSTRUAL_ROTATION],
   ['match use', table.ROTATION_MATCH_USE], ['accept answer', table.ROTATION_ACCEPT_ANSWER], ['accept backchannel', table.ROTATION_ACCEPT_BACKCHANNEL],
