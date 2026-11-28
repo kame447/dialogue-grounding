@@ -124,7 +124,9 @@ test('only a valid same-origin form requests preparation once and redirects', as
   assert.equal(response.status, 303); assert.equal(response.headers.get('Location'), '/admin/reception-settings');
   assert.deepEqual(f.calls, [{ op: 'prepare', input: { expectedProtocolRevision: 2 } }]);
   for (const [name, value] of Object.entries(ADMIN_HEADERS)) assert.equal(response.headers.get(name), value);
-  for (const headers of [{ Origin: 'https://evil.test' }, { Origin: '' }, { Origin: 'null', 'Sec-Fetch-Site': 'cross-site' }, { Origin: ORIGIN, 'Sec-Fetch-Site': 'cross-site' }]) {
+  const invalidOrigins: Record<string, string>[] = [{ Origin: 'https://evil.test' }, { Origin: '' },
+    { Origin: 'null', 'Sec-Fetch-Site': 'cross-site' }, { Origin: ORIGIN, 'Sec-Fetch-Site': 'cross-site' }];
+  for (const headers of invalidOrigins) {
     const g = fixture(); assert.equal((await handleAdmin(post(undefined, headers), g.deps)).status, 403); assert.deepEqual(g.calls, []);
   }
   for (const method of ['PUT', 'DELETE', 'OPTIONS']) {
