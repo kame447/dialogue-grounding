@@ -476,14 +476,22 @@ export async function handleAdmin(request: Request, deps: AdminDeps): Promise<Re
     try {
       // Version first, then content: a change in between makes the next version check differ, so none is missed.
       const since = new Date().toISOString();
+      const started = performance.now();
       let version: string | null = null;
       if (deps.receptions.version) { try { version = (await deps.receptions.version(null)).version; } catch { version = null; } }
-      const protocol = await deps.receptions.protocol();
-      const page = await deps.receptions.listPage(url.searchParams.get('after'));
+      const versionMs = performance.now() - started;
+      const [protocol, page] = await Promise.all([
+        deps.receptions.protocol(), deps.receptions.listPage(url.searchParams.get('after')),
+      ]);
+      const listMs = performance.now() - started - versionMs;
+      if (page.unavailableCount && !wantsHtml(request)) return receptionError(503, 'reception_unavailable');
       // An unreadable version still starts the live list: an empty version differs from the first good one,
       // so the page is fetched again as soon as the version can be read.
       const live = deps.receptions.version ? { version: version !== null && /^[a-f0-9]{64}$/u.test(version) ? version : '', since } : null;
-      return respond(200, renderReceptions(page.items, page.next, protocol, live, Boolean(deps.receptions.forceEnd)), undefined, live ? { 'Content-Security-Policy': LIVE_CSP } : {});
+      return respond(200, renderReceptions(page.items, page.next, protocol, live, Boolean(deps.receptions.forceEnd), page.unavailableCount ?? 0), undefined, {
+        ...(live ? { 'Content-Security-Policy': LIVE_CSP } : {}),
+        'Server-Timing': `version;dur=${versionMs.toFixed(1)}, reception-list;dur=${listMs.toFixed(1)}`,
+      });
     } catch { return receptionFailure(request, '受付一覧', 503, 'reception_unavailable'); }
   }
   if (deps.receptions?.version && url.pathname === '/admin/receptions/version') {
@@ -565,7 +573,10 @@ export async function handleAdmin(request: Request, deps: AdminDeps): Promise<Re
   }
   if (url.pathname === "/admin/log-live.js") return respond(200, LOG_LIVE_JS, "text/javascript; charset=utf-8");
   if (url.pathname === "/admin/style.css") return respond(200, ADMIN_CSS, "text/css; charset=utf-8");
-  if (url.pathname === "/admin/figures") return respond(200, renderFigures());
+  if (url.pathname === "/admin/figures") {
+    try { return respond(200, renderFigures(await deps.receptionSettings?.figurePresets?.list())); }
+    catch { return respond(503, renderMessage('図形一覧', '図形プリセットを読み込めませんでした。')); }
+  }
   if (url.pathname === "/admin" || url.pathname === "/admin/") {
     const filter = parseFilter(url.searchParams);
     const page = await deps.listPage(url.searchParams.get("after"));

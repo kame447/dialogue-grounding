@@ -5,6 +5,7 @@ import { createNamingTaskV2 } from "../../../dialogue-model/runtime/v2/naming-ta
 import { createGroundingJudgeClient } from "../../../dialogue-model/runtime/grounding/client.ts";
 import { INITIAL_OBSERVATION_STRUCTURED_V2 } from "../../../dialogue-model/runtime/observation/initial-observation-generation.ts";
 import { workerTerraInitialKey, validateWorkerTerraCacheEntry } from "../../../dialogue-model/runtime/observation/worker-terra-observer.ts";
+import { allRecordedTrialsDeleted } from './reception-visibility.ts';
 import { NamingTaskError } from "../../../dialogue-model/runtime/naming-error.mjs";
 import { sessionCookie, sessionId } from "./session-cookie.ts";
 import { isExcessiveTraffic, type SoftLimitBindings } from "./soft-limits";
@@ -215,8 +216,8 @@ export class TangramSession extends DurableObject<Env> {
     return s.protocol;
   }
   /** Classified from stored state only: a reception owner stays one even when the global mode is off. */
-  private async ownerKind(): Promise<OwnerKind> {
-    if (await this.readReception()) return 'reception';
+  private async ownerKind(reception?: Reception | null): Promise<OwnerKind> {
+    if (reception === undefined ? await this.readReception() : reception) return 'reception';
     const raw = await this.storage.get<BaseOwnerState>('base:owner:v1');
     if (!raw) return await this.storage.get(ACTIVE_KEY) ? 'legacy_active' : 'absent';
     return readOwner(raw, this.ctx.id.toString()).activeKey === null ? 'unused' : 'legacy';
@@ -260,6 +261,18 @@ export class TangramSession extends DurableObject<Env> {
   }
   /** Researcher-only RPCs. The management adapter supplies authorization. */
   async adminReception(): Promise<Reception | null> { return this.readReception(); }
+  /** One list-specific RPC: authoritative reception, deletion markers and recovery
+   * eligibility; never restores dialogue, calls a model, or writes storage. */
+  async adminReceptionListState() {
+    const reception = await this.adminReception();
+    if (!reception) return null;
+    const ids = reception.trials.flatMap(trial => trial.recordId === null ? [] : [trial.recordId]);
+    const [deletedRecordIds, recoverableUnrecordedAdmission] = await Promise.all([
+      ids.length ? this.adminDeletedRecordIds(ids) : Promise.resolve([]),
+      this.hasRecoverableUnrecordedAdmission(reception).catch(() => true),
+    ]);
+    return { reception, deletedRecordIds, recoverableUnrecordedAdmission };
+  }
   async adminFailedStartUsage(receptionId: string): Promise<ReceptionFailedStartUsage | null> {
     return this.storage.transaction(async tx => {
       const rawReception = await tx.get('reception:v1');
@@ -681,6 +694,25 @@ export class TangramSession extends DurableObject<Env> {
     return questionnaire ? { ...record, questionnaire } : record;
   }
 
+  // A null trial slot is not a stored log. Keep it visible only while its
+  // admission can still produce a record, or while its state is uncertain.
+  private async hasRecoverableUnrecordedAdmission(reception: Reception): Promise<boolean> {
+    if (reception.status !== 'in_progress' || !reception.trials.some(t => t.recordId === null)) return false;
+    const raw = await this.storage.get<BaseOwnerState>('base:owner:v1');
+    if (!raw) return true;
+    const owner = readOwner(raw, this.ctx.id.toString());
+    const entry = owner.activeKey && owner.admissions[owner.activeKey];
+    if (!entry || entry.assignment.source.kind === 'server_config_v1') return true;
+    const source = entry.assignment.source;
+    if (source.receptionId !== reception.receptionId || reception.trials[source.trialIndex]?.recordId !== null) return true;
+    return needsAssignmentPreparation(entry);
+  }
+
+  async adminHasRecoverableUnrecordedAdmission(receptionId: string): Promise<boolean> {
+    const reception = await this.readReception();
+    return !reception || reception.receptionId !== receptionId || await this.hasRecoverableUnrecordedAdmission(reception);
+  }
+
   async adminDeletedRecordIds(recordIds: string[]): Promise<string[]> {
     const deleted = new Set(await this.storage.get<string[]>('tombstones'));
     return recordIds.filter(id => deleted.has(id));
@@ -986,7 +1018,7 @@ export class TangramSession extends DurableObject<Env> {
   }
 
   /** Read only history metadata, leaving dialogue restoration and model calls to explicit routes. */
-  async tabHistorySummary(sessionId: string, createdAt: string | null, protocolAvailable: boolean): Promise<BrowserSessionSummary | null> {
+  async tabHistorySummary(sessionId: string, createdAt: string | null, protocolAvailable: boolean): Promise<BrowserSessionSummary | { deletedReception: true } | null> {
     await this.initialize();
     let reception: Reception | null = null, receptionUnreadable = false;
     try { reception = await this.readReception(); }
@@ -994,23 +1026,18 @@ export class TangramSession extends DurableObject<Env> {
       if (!(error instanceof ReceptionError)) throw error;
       receptionUnreadable = true;
     }
-    const [active, ids] = await Promise.all([this.storage.get<StoredTrial>(ACTIVE_KEY), ledgerIds(this.storage)]);
-    const records = [];
-    // Project each record immediately; do not retain large dialogue snapshots.
-    for (let offset = 0; offset < ids.length; offset += 4) {
-      const batch = await Promise.all(ids.slice(offset, offset + 4).map(async id => {
-        const [record, questionnaire] = await Promise.all([
-          this.readOwnedArchive(id), readQuestionnaire<Questionnaire>(this.storage, id),
-        ]);
-        return record ? { entry: recordListEntry(record, id === active?.recordId, questionnaire), questionnaireUpdatedAt: questionnaire?.updatedAt } : null;
-      }));
-      for (const record of batch) if (record) records.push(record);
+    if (reception?.trials.some(t => t.recordId !== null)) {
+      const deleted = new Set(await this.storage.get<string[]>('tombstones') ?? []);
+      if (allRecordedTrialsDeleted(reception.trials, id => deleted.has(id)) &&
+          !await this.hasRecoverableUnrecordedAdmission(reception)) return { deletedReception: true };
     }
+    const [active, ids] = await Promise.all([this.storage.get<StoredTrial>(ACTIVE_KEY), ledgerIds(this.storage)]);
+    const records = await this.readRecordList(active?.recordId, ids);
     return summarizeBrowserSession({ sessionId, createdAt, reception, receptionUnreadable, protocolAvailable,
       activeRecordId: active?.recordId ?? null, records });
   }
 
-  async browserHistory(): Promise<{ receptionMode: ReceptionMode; sessions: BrowserSessionSummary[] }> {
+  async browserHistory(): Promise<{ receptionMode: ReceptionMode; sessions: BrowserSessionSummary[]; hadDeletedReception?: true }> {
     const [settings, entries] = await Promise.all([this.settings().catch(() => null), this.browserSessions()]);
     const protocolAvailable = Boolean(settings?.protocol);
     const results = await Promise.all([
@@ -1018,15 +1045,19 @@ export class TangramSession extends DurableObject<Env> {
       ...entries.map(({ sessionId, doName, createdAt }) =>
         this.tabObject(doName).tabHistorySummary(sessionId, createdAt, protocolAvailable)),
     ]);
-    const summaries = results.filter((summary): summary is BrowserSessionSummary => summary !== null);
+    const summaries = results.filter((summary): summary is BrowserSessionSummary => summary !== null && !('deletedReception' in summary));
     return { receptionMode: settings ? receptionOpen(settings.mode) ? 'on' : 'off' : 'unavailable',
-      sessions: sortBrowserSessions(summaries) };
+      sessions: sortBrowserSessions(summaries),
+      // A browser with deleted history is not a first-time visitor. No IDs or
+      // removed record content are returned, only this owned-history flag.
+      ...(results.some(summary => summary !== null && 'deletedReception' in summary) ? { hadDeletedReception: true } : {}) };
   }
   private async baseReadRecord(id: string): Promise<BaseRecord|null> {
     if (!RECORD_ID.test(id)) return null;
-    const tombstones = await this.storage.get<string[]>('tombstones') ?? [];
-    const ledger = await this.storage.get<Record<string,number>>('ledger') ?? {};
-    if (tombstones.includes(id) || !Object.hasOwn(ledger,id)) return null;
+    const [tombstones, ledger] = await Promise.all([
+      this.storage.get<string[]>('tombstones'), this.storage.get<Record<string,number>>('ledger'),
+    ]);
+    if ((tombstones ?? []).includes(id) || !Object.hasOwn(ledger ?? {}, id)) return null;
     return await this.readOwnedArchive(id) as BaseRecord | null;
   }
   private assignmentSession(): BaseSession {
@@ -1311,15 +1342,26 @@ export class TangramSession extends DurableObject<Env> {
     }) as unknown as Parameters<typeof createNamingTaskV2>[0]) as NamingTask;
   }
 
+  /** The history and record-list APIs use the same bounded, owner-validated
+   * projection; no record content is cached or returned. */
+  private async readRecordList(active: unknown, ids?: string[]) {
+    ids ??= await ledgerIds(this.storage);
+    const records = [];
+    for (let offset = 0; offset < ids.length; offset += 4) {
+      const batch = await Promise.all(ids.slice(offset, offset + 4).map(async id => {
+        const [record, questionnaire] = await Promise.all([
+          this.readOwnedArchive(id), readQuestionnaire<Questionnaire>(this.storage, id),
+        ]);
+        return record ? { entry: recordListEntry(record, id === active, questionnaire), questionnaireUpdatedAt: questionnaire?.updatedAt } : null;
+      }));
+      for (const record of batch) if (record) records.push(record);
+    }
+    return records;
+  }
+
   /** This browser's trials: exactly the records in this session object's own storage. */
   private async ownRecords() {
-    const active = this.trial?.getState().sessionId;
-    const entries = [];
-    for (const id of await ledgerIds(this.storage)) {
-      const record = await this.readOwnedArchive(id);
-      if (record) entries.push(recordListEntry(record, id === active, await readQuestionnaire(this.storage, id)));
-    }
-    return sortRecordList(entries);
+    return sortRecordList((await this.readRecordList(this.trial?.getState().sessionId)).map(record => record.entry));
   }
 
   /**
@@ -1374,15 +1416,17 @@ export class TangramSession extends DurableObject<Env> {
     const interrupted = await this.interruptedState();
     if (interrupted) return interrupted;
     const state = await this.state(starting, startIntentId);
-    const kind = await this.ownerKind();
+    const r = await this.readReception();
+    const kind = await this.ownerKind(r);
     if (kind === 'unused') {
       // Only a browser that has nothing yet depends on the global mode; reasons are never shown.
       let open: boolean;
       try { open = receptionOpen((await this.settings()).mode); } catch { return { ...state as object, reception:{ number:null, status:'unavailable', revision:0 } }; }
       return open ? { ...state as object, reception:{ number:null, status:'waiting', revision:0 } } : state;
     }
-    if (kind !== 'reception') return state;
-    const r = (await this.readReception())!;
+    if (kind !== 'reception' || !r) return state;
+    // This read may see a termination committed while the live state was read.
+    if (r.status === 'interrupted') return { trial: null, busy: false, hideStrategy: true, interrupted: true, reception: participantReception(r) };
     // Settings are read only when a start is possible; an existing trial never depends on them.
     const last = r.status === 'in_progress' ? r.trials.at(-1) : undefined;
     const next = last?.recordId && r.plan && r.trials.length < r.plan.trials.length && (await this.baseReadRecord(last.recordId))?.status === 'completed';
@@ -1505,8 +1549,15 @@ export default {
         token: index ? env.ADMIN_TOKEN : undefined,
         limiter: env.ADMIN_RATE_LIMIT,
         receptions: index ? createReceptionAdminPort({
-          index,
-          readSettings:() => index.readReceptionSettings(),
+          // DO RPC stubs can become unusable after an exception. A failed
+          // version probe must not poison the subsequent list or settings read.
+          index: {
+            listReceptions: () => env.ADMIN_INDEX!.get(env.ADMIN_INDEX!.idFromName(ADMIN_INDEX_NAME)).listReceptions(),
+            getReception: id => env.ADMIN_INDEX!.get(env.ADMIN_INDEX!.idFromName(ADMIN_INDEX_NAME)).getReception(id),
+            recordRoles: (ids, deleted) => env.ADMIN_INDEX!.get(env.ADMIN_INDEX!.idFromName(ADMIN_INDEX_NAME)).recordRoles(ids, deleted),
+            participantRoleRevision: () => env.ADMIN_INDEX!.get(env.ADMIN_INDEX!.idFromName(ADMIN_INDEX_NAME)).participantRoleRevision(),
+          },
+          readSettings:() => env.ADMIN_INDEX!.get(env.ADMIN_INDEX!.idFromName(ADMIN_INDEX_NAME)).readReceptionSettings(),
           owner,
         }) : undefined,
         receptionSettings: index ? createReceptionSettingsPort(index) : undefined,
@@ -1633,7 +1684,10 @@ export default {
         }
         const object = env.NAMING_SESSIONS.get(target);
         const forwardHeaders = new Headers(request.headers);forwardHeaders.delete('Authorization');forwardHeaders.delete('Cookie');
-        result = await object.fetch(new Request(`https://session.internal${url.pathname}${url.search}`,{method:request.method,headers:forwardHeaders,body:['GET','HEAD'].includes(request.method)?null:request.body}));
+        // The object never reads the body of /api/reception. A forwarded body stream left unread is read after the response has been sent
+        // (workerd: "Can't read from request stream after response has been sent"), so it is not forwarded.
+        const forwardBody = !['GET','HEAD'].includes(request.method) && url.pathname !== '/api/reception';
+        result = await object.fetch(new Request(`https://session.internal${url.pathname}${url.search}`,{method:request.method,headers:forwardHeaders,body:forwardBody?request.body:null}));
       } else {
         if (!['/','/index.html','/app.js','/style.css','/tab-session.js'].includes(url.pathname) || request.method !== 'GET') return withHeaders(json(404,{error:'not_found'}));
         if (url.pathname === '/' || url.pathname === '/index.html') {

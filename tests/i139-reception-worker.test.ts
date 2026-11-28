@@ -712,19 +712,30 @@ test('deleting trial logs removes their reception links and hides the row once a
   };
   const version = async () => (await h.edge(adminRequest(path + '/version'))).json();
   const deleteLog = (id: string) => h.edge(endRequest('/admin/record/' + id + '/delete', { confirm: id }));
+  const browserHistory = async (ownerCookie = cookie) => {
+    const response = await h.edge(req('/api/sessions', undefined, ownerCookie));
+    assert.equal(response.status, 200);
+    return (await response.json()).sessions;
+  };
   const before = await list(), beforeVersion = await version();
+  assert.equal((await browserHistory()).length, 1);
   assert.ok(before.includes(r.receptionId) && before.includes(first) && before.includes(second));
   assert.ok(before.includes(pending.receptionId));
   assert.equal((await deleteLog(first)).status, 303);
   const partial = await list(), partialVersion = await version();
   assert.ok(partial.includes(r.receptionId) && partial.includes(second));
   assert.ok(!partial.includes(first) && !partial.includes('削除済み'));
+  assert.deepEqual((await browserHistory())[0].records.map((record: any) => record.recordId), [second]);
   assert.notDeepEqual(partialVersion, beforeVersion);
   assert.ok(partial.includes(pending.receptionId));
   assert.equal((await deleteLog(second)).status, 303);
   const after = await list();
   assert.ok(!after.includes(r.receptionId) && !after.includes(first) && !after.includes(second));
   assert.ok(after.includes(pending.receptionId));
+  assert.deepEqual(await browserHistory(), []);
+  assert.equal((await (await h.edge(req('/api/sessions', undefined, cookie))).json()).hadDeletedReception, true);
+  assert.equal((await (await h.edge(req('/api/sessions', undefined, other))).json()).hadDeletedReception, undefined);
+  assert.equal((await browserHistory(other)).length, 1);
   assert.notDeepEqual(await version(), partialVersion);
   // Persisted admission identity and deletion audit remain; no other trial is deleted.
   assert.deepEqual(reception(h, cookie).trials.map((t: any) => t.recordId), [first, second]);
@@ -733,6 +744,7 @@ test('deleting trial logs removes their reception links and hides the row once a
   assert.equal((await h.index.audit()).length, 2);
   h.evict(); h.evictIndex();
   assert.ok(!(await list()).includes(r.receptionId));
+  assert.deepEqual(await browserHistory(), []);
   await h.done();
 });
 
@@ -746,8 +758,38 @@ test('already deleted trial hides its reception even when the global index remov
   assert.equal(await h.object(cookie).adminDelete(id), true);
   assert.ok(await h.index.get(id), 'index removal has not happened');
   assert.ok(!(await list()).includes(r.receptionId));
+  assert.deepEqual((await (await h.edge(req('/api/sessions', undefined, cookie))).json()).sessions, []);
   const retry = await start(h, cookie);
   assert.equal(retry.status, 401, 'deleted admission has expired and cannot start again');
   assert.deepEqual(await retry.json(), { error: 'session_required' });
+  await h.done();
+});
+
+
+test('a terminal unrecorded slot does not retain a reception after all real logs were deleted', async () => {
+  const h = harness(roleEnv), cookie = await h.browser(), r = await approved(h, cookie);
+  const first = (await (await start(h, cookie)).json()).trial.sessionId;
+  await h.tasks.get(first).complete(); await h.done();
+  await indexSyntheticTrial(h, cookie, first);
+  h.object(cookie).createTrial = async () => { throw Error('synthetic second admission failure'); };
+  assert.equal((await start(h, cookie, { expectedRecordId: first })).status, 409);
+  const saved = reception(h, cookie);
+  assert.deepEqual(saved.trials.map((t: any) => t.recordId), [first, null]);
+  const list = async () => (await h.edge(adminRequest('/admin/receptions'))).text();
+  const history = async () => (await (await h.edge(req('/api/sessions', undefined, cookie))).json()).sessions;
+  assert.equal((await h.edge(endRequest('/admin/record/' + first + '/delete', { confirm: first }))).status, 303);
+  // A recoverable admission is not a deleted experiment. Retain it until ended.
+  assert.ok((await list()).includes(r.receptionId));
+  assert.equal((await history()).length, 1);
+  assert.equal((await h.edge(endRequest('/admin/reception/' + r.receptionId + '/force-end',
+    { confirm: saved.number, expectedRevision: String(saved.revision) }))).status, 303);
+  await h.done();
+  assert.ok(!(await list()).includes(r.receptionId));
+  assert.deepEqual(await history(), []);
+  assert.deepEqual(reception(h, cookie).trials.map((t: any) => t.recordId), [first, null]);
+  assert.equal((await h.index.audit()).length, 1);
+  h.evict(); h.evictIndex();
+  assert.ok(!(await list()).includes(r.receptionId));
+  assert.deepEqual(await history(), []);
   await h.done();
 });

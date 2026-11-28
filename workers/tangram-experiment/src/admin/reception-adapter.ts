@@ -1,3 +1,4 @@
+import { allRecordedTrialsDeleted } from '../reception-visibility.ts';
 import { PARTICIPANT_PRODUCTION_PROFILE } from '../../../../dialogue-model/runtime/web/participant-usage-policy.ts';
 import { ReceptionError, validateReception, effectiveRotationMode, effectiveBetweenTrials, effectiveFigureSelection } from '../../../../dialogue-model/runtime/v2/reception.ts';
 import { usesThreeFigures, validateReceptionSettings } from './reception-settings.ts';
@@ -8,13 +9,16 @@ import { OBJECT_ID, RECORD_ID } from './summary.ts';
 import { participantRoleView } from './participant-role.ts';
 import type { ParticipantRole, ParticipantRoleResult } from './participant-role.ts';
 
+type ReceptionListState = { reception: Reception; deletedRecordIds: string[]; recoverableUnrecordedAdmission: boolean };
 type Owner = {
   adminReception(): Promise<Reception | null>;
+  adminReceptionListState?(): Promise<ReceptionListState | null>;
   adminFailedStartUsage?(receptionId: string): Promise<ReceptionFailedStartUsage | null>;
   adminApproveReception(input: { expectedRevision: number; order: number; protocol: DisplayedProtocol }): Promise<Reception>;
   adminCancelReception(input: { expectedRevision: number }): Promise<Reception>;
   adminForceEndReception?(id: string, expectedRevision: number): Promise<void>;
   adminDeletedRecordIds?(recordIds: string[]): Promise<string[]>;
+  adminHasRecoverableUnrecordedAdmission?(receptionId: string): Promise<boolean>;
   adminSetReceptionParticipantRole?(id: string, role: ParticipantRole, expectedRecordIds: string[] | null): Promise<ParticipantRoleResult>;
 };
 type Index = {
@@ -25,6 +29,32 @@ type Index = {
 };
 type Options = { index: Index; owner(objectId: string): Owner | null; readSettings(): Promise<unknown> };
 const PAGE_SIZE = 100;
+const OWNER_READ_CONCURRENCY = 4;
+
+/** Bound concurrent cross-object reads and preserve index order, without waiting
+ * for the slowest member of a batch before starting another independent read. */
+async function mapOwnerReads<T, R>(items: readonly T[], read: (item: T) => Promise<R>): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let cursor = 0;
+  await Promise.all(Array.from({ length: Math.min(OWNER_READ_CONCURRENCY, items.length) }, async () => {
+    while (cursor < items.length) {
+      const index = cursor++;
+      results[index] = await read(items[index]);
+    }
+  }));
+  return results;
+}
+
+/** Detach plain RPC data and promptly release the response capability. */
+function snapshotRpc<T>(value: T): T {
+  try { return structuredClone(value); }
+  finally {
+    if (value !== null && typeof value === 'object') {
+      const dispose = (value as { [Symbol.dispose]?: () => void })[Symbol.dispose];
+      if (typeof dispose === 'function') dispose.call(value);
+    }
+  }
+}
 
 /** Management values always come from the owning DO, never from index extras. */
 function project(r: Reception): ReceptionAdminRow {
@@ -52,16 +82,22 @@ function failure(error: unknown): ReceptionAdminResult {
   }
 }
 export function createReceptionAdminPort(options: Options): ReceptionAdminPort {
-  async function resolve(summary: ReceptionSummary | null, requestedId: string) {
+  async function resolve(summary: ReceptionSummary | null, requestedId: string, forList = false) {
     if (!summary || !RECORD_ID.test(requestedId) || summary.receptionId !== requestedId || !OBJECT_ID.test(summary.objectId)) return null;
     const owner = options.owner(summary.objectId);
     if (!owner) return null;
-    const raw = await owner.adminReception();
+    const listState = forList && owner.adminReceptionListState
+      ? snapshotRpc(await owner.adminReceptionListState()) : undefined;
+    if (listState === null) return null;
+    const raw = listState === undefined ? await owner.adminReception() : listState.reception;
     if (raw === null) return null;
     // workerd adds a non-enumerable Symbol.dispose to RPC results; keep only the structured data, then validate it as before.
-    const reception = validateReception(structuredClone(raw));
+    const reception = validateReception(listState === undefined ? snapshotRpc(raw) : raw);
     if (reception.receptionId !== requestedId || reception.objectId !== summary.objectId) return null;
-    return { owner, reception };
+    if (listState && (!Array.isArray(listState.deletedRecordIds) ||
+        listState.deletedRecordIds.some(id => !reception.trials.some(trial => trial.recordId === id)) ||
+        typeof listState.recoverableUnrecordedAdmission !== 'boolean')) throw new ReceptionError('reception_unavailable');
+    return { owner, reception, listState };
   }
   async function lookup(id: string) {
     return RECORD_ID.test(id) ? resolve(await options.index.getReception(id),id) : null;
@@ -77,7 +113,7 @@ export function createReceptionAdminPort(options: Options): ReceptionAdminPort {
   return {
     async protocol() {
       // Transport attributes (workerd's Symbol.dispose) are dropped before strict validation; damage throws.
-      const s = validateReceptionSettings(structuredClone(await options.readSettings()));
+      const s = validateReceptionSettings(snapshotRpc(await options.readSettings()));
       if (!s.protocol) return { configured:false, mode:s.mode.value };
       const p = s.protocol.protocol;
       return { configured:true, mode:s.mode.value, protocolId:p.protocolId, revision:s.protocol.revision, sha256:s.protocol.sha256,
@@ -86,29 +122,52 @@ export function createReceptionAdminPort(options: Options): ReceptionAdminPort {
         ...(usesThreeFigures(p) ? {} : { legacyFigures:true as const }) };
     },
     async listPage(after) {
-      const summaries = await options.index.listReceptions();
+      const summaries = snapshotRpc(await options.index.listReceptions());
       const position = after ? summaries.findIndex(r => r.receptionId === after) : -1;
-      const start = position + 1, page = summaries.slice(start,start+PAGE_SIZE), items: ReceptionAdminRow[] = [];
+      // Cancellation is terminal and can only occur before a trial exists.
+      // Skip indexed cancellations before pagination, keeping the index rows
+      // themselves so old cursors and reception identities remain valid.
+      const remaining = summaries.slice(position + 1).filter(row => row.status !== 'cancelled');
+      const page = remaining.slice(0, PAGE_SIZE), items: ReceptionAdminRow[] = [];
       const seen = new Set<string>(), liveRecords: string[] = [];
-      for (const summary of page) {
-        if (seen.has(summary.receptionId)) continue;
-        const resolved = await resolve(summary,summary.receptionId);
-        if (!resolved) continue;
-        seen.add(resolved.reception.receptionId);
+      const sources = new Map<string, { owner: Owner; listState?: ReceptionListState }>();
+      async function readRow(summary: ReceptionSummary, fast: boolean) {
+        const resolved = await resolve(summary, summary.receptionId, fast);
+        // The owner may already be cancelled even if the index update failed.
+        if (!resolved || resolved.reception.status === 'cancelled') return null;
         const item = project(resolved.reception);
         if (options.index.recordRoles) {
           const ids = item.trials.flatMap(trial => trial.recordId === null ? [] : [trial.recordId]);
-          const deleted = new Set(ids.length ? await resolved.owner.adminDeletedRecordIds?.(ids) : []);
+          const deleted = new Set(resolved.listState?.deletedRecordIds ??
+            (ids.length ? snapshotRpc(await resolved.owner.adminDeletedRecordIds?.(ids)) : []));
           for (const trial of item.trials) {
-            if (trial.recordId === null) continue;
-            if (deleted.has(trial.recordId)) trial.recordDeleted = true;
-            else liveRecords.push(trial.recordId);
+            if (trial.recordId !== null && deleted.has(trial.recordId)) trial.recordDeleted = true;
           }
+        }
+        return { item, resolved };
+      }
+      let unavailableCount = 0;
+      const resolvedRows = await mapOwnerReads(page, async summary => {
+        try { return await readRow(summary, true); }
+        catch {
+          // A failed RPC stub is not reusable. resolve() obtains a fresh stub
+          // and the original narrow read path, with the same identity checks.
+          try { return await readRow(summary, false); }
+          catch { unavailableCount++; return null; }
+        }
+      });
+      for (const result of resolvedRows) {
+        if (!result || seen.has(result.item.receptionId)) continue;
+        const { item, resolved } = result;
+        seen.add(item.receptionId);
+        sources.set(item.receptionId, resolved);
+        if (options.index.recordRoles) for (const trial of item.trials) {
+          if (trial.recordId !== null && !trial.recordDeleted) liveRecords.push(trial.recordId);
         }
         items.push(item);
       }
       if (liveRecords.length && options.index.recordRoles) {
-        const roles = await options.index.recordRoles(liveRecords, true);
+        const roles = snapshotRpc(await options.index.recordRoles(liveRecords, true));
         for (const item of items) for (const trial of item.trials) {
           if (trial.recordId === null || trial.recordDeleted) continue;
           const role = roles[trial.recordId];
@@ -116,18 +175,33 @@ export function createReceptionAdminPort(options: Options): ReceptionAdminPort {
           else trial.participantRole = participantRoleView(role);
         }
       }
-      // A reception with only deleted trials is no longer an experiment to manage.
-      // Preserve the owning reception and its trial IDs for admission/retry safety;
-      // an unstarted reception or an unrecorded admission is not a deleted trial.
-      const visible = items.filter(item => !item.trials.length || item.trials.some(trial => !trial.recordDeleted));
-      return { items: visible, next:start+PAGE_SIZE < summaries.length ? page.at(-1)!.receptionId : null };
+      // Keep the durable reception, audit and admission identities. A terminal
+      // null slot does not keep an otherwise deleted reception in the list.
+      const visible: ReceptionAdminRow[] = [];
+      for (const item of items) {
+        const deleted = new Set(item.trials.filter(t => t.recordDeleted).map(t => t.recordId));
+        if (!allRecordedTrialsDeleted(item.trials, id => deleted.has(id))) {
+          visible.push(item);
+          continue;
+        }
+        if (item.status === 'in_progress' && item.trials.some(t => t.recordId === null)) {
+          const source = sources.get(item.receptionId);
+          // If a recovery is still possible or the owner cannot be consulted,
+          // keep the row rather than hiding an active participant.
+          const recoverable = source?.listState?.recoverableUnrecordedAdmission ??
+            await source?.owner.adminHasRecoverableUnrecordedAdmission?.(item.receptionId).catch(() => true);
+          if (recoverable !== false) visible.push(item);
+        }
+      }
+      return { items: visible, next:remaining.length > PAGE_SIZE ? page.at(-1)!.receptionId : null,
+        ...(unavailableCount ? { unavailableCount } : {}) };
     },
     async version(since) {
       // Change detection only: index rows and settings are hashed, never shown; management values still come from the owner.
       const [rows, settings, participantRoleRevision] = await Promise.all([
         options.index.listReceptions(), options.readSettings(), options.index.participantRoleRevision?.(),
       ]);
-      const s = validateReceptionSettings(structuredClone(settings)), list = structuredClone(rows);
+      const s = validateReceptionSettings(snapshotRpc(settings)), list = snapshotRpc(rows);
       if (!Array.isArray(list)) throw new Error('reception_unavailable');
       const material = JSON.stringify({ receptions: list.map(r => [r?.receptionId, r?.number, r?.status, r?.revision,
         Array.isArray(r?.trials) ? r.trials.map(t => t?.recordId ?? null) : null]),
@@ -138,11 +212,9 @@ export function createReceptionAdminPort(options: Options): ReceptionAdminPort {
       // (e.g. a cancellation) does not keep counting them.
       let newPending: number | null = null;
       if (since !== null) {
-        newPending = 0;
-        for (const row of list) {
-          if (row?.status !== 'pending' || typeof row?.createdAt !== 'string' || row.createdAt < since) continue;
-          if ((await resolve(row, row.receptionId))?.reception.status === 'pending') newPending++;
-        }
+        const candidates = list.filter(row => row?.status === 'pending' && typeof row?.createdAt === 'string' && row.createdAt >= since);
+        const confirmed = await mapOwnerReads(candidates, async row => (await resolve(row, row.receptionId))?.reception.status === 'pending');
+        newPending = confirmed.filter(Boolean).length;
       }
       return { version: [...digest].map(b => b.toString(16).padStart(2, '0')).join(''), newPending };
     },

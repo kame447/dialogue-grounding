@@ -8,6 +8,7 @@ import { summarizeLatency } from '../workers/tangram-experiment/src/admin/latenc
 import { renderSettings, renderReceptions, renderDetail, renderExperimentPreview, renderFigures } from '../workers/tangram-experiment/src/admin/render.ts';
 import { readSettings, saveProtocol, protocolHistory } from '../workers/tangram-experiment/src/admin/reception-settings.ts';
 import type { SettingsStorage } from '../workers/tangram-experiment/src/admin/reception-settings.ts';
+import type { FigurePreset, FigurePresetPort } from '../workers/tangram-experiment/src/admin/figure-presets.ts';
 import { validateReceptionProtocolV2, receptionProtocolSha256 } from '../dialogue-model/runtime/v2/reception.ts';
 import { createTrialV2, participantView } from '../dialogue-model/runtime/stimuli/scatter-v2.mjs';
 import { FIGURE_BANK, FIGURE_SETS, resolveFigureSelection } from '../dialogue-model/runtime/stimuli/figure-bank.ts';
@@ -52,6 +53,45 @@ test('figure catalogue page: authenticated, strict CSP, 30 figures and six candi
   assert.doesNotMatch(html, /<style|\sstyle=/u);
   assert.match(html, /予備検討用/u);
   assert.match(html, /<a href="\/admin\/figures" aria-current="page">図形一覧<\/a>/u);
+});
+
+// #280: new receptions offer three-figure presets only. The older four- and six-figure sets stay as a lookup for the set ids that
+// the reception list prints for receptions approved before, so they sit in their own closed block, never among the new presets.
+test('figure catalogue page: the three-figure presets for new receptions are listed apart from the older four- and six-figure sets in a closed block', async () => {
+  const presets: FigurePreset[] = [{ id: 'trio-01-v1', revision: 1, name: '3図形（F1–F3）', figureIds: ['F1', 'F2', 'F3'] },
+    { id: ID, revision: 2, name: '確認用 <b>', figureIds: ['F2', 'F11', 'F30'] }];
+  const presetPort = (list: () => Promise<FigurePreset[]>): FigurePresetPort => ({ list, async read() { return null; }, async save() { return { ok: true }; } });
+  const catalogue = (figurePresets?: FigurePresetPort) => {
+    const f = fixture();
+    if (figurePresets) f.deps.receptionSettings = { ...f.deps.receptionSettings!, figurePresets };
+    return handleAdmin(new Request(ORIGIN + '/admin/figures', { headers: auth }), f.deps);
+  };
+  const sections = (html: string) => new Map(html.split(/(?=<h2>)/u).slice(1).map(part => [part.match(/^<h2>([^<]*)<\/h2>/u)![1], part]));
+  const labels = (html: string) => [...html.matchAll(/aria-label="(F\d+)"/gu)].map(match => match[1]);
+  const titled = (section: string) => section.split('<h3>').slice(1).map(chunk => [chunk.slice(0, chunk.indexOf('</h3>')), labels(chunk)]);
+  const CURRENT = '新しい受付のプリセット（3図形）', OLD = '旧い受付の図形セット（4・6図形）';
+
+  const html = await (await catalogue(presetPort(async () => presets))).text(), parts = sections(html);
+  assert.deepEqual([...parts.keys()], ['全30図形', CURRENT, OLD], 'bank, then the presets new receptions offer, then the older sets');
+  const current = parts.get(CURRENT)!;
+  assert.deepEqual(titled(current), [['3図形（F1–F3）', ['F1', 'F2', 'F3']], ['確認用 &lt;b&gt;', ['F2', 'F11', 'F30']]]);
+  assert.match(current, /<a href="\/admin\/figure-presets">図形プリセットを管理<\/a>/u);
+  assert.doesNotMatch(current, /<details|legacy-v1|pilot-four-v1|bank-set-|<b>/u, 'no older set among the new presets');
+  const old = parts.get(OLD)!;
+  assert.match(old, /^<h2>[^<]*<\/h2>\s*<details class="diag"><summary>図形セット（6件）<\/summary>/u);
+  assert.equal((old.match(/<details/gu) ?? []).length, 1);
+  assert.doesNotMatch(old, /<details[^>]*\sopen/u, 'closed by default');
+  assert.deepEqual(titled(old), Object.entries(FIGURE_SETS).map(([id, ids]) => [id, [...ids]]), 'every older set is still listed, in full');
+  assert.ok(Object.values(FIGURE_SETS).every(ids => ids.length === 4 || ids.length === 6), 'the heading names the sizes of these sets');
+  assert.doesNotMatch(html.slice(0, html.indexOf(`<h2>${OLD}`)), /legacy-v1|pilot-four-v1|bank-set-/u, 'older set ids appear only under their own heading');
+
+  const empty = sections(await (await catalogue(presetPort(async () => []))).text()).get(CURRENT)!;
+  assert.match(empty, /表示中のプリセットはありません。/u); assert.deepEqual(labels(empty), []);
+  const unmanaged = await (await catalogue()).text();
+  assert.deepEqual([...sections(unmanaged).keys()], ['全30図形', OLD], 'without a preset port the page lists no new-reception section');
+  assert.doesNotMatch(unmanaged, /figure-presets/u);
+  const failed = await catalogue(presetPort(async () => { throw new Error('storage'); }));
+  assert.equal(failed.status, 503); assert.doesNotMatch(await failed.text(), /<svg|storage/u);
 });
 
 test('protocol form: each figure mode and policy is explicit, and the saved fields follow it', async () => {

@@ -332,7 +332,7 @@ const BETWEEN_LABELS: Record<string, string> = { none: '指定なし', questionn
 export type ReceptionLive = { version: string; since: string };
 
 export function renderReceptions(items: ReceptionAdminRow[], next: string | null, protocol: ReceptionProtocolStatus, live: ReceptionLive | null = null,
-  forceEnd = false): string {
+  forceEnd = false, unavailableCount = 0): string {
   const form = (entry: ReceptionAdminRow, action: 'approve' | 'cancel' | 'force-end') => {
     // No preselected order: the researcher chooses one, and the form carries the protocol version it was shown with.
     const choices = action === 'approve' && protocol.configured
@@ -377,12 +377,13 @@ ${td('試行記録', trialLinks ? `<div class="reception-trials">${trialLinks}</
 ${td('操作', `${entry.status === 'pending' && unstarted && approvable ? form(entry, 'approve') : ''}${cancel ? form(entry, 'cancel') : ''}${end}${open}${usage}`, ' class="ops"')}</tr>`;
   }).join('');
   const names = ['受付番号', '受付時刻', '状態', '条件順序', '図形セット', '回転', '試行の間', '試行記録', '操作'];
-  const list = `<div id="reception-list"${live ? ` data-version="${escapeHtml(live.version)}" data-since="${escapeHtml(live.since)}"` : ''}>
+  const list = `<div id="reception-list"${live ? ` data-version="${escapeHtml(live.version)}" data-since="${escapeHtml(live.since)}"` : ''}${unavailableCount ? ' data-incomplete="true"' : ''}>
 <div data-part="status">${protocol.configured ? `<p>プロトコル設定済み: ${escapeHtml(protocol.protocolId)} / revision ${escapeHtml(protocol.revision)}</p>`
     : '<p class="bad">プロトコルが未設定のため、許可できません（<a href="/admin/reception-settings">受付の設定</a>）</p>'}
 ${protocol.configured && protocol.legacyFigures ? '<p class="bad">現在の設定は3図形ではないため、許可できません（<a href="/admin/reception-settings">受付の設定</a>）</p>' : ''}
 ${protocol.mode === 'off' ? '<p>受付を使わない設定です。許可済みの受付は、計画どおり続けられます。</p>' : ''}</div>
-${items.length ? `<div class="wrap cards" data-part="table"><table><thead>${head(names)}</thead><tbody>${rows}</tbody></table></div>` : '<p data-part="empty">受付はありません</p>'}
+${unavailableCount ? `<p data-part="incomplete" class="bad" role="status">受付 ${escapeHtml(unavailableCount)} 件の情報を取得できませんでした。${live ? '自動で再確認します。' : ''}</p>` : ''}
+${items.length ? `<div class="wrap cards" data-part="table"><table><thead>${head(names)}</thead><tbody>${rows}</tbody></table></div>` : unavailableCount ? '' : '<p data-part="empty">受付はありません</p>'}
 ${next ? `<p data-part="more"><a href="/admin/receptions?${escapeHtml(new URLSearchParams({ after: next }).toString())}">次のページ →</a></p>` : ''}</div>`;
   return page('受付一覧', `${adminNav('/admin/receptions')}<h1>受付一覧</h1>
 ${live ? '<p id="reception-new" role="status" aria-live="polite"></p><p id="reception-sync" class="muted" role="status"></p>' : ''}
@@ -526,12 +527,22 @@ export function renderFigurePresetEditor(preset: FigurePreset | null): string {
 <p><button class="primary">保存</button></p></form>
 ${preset ? `<form method="post" action="${escapeHtml(action)}/hide">${revision}<button>プリセットを非表示</button></form>` : ''}`);
 }
-export function renderFigures(): string {
+/**
+ * Researcher catalogue. New receptions offer the managed three-figure presets only (#268), so they are listed on their own;
+ * the older four- and six-figure sets are kept apart and closed, because the reception list still prints their ids for
+ * receptions approved before. Without a preset port the presets section is left out, as on the settings page.
+ */
+export function renderFigures(presets?: readonly FigurePreset[]): string {
   const cell = (figure: BankFigure) => `<figure><div class="figure-art">${figureSvg(figure)}</div><figcaption>${escapeHtml(figure.id)}</figcaption></figure>`;
   const byId = new Map(FIGURE_BANK.map(f => [f.id, f]));
-  const sets = Object.entries(FIGURE_SETS).map(([id, ids]) => `<h3>${escapeHtml(id)}</h3><div class="figure-grid">${ids.map(fid => byId.get(fid)).filter((f): f is BankFigure => Boolean(f)).map(cell).join('')}</div>`).join('');
+  const grid = (ids: readonly string[]) => `<div class="figure-grid">${ids.map(id => byId.get(id)).filter((f): f is BankFigure => Boolean(f)).map(cell).join('')}</div>`;
+  const titled = (title: string, ids: readonly string[]) => `<h3>${escapeHtml(title)}</h3>${grid(ids)}`;
+  const current = presets === undefined ? '' : `<h2>新しい受付のプリセット（3図形）</h2>
+<p><a href="/admin/figure-presets">図形プリセットを管理</a></p>${presets.length ? presets.map(preset => titled(preset.name, preset.figureIds)).join('') : '<p>表示中のプリセットはありません。</p>'}`;
+  const legacy = Object.entries(FIGURE_SETS);
   return page('図形一覧', `${adminNav('/admin/figures')}<h1>図形一覧</h1>
-<p class="muted">候補バンク（${escapeHtml(FIGURE_BANK_VERSION)}）と候補セットは予備検討用です。実験条件への採用は研究者が判断します。</p>
-<h2>全${FIGURE_BANK.length}図形</h2><div class="figure-grid">${FIGURE_BANK.map(cell).join('')}</div>
-<h2>候補セット</h2>${sets}`);
+<p class="muted">候補バンク（${escapeHtml(FIGURE_BANK_VERSION)}）は予備検討用です。実験条件への採用は研究者が判断します。</p>
+<h2>全${FIGURE_BANK.length}図形</h2>${grid(FIGURE_BANK.map(f => f.id))}
+${current}
+<h2>旧い受付の図形セット（4・6図形）</h2>${fold(`図形セット（${legacy.length}件）`, legacy.map(([id, ids]) => titled(id, ids)).join(''))}`);
 }

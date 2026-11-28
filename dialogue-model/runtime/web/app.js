@@ -46,6 +46,7 @@ let restoreComposerOnChange = false;
 let activeTabSessionId = null;
 let pendingEmptySessionId = null;
 let sessionsReceptionMode = null;
+let sessionsHadDeletedReception = false;
 let confirmSnapshot = null;
 const tabSession = () => globalThis.TangramTabSession ?? null;
 // Without tab-session.js (or on a server without /api/sessions) the single
@@ -1607,6 +1608,7 @@ async function loadSessions() {
   // An earlier request must not prune a newly created session's local draft.
   if (epoch !== stateEpoch) return list;
   sessionsReceptionMode = ["on", "off", "unavailable"].includes(value?.receptionMode) ? value.receptionMode : "off";
+  sessionsHadDeletedReception = value?.hadDeletedReception === true;
   const browserRecordIds = list.flatMap((item) => [
     ...(typeof item.activeRecordId === "string" ? [item.activeRecordId] : []),
     ...(Array.isArray(item.records) ? item.records.map((r) => r?.recordId).filter((id) => typeof id === "string") : []),
@@ -1797,7 +1799,7 @@ async function startup() {
   }
   if (epoch !== stateEpoch || !entryMode()) return;
   // The first visit of a browser keeps the QR experience: a number right away.
-  if (!sessions.length && sessionsReceptionMode !== "unavailable") { await newSession(); return; }
+  if (!sessions.length && !sessionsHadDeletedReception && sessionsReceptionMode !== "unavailable") { await newSession(); return; }
   renderEntry(sessions);
 }
 $("new-session").addEventListener("click", newSession);
