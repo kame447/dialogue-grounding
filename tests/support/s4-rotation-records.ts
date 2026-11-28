@@ -20,7 +20,7 @@ const isJudgmentRequest = (value: any): value is Request => !!value && typeof va
 export function retargetPayload(payload: NonNullable<Request['payload']>, { stateMode, premise }: { stateMode: string; premise: string | null }) {
   const state = JSON.parse(payload.state as string);
   if (state.rotationMode !== 'relative_pm90') return null;
-  const questions: Record<string, unknown> = {};
+  const questions: Record<string, { instructions?: unknown }> = {};
   for (const [key, question] of Object.entries(payload.questions!)) {
     const text = question.instructions;
     if (typeof text !== 'string') { questions[key] = question; continue; }
