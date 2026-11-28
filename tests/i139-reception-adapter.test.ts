@@ -142,6 +142,35 @@ test('management list and approval accept workerd RPC values carrying Symbol.dis
   assert.ok((await after.text()).includes(`/admin/reception/${r.receptionId}/cancel`)); await h.done();
 });
 
+test('management list reads multiple independent reception owners concurrently, within the connection budget', async () => {
+  const h = harness();
+  const cookies = [];
+  for (let i = 0; i < 9; i++) cookies.push(await h.browser());
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  let entered = 0, active = 0, peak = 0;
+  for (const cookie of cookies) {
+    const owner = h.object(cookie), read = owner.adminReceptionListState.bind(owner);
+    owner.adminReceptionListState = async () => {
+      entered++; active++; peak = Math.max(peak, active);
+      try { await gate; return await read(); } finally { active--; }
+    };
+  }
+  const page = h.fetch(adminGet());
+  try {
+    for (let i = 0; i < 100 && entered < 6; i++) await new Promise<void>(resolve => setImmediate(resolve));
+    assert.equal(entered, 6, 'six owner requests start before any response');
+  } finally { release(); }
+  const response = await page;
+  assert.equal(response.status, 200);
+  const html = await response.text();
+  assert.equal(entered, 9);
+  assert.equal(peak, 6);
+  for (const cookie of cookies) assert.ok(html.includes(rec(h, cookie).receptionId));
+  assert.match(response.headers.get('Server-Timing') ?? '', /version;dur=[\d.]+, reception-list;dur=[\d.]+/u);
+  await h.done();
+});
+
 test('normalizing RPC values never admits an unknown enumerable field from the owner', async () => {
   const h = harness(), cookie = await h.browser(), r = rec(h,cookie), before = h.snapshot(cookie);
   workerdRpc(h,cookie,{ unexpected:true });

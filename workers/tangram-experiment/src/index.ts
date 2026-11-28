@@ -261,6 +261,18 @@ export class TangramSession extends DurableObject<Env> {
   }
   /** Researcher-only RPCs. The management adapter supplies authorization. */
   async adminReception(): Promise<Reception | null> { return this.readReception(); }
+  /** One list-specific RPC: authoritative reception, deletion markers and recovery
+   * eligibility; never restores dialogue, calls a model, or writes storage. */
+  async adminReceptionListState() {
+    const reception = await this.adminReception();
+    if (!reception) return null;
+    const ids = reception.trials.flatMap(trial => trial.recordId === null ? [] : [trial.recordId]);
+    const [deletedRecordIds, recoverableUnrecordedAdmission] = await Promise.all([
+      ids.length ? this.adminDeletedRecordIds(ids) : Promise.resolve([]),
+      this.hasRecoverableUnrecordedAdmission(reception).catch(() => true),
+    ]);
+    return { reception, deletedRecordIds, recoverableUnrecordedAdmission };
+  }
   async adminFailedStartUsage(receptionId: string): Promise<ReceptionFailedStartUsage | null> {
     return this.storage.transaction(async tx => {
       const rawReception = await tx.get('reception:v1');
