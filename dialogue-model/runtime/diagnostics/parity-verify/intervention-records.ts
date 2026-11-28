@@ -44,7 +44,7 @@ import {rotationTurn,rotationJevMatches,rotationLunaMatches,rotationObserveMatch
 import {extractionEvidenceForJob,isIssueHandlingExecution,issueHandlingDecisionShape,issueHandlingExtraRequestsMatch,issueHandlingFailureStage,issueHandlingFeatureScope,
  issueHandlingBasisMatches,issueHandlingCloseMatches,issueHandlingLedger,issueHandlingPartsMatch,issueHandlingPublicationPath,
  issueHandlingRelation,issueHandlingReplayBoundary,issueHandlingRequestMatches,issueHandlingSourcesMatch,
- publishedIssueHandlings,publishedPreviousExtras,s4UsesIssueHandling,s4UsesV22GenerationRules,s4UsesV24GenerationRules,S4_ISSUE_HANDLING_POLICY,S4_ISSUE_HANDLING_TABLE_SHA256} from './issue-handling-records.ts';
+ publishedIssueHandlings,publishedPreviousExtras,s4UsesIssueHandling,s4UsesV22GenerationRules,s4UsesV24GenerationRules,s4UsesV25GenerationRules,S4_ISSUE_HANDLING_POLICY,S4_ISSUE_HANDLING_TABLE_SHA256} from './issue-handling-records.ts';
 const POLICY='376d569120ca36a3eceaf5ab95410f7eb83f25fbb681e7566a684b97c35165c8';
 const ACTIONS=['accept','propose_name','confirm','repair','defer','revisit','agree','move_on','close','request_observation'];
 const INNER_CODES=['invalid_scores','no_valid_alternative','detail_unavailable','invalid_executed','invalid_options','invalid_input','invalid_response','invalid_decision','inconsistent_decision','model_mismatch','key_unavailable','key_leak','unauthorized','payment_required','not_found','rate_limited','upstream_error','network_error','timeout','aborted','cost_cap','cost_unreported','busy'];
@@ -1332,6 +1332,7 @@ function generatedReplayProof(tr:any,t:any,tape:any,result:any,pair:any,
  const issueHandling=s4UsesIssueHandling(tape.generationRetryVersion);
  const v22=s4UsesV22GenerationRules(tape.generationRetryVersion);
  const v24=s4UsesV24GenerationRules(tape.generationRetryVersion);
+ const v25=s4UsesV25GenerationRules(tape.generationRetryVersion);
  const v23=v24||tape.generationRetryVersion==='jev_generation_retry_v23';
  const checksOff=v24&&tape.postGenerationCheck==='off';
  const checksTopic=v22&&!checksOff;
@@ -1359,7 +1360,7 @@ function generatedReplayProof(tr:any,t:any,tape:any,result:any,pair:any,
  // Only the registered rotation-memory version may carry it: the earlier versions' sources do not hold its texts.
  const rot=rotationTurn(tape.state?.observationMemo,t.observationMemo);
  if(!rot||rot.carried&&!rotationVersion(prompt.id))return'invalid';
- const aiPrompt=(visualFeatures:boolean)=>rotationAiPrompt(rot,memoAiExtractionPrompt(SHAPE_TERMINOLOGY_GENERATION),memoAiExtractionPrompt(SHAPE_TERMINOLOGY_GENERATION,true),VISUAL_FEATURE_SOURCES_V19,visualFeatures);
+ const aiPrompt=(visualFeatures:boolean)=>rotationAiPrompt(rot,memoAiExtractionPrompt(SHAPE_TERMINOLOGY_GENERATION),memoAiExtractionPrompt(SHAPE_TERMINOLOGY_GENERATION,true),VISUAL_FEATURE_SOURCES_V19,visualFeatures,v25);
  for(const [n,label] of ['repair-first','bypass-enabled'].entries()){
   const s=result.sides[n],m=s?.material,tail=tape.tails?.[label],p=s?.generatedPublication;
   if(!tail)return'missing';
@@ -1396,7 +1397,7 @@ function generatedReplayProof(tr:any,t:any,tape:any,result:any,pair:any,
   const topicActRecords:any[]=[];
   for(const req of s.requests){
    if(!['luna','jev'].includes(req.provider)||req.payloadDomain!=='canonical_http_json'||hash(req.payload)!==req.payloadSha256)return'invalid';
-   if(!(req.provider==='luna'?rotationLunaMatches(rot,req.phase,req.payload):rotationJevMatches(rot,req.payload,
+   if(!(req.provider==='luna'?rotationLunaMatches(rot,req.phase,req.payload,v25):rotationJevMatches(rot,req.payload,
      {terminology:SHAPE_TERMINOLOGY,sharedAccept:SHARED_ACCEPT,sharedConfirm:SHARED_CONFIRM,repairQuality:Object.values(REPAIR_QUALITY_ACTION) as string[]})))return'invalid';
    const provider=req.provider as keyof typeof counters,answer=recorded[provider][counters[provider]++];
    if(!answer)return'missing';
@@ -1427,7 +1428,7 @@ function generatedReplayProof(tr:any,t:any,tape:any,result:any,pair:any,
      if(v23){
       const count=generations.length;
       const candidate=count>=priorDrafts?ex:count<2&&p.recovery?.reason==='publication_mismatch'?s.executed:p.recovery?.executed;
-      if(!candidate||!issueCtx||!v23PlanMatches(req.payload.messages,candidate,issueCtx.slots.length,v23Questions,v24))return'invalid';
+      if(!candidate||!issueCtx||!v23PlanMatches(req.payload.messages,candidate,issueCtx.slots.length,v23Questions,v24,v25))return'invalid';
      }
      lastRaw=answer.response?.text??answer.text;lastDraft=null;lastExtraction=null;functionAnswers=null;
      generations.push(req);
@@ -1608,7 +1609,7 @@ function generatedReplayProof(tr:any,t:any,tape:any,result:any,pair:any,
       ...(label===tr.label?{graphRevision:graph?.revision}:{})}))return'invalid';
    if(!issueHandlingPartsMatch(p,ex,speech,draftParts))return'invalid';
    const messages=generations.at(-1).payload.messages;
-   if(v23?!v23OutputMatches(messages,!!draftParts,structuredVisual,combined,checksOff,rot.carried):
+   if(v23?!v23OutputMatches(messages,!!draftParts,structuredVisual,combined,checksOff,rot.carried,v25,[ex.action,...(ex.extras??[]).map((extra:any)=>extra.action)]):
       !issueHandlingGenerationScope(messages,ex,finals,visualDetail,combined,v22,tr.profile?.judgmentMaterialVersion===JEV_REPAIR_QUALITY_VERSION,
        t.namingReconfirm===true,tape.state.ledger))return'invalid';
    const start=messages.at(-1)?.content?.startsWith('公開発話を書き直してください。')?messages.slice(0,-1):messages;
@@ -3513,6 +3514,35 @@ const PROMPT_VERSIONS:readonly PromptVersion[]=[
   'v2/issue-publication.ts':'55c17c514d0257803276ee451eaf4279b00fde0bdced13dd09ae91c1f03259a9',
   'decision/human-led-move-on.ts':'7c5dc7ff16877f1d9ff5cb6a777895c91aeb28fa6e31af1e7ab3d4ad5ed8d048',
   'v2/generation-prompt-v23.ts':'dbf4b80871418393211280f4b26e6a8046d73714aa81c5e097122e1fe21d6111',
+ }},fixed:FIXED_I172,native:NATIVE_I172},
+ // Generation cleanup (v25, #273/#275): the instruction text of the rotation-memory row, with the tidied generation instructions (jev_generation_retry_v25) and the ON source extraction rules.
+ {id:'p5_pilot012_generation_cleanup_v25',i172:true,fourFigures:true,threeFigures:true,styleMode:'research_split',sources:{scheme:'complete_instruction_source_sha256',files:{
+  'v2/dialogue-v2.mjs':'16885924a3466586d39d704f0979329f1e4ac71b765941a095d716ea4180c42e',
+  'v2/jev-turn.ts':'a579ad8f9d32d35826c6d2c43c1223e24876c83cd76dec2ce28ff15ed0484c50',
+  'v2/generation-guard.ts':'4e29339337cdc1098ef66f8e665cfa3f1984be3332d917675d40c8591762aa35',
+  'judgment/instructions.mjs':'eeb20c812729d04e52437a064b31fcd8af60ee2da8b1f6e73d99c4eb8dc8a785',
+  'observation/observe.ts':'c8f624c73ee69123092219153b9352f4bfe57168a266b5873f921e391dadb9ab',
+  'observation/parts.ts':'3f69275305aa81a3d7135022e639a7d58ec4b0ffe7293a787189e5b431dc8ea9',
+  'observation/part-consumers.ts':'f48c05b8b8cce2b077702d65fac541f87465d5226e867a2d4c669ab39da33ef1',
+  'stimuli/primary-regions.ts':'5257332eb539836ad33cc50ca926dc05bb08cf093a42fd044542e00b4246a07b',
+  'stimuli/primary-regions-data.ts':'04dc40bf52e3adbe709767283a4998ac9f4eaeaa295d64ebaf583fa4c12db314',
+  'stimuli/part-geometry.ts':'7581f27cb9849dd5c01aa2dcbac39e696a3ecd89f833b5eb3a3d5e86358d1692',
+  'stimuli/rotation-memory-shape.ts':'acb02a7d3e821f99838178ace2a7591351ad12b6130a83da071108cdcccea8f3',
+  'stimuli/rotation-memory.ts':'8527df56df9746f8de1a867607c153945c55ed4458c6c172b6d9f19d66d96b72',
+  'stimuli/rotation-memory-data.ts':'46240f8edc222b2c22d18e618af59e1e81769c3f28b86655fdd5645c12e02797',
+  'observation/rotation-memo.ts':'a6a3c18ee9e6ac502de22f46f3ae80be9c4259f24cda8d55d38bb672f6eb3fc7',
+  'decision/rotation-memory-guidance.ts':'f80b82271d20b2b0fe196d68183fc37f9d4f8729ab70f699171113f87c270e3a',
+  'local-grounding/extract.ts':'f71f0b21d1e1a2b5cf6595689d40fc80d7d60d7f0040b31f744d23d677d027d2',
+  'local-grounding/jev-local-test.ts':'64084d50c6d5855cbe64665ad156c6af5d9d3bf061d5e2de372904e45e88df01',
+  'decision/jev-decision.ts':'b43280f143f826ca54ddefc6acaca07d61a4ed3cd86a3de187d54219d3b076b5',
+  'local-grounding/extract-ai.ts':'d399e79f60ce70e61ec528a645215e8712e5a71c80e2bc78a0a943f8dc0567a7',
+  'local-grounding/jev-ai-public.ts':'6d3e05a7fb12778754a6cd8ba9c7b00e7045fa55daeded213a46a5a10375f1c7',
+  'shape-terminology.ts':'80fddf9e0947ae4e8dad85f3cf5e27700a070f0897225a565967623012ac3cf9',
+  'v2/visual-feature-evidence.ts':'6f03c678fd3856c80e9613ad79874a4b601dbbef691ff47063d065ca5a6a21ba',
+  'v2/deferred-ai-extraction.ts':'c8426684784a2be33356c0d18d26981f169c4c7ff7287d30abe5654541016b77',
+  'v2/issue-publication.ts':'55c17c514d0257803276ee451eaf4279b00fde0bdced13dd09ae91c1f03259a9',
+  'decision/human-led-move-on.ts':'7c5dc7ff16877f1d9ff5cb6a777895c91aeb28fa6e31af1e7ab3d4ad5ed8d048',
+  'v2/generation-prompt-v23.ts':'53ba1d0f3c4fec889b40cfd3188e0d54ab86dc125bcf864bf71610a04dc42282',
  }},fixed:FIXED_I172,native:NATIVE_I172},
  ...HISTORICAL_MAIN_PROMPT_SOURCES.map(({id, files}) => ({
   id, i172: false, styleMode: 'legacy' as const, sources: {scheme: 'complete_instruction_source_sha256', files: {...HISTORICAL_MAIN_SHARED_SOURCES, ...files}},

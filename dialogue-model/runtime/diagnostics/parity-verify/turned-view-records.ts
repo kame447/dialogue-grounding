@@ -19,6 +19,11 @@ export const ROTATION_CONFIRM = "対象や話の理解に具体的な未解決�
 export const ROTATION_PROPOSE_NAME = "特定の図形に呼び名を提案する。見立ては候補であり共同採用済みではない。対象が公開上で相手に伝わり、命名の流れに入って、呼び名が共同作業に役立つときに、自分側の観察の仮説（回転別メモの見立てを含む）を候補として提案できる。提案する必要がなければ見立てを返すだけでよい。相手が先に公開した呼び名は新しい提案として出し直さず、相手の提案を自分の新案にしない。";
 export const ROTATION_REQUEST_OBSERVATION = "回転別メモ（rotation）にない、自分の画像でしか確かめられない視覚上の事実（細部の形・位置・つながり）を確かめるために、図形と論点を指定してLunaへ再観察を依頼する。回転別メモの今の向き・別の向き・部分の候補で答えられる問いや、相手の別の見立てがメモの別の向きの見立てで説明できる場合、呼び名の好みなど視覚に無関係な変更や相手にしか分からない点の解決には選ばない。以前の観察でも不明な点を再観察し、一方の画面の方位を他方の証拠に使わない。";
 export const ROTATION_FEATURE_SOURCES = "回転別メモを使った出所は、先頭を \"rotation\" にして、使った候補を指します。例は [\"rotation\",\"current\",\"whole\",0]、[\"rotation\",\"turned\",1,\"whole\",0]、[\"rotation\",\"turned\",1,\"parts\",\"P1\",0]、[\"rotation\",\"regions\",0] です。whole・parts の添字は各向きの行に並んだ順で0から数え、turned の添字は0〜2です。";
+// v25 (#275). The noun-unit sentence follows the sources line of a request that asks for observation sources and carries the memory (generation and the independent extraction of ON);
+// the extraction rules close the extraction prompt of every v25 request that reads the sources of a published sentence, with or without the memory.
+export const ROTATION_NOUN_UNIT_V25 = "公開文で見立ての名詞を使ったときは、向きや領域ではなく、その名詞を持つ候補1件を指します。「ペンギン」なら whole の1件、「くちばし」なら parts の領域のidと添字で決まる1件です。";
+export const ROTATION_FEATURE_SOURCES_V25 = ROTATION_FEATURE_SOURCES + ROTATION_NOUN_UNIT_V25;
+export const AI_EXTRACTION_SOURCE_RULES_V25 = "観察として述べた特徴だけを出所にし、「向きを変えて見ると」のようなつなぎの語や「断定できるかは分かりません」のような留保の語は出所にしないでください。同じ向きの出所は1件にまとめてください。";
 export const EXTRACTION_ROTATION_USE = "相手の説明は、今の向きだけでなくrotationの別の向きの見立てや部分の候補とも照合し、合う図形をtargetsの候補に残してください。一致は候補の根拠にとどまり、同じ図形・名前の合意の確定ではありません。";
 export const AI_EXTRACTION_ROTATION_USE = "「向きを変えて見ると〜」「見る角度によっては〜」は、rotationに根拠がある自分側の想像の見立て（construal）として抽出してください。相手の画面の向きの主張ではありません。";
 export const REOBSERVATION_ROTATION_USE = "figuresのrotationは自分の図形を向きを変えて見たと想像した見立ての記録で、今の画像上の根拠ではありません。画像で確かめられる点だけをsupports・contradicts・unknownへ書いてください。";
@@ -157,7 +162,7 @@ export function memoInLayer(memo: Obj, layer: RotationLayer): Obj {
 // ---- What the turn's requests carry ----
 export type RotationTurn = { carried: boolean; memo: Obj };
 /** The registered versions whose instruction sources hold the texts of this table. A record of an earlier version never carries the memory. */
-const ROTATION_VERSIONS: readonly string[] = ["p5_pilot012_rotation_memory_v1"];
+const ROTATION_VERSIONS: readonly string[] = ["p5_pilot012_rotation_memory_v1", "p5_pilot012_generation_cleanup_v25"];
 export const rotationVersion = (id: unknown): boolean => typeof id === "string" && ROTATION_VERSIONS.includes(id);
 /** From the memo the turn starts with; the memo the turn records must hold the same rotation memories. Null when the two disagree. */
 const rotationsOf = (memo: unknown): [unknown, unknown][] => figuresOf(memo).filter(figure => Object.hasOwn(figure, "rotation")).map(figure => [figure.id, figure.rotation]);
@@ -168,7 +173,7 @@ const count = (text: string, sentence: string): number => text.split(sentence).l
 /** Sentences that only a request carrying the memory may hold (the short ones of the generation edits are checked where they are expected). */
 const REQUEST_OBSERVATION_TERRA = ROTATION_REQUEST_OBSERVATION.replace("Lunaへ", "Terraへ");
 const ROTATION_SENTENCES: readonly string[] = [ROTATION_LEGEND_NOUNS, ROTATION_LEGEND_ROLES, COMMON_DIFFERENT_CONSTRUAL_ROTATION, ROTATION_MATCH_USE, ROTATION_ACCEPT_ANSWER,
-  ROTATION_ACCEPT_BACKCHANNEL, ROTATION_CONFIRM, ROTATION_PROPOSE_NAME, ROTATION_REQUEST_OBSERVATION, REQUEST_OBSERVATION_TERRA, ROTATION_FEATURE_SOURCES,
+  ROTATION_ACCEPT_BACKCHANNEL, ROTATION_CONFIRM, ROTATION_PROPOSE_NAME, ROTATION_REQUEST_OBSERVATION, REQUEST_OBSERVATION_TERRA, ROTATION_FEATURE_SOURCES, ROTATION_NOUN_UNIT_V25,
   EXTRACTION_ROTATION_USE, AI_EXTRACTION_ROTATION_USE, REOBSERVATION_ROTATION_USE, GENERATION_ROTATION_EDITS[1][1], GENERATION_ROTATION_EDITS[4][1], GENERATION_ROTATION_EDITS[5][1]];
 const stray = (text: string, allowed: readonly string[] = []): boolean => ROTATION_SENTENCES.some(sentence => !allowed.includes(sentence) && count(text, sentence) > 0);
 const parse = (text: unknown): Obj | null => { try { const value = typeof text === "string" ? JSON.parse(text) : null; return plain(value) ? value : null; } catch { return null; } };
@@ -298,15 +303,17 @@ export function rotationJevMatches(turn: RotationTurn, payload: Obj, texts: Rota
 }
 
 /** A Luna request: what its phase carries of the memory when the turn carries it, nothing of it otherwise. */
-export function rotationLunaMatches(turn: RotationTurn, phase: string, payload: Obj): boolean {
+export function rotationLunaMatches(turn: RotationTurn, phase: string, payload: Obj, v25 = false): boolean {
   const messages: Obj[] = Array.isArray(payload.messages) ? payload.messages.filter(plain) : [];
   const text = (m: Obj | undefined): string => typeof m?.content === "string" ? m.content : "";
   if (!turn.carried) return !messages.some(m => stray(text(m)));
   const prompt = text(messages[0]);
+  // The sources line of a request that asks for them: v25 holds the v24 line followed by the noun-unit sentence, an earlier version only the v24 line (the noun-unit sentence is then stray).
+  const sources = v25 ? ROTATION_FEATURE_SOURCES_V25 : ROTATION_FEATURE_SOURCES, sourceTexts = v25 ? [ROTATION_FEATURE_SOURCES, ROTATION_NOUN_UNIT_V25] : [ROTATION_FEATURE_SOURCES];
   if (phase === "local_extraction" || phase === "ai_extraction") {
     const use = phase === "local_extraction" ? EXTRACTION_ROTATION_USE : AI_EXTRACTION_ROTATION_USE;
     const context = contextAt(messages, 1);
-    if (count(prompt, use) !== 1 || stray(prompt, phase === "ai_extraction" ? [use, ROTATION_FEATURE_SOURCES] : [use]) || count(prompt, ROTATION_FEATURE_SOURCES) > 1 ||
+    if (count(prompt, use) !== 1 || stray(prompt, phase === "ai_extraction" ? [use, ...sourceTexts] : [use]) || count(prompt, sources) > 1 ||
         !context || context.end !== messages.length) return false;
     const state = context.value, keys = Object.keys(state);
     // local extraction: { ...context, rotationLegend, observations }; AI extraction: { ...snapshot, rotationLegend } (the snapshot already holds observations, so the legend is last)
@@ -325,10 +332,12 @@ export function rotationLunaMatches(turn: RotationTurn, phase: string, payload: 
     // The edits' own sentences sit in the instructions, the roles legend in the memo message(s), the sources line in the action message and, when a draft is regenerated,
     // once more in the retry message that restates the action message whole; nowhere else.
     const retry = messages.length > 3 && text(messages[messages.length - 1]).startsWith("公開発話を書き直してください。") ? messages.length - 1 : -1;
-    const restated = retry >= 0 && text(messages[retry]).includes(text(messages[2])) && count(text(messages[retry]), ROTATION_FEATURE_SOURCES) === count(text(messages[2]), ROTATION_FEATURE_SOURCES);
+    const restated = retry >= 0 && text(messages[retry]).includes(text(messages[2])) && count(text(messages[retry]), sources) === count(text(messages[2]), sources);
     return messages.every((m, i) => !stray(text(m), i === 1 ? [GENERATION_ROTATION_EDITS[1][1], GENERATION_ROTATION_EDITS[4][1], GENERATION_ROTATION_EDITS[5][1]]
-      : i >= at && i < memo.end ? [ROTATION_LEGEND_ROLES] : i === 2 || i === retry && restated ? [ROTATION_FEATURE_SOURCES] : [])) &&
-      messages.every(m => count(text(m), ROTATION_FEATURE_SOURCES) <= 1);
+      : i >= at && i < memo.end ? [ROTATION_LEGEND_ROLES] : i === 2 || i === retry && restated ? sourceTexts : [])) &&
+      messages.every(m => count(text(m), sources) <= 1) &&
+      // The noun-unit sentence only ever follows the earlier sources line.
+      messages.every(m => count(text(m), ROTATION_NOUN_UNIT_V25) === (v25 ? count(text(m), sources) : 0));
   }
   if (phase === "observation_targeted") {
     const context = contexts(messages, 1).find(c => Array.isArray(c.figureIds));
@@ -354,9 +363,11 @@ export function rotationObserveMatches(turn: RotationTurn, decisions: unknown, h
 }
 
 /** The prompt an AI extraction request may carry: the earlier prompt with the memory's sentence (and, for visual features, its sources line) where the request builder puts them. */
-export function rotationAiPrompt(turn: RotationTurn, plainPrompt: string, visualPrompt: string, visualSources: string, visual: boolean): string | null {
-  if (!turn.carried) return visual ? visualPrompt : plainPrompt;
+export function rotationAiPrompt(turn: RotationTurn, plainPrompt: string, visualPrompt: string, visualSources: string, visual: boolean, v25 = false): string | null {
+  // v25: the extraction that reads the sources of a published sentence ends with the rules on what a source is, whether or not the memo carries the rotation memory.
+  const rules = visual && v25 ? "\n" + AI_EXTRACTION_SOURCE_RULES_V25 : "";
+  if (!turn.carried) return (visual ? visualPrompt : plainPrompt) + rules;
   if (!visual) return plainPrompt + "\n" + AI_EXTRACTION_ROTATION_USE;
   const head = plainPrompt + "\n" + visualSources;
-  return visualPrompt.startsWith(head) ? plainPrompt + "\n" + AI_EXTRACTION_ROTATION_USE + "\n" + visualSources + "\n" + ROTATION_FEATURE_SOURCES + visualPrompt.slice(head.length) : null;
+  return visualPrompt.startsWith(head) ? plainPrompt + "\n" + AI_EXTRACTION_ROTATION_USE + "\n" + visualSources + "\n" + (v25 ? ROTATION_FEATURE_SOURCES_V25 : ROTATION_FEATURE_SOURCES) + visualPrompt.slice(head.length) + rules : null;
 }

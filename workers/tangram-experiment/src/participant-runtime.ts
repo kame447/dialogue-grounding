@@ -17,13 +17,13 @@ import { participantChatProvider, requireExactParticipantModel, validateParticip
 import { researchHash, researchTrialProfileV3, RESEARCH_TRIAL_PROFILE_V1 } from '../../../dialogue-model/runtime/v2/research-profile.ts';
 import { RESEARCH_MAX_DEADLINE_MS, RESEARCH_MAX_LUNA_ATTEMPT_MS } from '../../../dialogue-model/runtime/v2/research-timeouts.ts';
 import { SHAPE_TERMINOLOGY_GENERATION } from '../../../dialogue-model/runtime/shape-terminology.ts';
-import { DEFERRED_AI_EXTRACTION_GENERATION, GENERATION_RETRY_V22, GENERATION_RETRY_V23, GENERATION_RETRY_V24,
+import { DEFERRED_AI_EXTRACTION_GENERATION, GENERATION_RETRY_V22, GENERATION_RETRY_V23, GENERATION_RETRY_V24, GENERATION_RETRY_V25,
   ISSUE_HANDLING_GENERATION, isPostGenerationCheck, type PostGenerationCheck } from '../../../dialogue-model/runtime/v2/deferred-ai-extraction.ts';
 
 import type { BaseRecord } from '../../../dialogue-model/runtime/v2/base-assignment.ts';
-import { isPilot012ParticipantDialogueProfile, participantMemoryPruneVersion, PILOT012_PARTICIPANT_PROFILE, PILOT012_V18_PARTICIPANT_PROFILE,
-  PILOT012_V19_PARTICIPANT_PROFILE, PILOT012_V20_PARTICIPANT_PROFILE, PILOT012_V21_PARTICIPANT_PROFILE,
-  PILOT012_V22_PARTICIPANT_PROFILE, PILOT012_V23_PARTICIPANT_PROFILE, PILOT012_V24_PARTICIPANT_PROFILE,
+import { hasPostGenerationCheckProfile, isPilot012ParticipantDialogueProfile, participantMemoryPruneVersion, PILOT012_PARTICIPANT_PROFILE,
+  PILOT012_V18_PARTICIPANT_PROFILE, PILOT012_V19_PARTICIPANT_PROFILE, PILOT012_V20_PARTICIPANT_PROFILE, PILOT012_V21_PARTICIPANT_PROFILE,
+  PILOT012_V22_PARTICIPANT_PROFILE, PILOT012_V23_PARTICIPANT_PROFILE, PILOT012_V24_PARTICIPANT_PROFILE, PILOT012_V25_PARTICIPANT_PROFILE,
   type ParticipantDialogueProfile } from '../../../dialogue-model/runtime/v2/reception.ts';
 
 type Dispatch = (payload: unknown, expectedModelId: string) => Promise<ParticipantDispatchResult>;
@@ -130,6 +130,10 @@ const workerDialogue = {
   [PILOT012_V24_PARTICIPANT_PROFILE]: { ...dialogueV22IssueFixes,
     pinnedVersions: { ...dialogueV22IssueFixes.pinnedVersions, generationRetryVersion: GENERATION_RETRY_V24 },
   },
+  // v24's procedure with the generation instructions tidied (#273) and the ON source extraction told what a source is (#275).
+  [PILOT012_V25_PARTICIPANT_PROFILE]: { ...dialogueV22IssueFixes,
+    pinnedVersions: { ...dialogueV22IssueFixes.pinnedVersions, generationRetryVersion: GENERATION_RETRY_V25 },
+  },
 } as const;
 
 export function matchesWorkerDialogueProfile(key: ParticipantDialogueProfile | undefined, record: BaseRecord) {
@@ -140,7 +144,7 @@ export function matchesWorkerDialogueProfile(key: ParticipantDialogueProfile | u
   const dialogue = workerDialogue[key];
   const memoryPruneVersion = participantMemoryPruneVersion(key);
   return !!dialogue && options.participantDialogueProfile === key &&
-    (key === PILOT012_V24_PARTICIPANT_PROFILE ? isPostGenerationCheck(options.postGenerationCheck) : !Object.hasOwn(options, 'postGenerationCheck')) &&
+    (hasPostGenerationCheckProfile(key) ? isPostGenerationCheck(options.postGenerationCheck) : !Object.hasOwn(options, 'postGenerationCheck')) &&
     options.memoryPruneVersion === memoryPruneVersion && state?.graph?.memoryPruneVersion === memoryPruneVersion &&
     (!isPilot012ParticipantDialogueProfile(key) || options.initialObservationGeneration === INITIAL_OBSERVATION_STRUCTURED_V2) &&
     options.profileSha256 === researchHash(dialogue.profile) && options.questionLayout === dialogue.profile.questionLayout &&
@@ -244,7 +248,7 @@ export function createWorkerParticipantRuntime({ pin, own, proxy, cache, limits,
    { limits?: never; usage?: never; historicalLimits: Readonly<BudgetLimits> | null } |
    { limits?: never; usage: ParticipantUsageLedger; historicalLimits?: never })) {
   if (pin.schemaVersion !== 'participant_model_pin_v1' && !usage) throw new NamingTaskError('invalid_options');
-  if (participantDialogueProfile === PILOT012_V24_PARTICIPANT_PROFILE ? !isPostGenerationCheck(postGenerationCheck) : postGenerationCheck !== undefined) {
+  if (hasPostGenerationCheckProfile(participantDialogueProfile) ? !isPostGenerationCheck(postGenerationCheck) : postGenerationCheck !== undefined) {
     throw new NamingTaskError('invalid_options');
   }
   const dialogue = participantDialogueProfile === undefined ? null : workerDialogue[participantDialogueProfile];

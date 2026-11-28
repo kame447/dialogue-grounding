@@ -483,7 +483,7 @@ ${presets === undefined ? '' : '<p><a href="/admin/figure-presets">図形プリ�
 <form method="post" action="/admin/reception-settings/mode" class="actions"><input type="hidden" name="expectedRevision" value="${escapeHtml(view.mode.revision)}">
 <button name="value" value="on">受付を使う</button> <button name="value" value="off">受付を使わない</button></form>
 <h2>生成後チェック</h2><p class="state">現在：${view.postGenerationCheck?.value === 'on' ? 'ON' : view.postGenerationCheck ? 'OFF' : 'OFF（既定）'}</p>
-<p>v24 の受付をこれから許可するときに使う設定です。許可済みの受付の設定は変わりません。</p>
+<p>v24 以降の受付をこれから許可するときに使う設定です。許可済みの受付の設定は変わりません。</p>
 <form method="post" action="/admin/reception-settings/post-generation-check" class="actions"><input type="hidden" name="expectedRevision" value="${escapeHtml(view.postGenerationCheck?.revision ?? 0)}">
 <button name="value" value="on">ON にする</button> <button name="value" value="off">OFF にする</button></form>
 <h2>プロトコル</h2>${status}${legacyNotice}

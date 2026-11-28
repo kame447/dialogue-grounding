@@ -4,7 +4,7 @@ import type { AiPublicInput, AiStageEvidence, LocalSegmentProposal } from "./con
 import { literalSpan } from "../judgment/public-evidence.mjs";
 import { validateObservationMemo, observationContextMessages } from "../observation/observe.ts";
 import { hasPartGeometry, withPartDescriptions, PART_REFERENCE_INSTRUCTIONS, PART_FEATURE_SOURCES } from "../observation/part-consumers.ts";
-import { hasRotationMemory, withRotationLayer, rotationLegendEntry, ROTATION_LAYER_OF_CALL, AI_EXTRACTION_ROTATION_USE, ROTATION_FEATURE_SOURCES } from "../decision/rotation-memory-guidance.ts";
+import { hasRotationMemory, withRotationLayer, rotationLegendEntry, ROTATION_LAYER_OF_CALL, AI_EXTRACTION_ROTATION_USE, ROTATION_FEATURE_SOURCES, ROTATION_FEATURE_SOURCES_V25 } from "../decision/rotation-memory-guidance.ts";
 import { withShapeTerminology, type ShapeTerminologyVersion } from "../shape-terminology.ts";
 import { readVisualFeatureEvidence, VISUAL_FEATURE_SOURCES_V19 } from "../v2/visual-feature-evidence.ts";
 import type { VisualFeatureEvidence } from "../v2/visual-feature-evidence.ts";
@@ -50,20 +50,24 @@ export function snapshotAiExtraction(input: AiPublicInput): AiPublicInput {
   return { turn: input.turn, aiSeq: input.aiSeq, candidateText: input.candidateText, publicTurns,
     ownSlots: [...input.ownSlots], ownAnchors, observations, issueSummary: input.issueSummary };
 }
-export const memoAiExtractionPrompt = (terminology?: ShapeTerminologyVersion, visualFeatures = false, withParts = false, withRotation = false): string => {
+/** v25 (#275), only in the extraction that reads the sources of a published sentence (postGenerationCheck on): the independent extraction listed a hedge ("耳と断定できるかは分かりません") or a connective ("向きを変えて見ると") as a source, and the same view more than once. */
+export const AI_EXTRACTION_SOURCE_RULES_V25 = "観察として述べた特徴だけを出所にし、「向きを変えて見ると」のようなつなぎの語や「断定できるかは分かりません」のような留保の語は出所にしないでください。同じ向きの出所は1件にまとめてください。";
+/** `sourceRules` (v25) has an effect only together with `visualFeatures`: the extraction without the sources keeps the earlier bytes. */
+export const memoAiExtractionPrompt = (terminology?: ShapeTerminologyVersion, visualFeatures = false, withParts = false, withRotation = false, sourceRules = false): string => {
   const original = withShapeTerminology(MEMO_AI_PUBLIC_EXTRACTION_INSTRUCTIONS, terminology) +
     (withParts ? "\n" + PART_REFERENCE_INSTRUCTIONS + (visualFeatures ? "\n" + PART_FEATURE_SOURCES : "") : "") + (withRotation ? "\n" + AI_EXTRACTION_ROTATION_USE : "");
-  return visualFeatures ? original + "\n" + VISUAL_FEATURE_SOURCES_V19 + (withRotation ? "\n" + ROTATION_FEATURE_SOURCES : "") +
-    '\nこの場合は配列だけでなく、segments（上記の局所命題の配列）と visualFeatures を持つJSONオブジェクトを返してください。visualFeatures は {sources:[{source:{figureId,path},quote}]} です。公開文の中で自分側の観察に根拠を置く特徴だけを、実際にその特徴を表した箇所の引用と結び付けてください。観察の利用がなければ sources は空配列です。自分側の観察に基づく説明として述べているのに、メモから根拠を特定できない場合は visualFeatures を null にしてください。' : original;
+  return visualFeatures ? original + "\n" + VISUAL_FEATURE_SOURCES_V19 + (withRotation ? "\n" + (sourceRules ? ROTATION_FEATURE_SOURCES_V25 : ROTATION_FEATURE_SOURCES) : "") +
+    '\nこの場合は配列だけでなく、segments（上記の局所命題の配列）と visualFeatures を持つJSONオブジェクトを返してください。visualFeatures は {sources:[{source:{figureId,path},quote}]} です。公開文の中で自分側の観察に根拠を置く特徴だけを、実際にその特徴を表した箇所の引用と結び付けてください。観察の利用がなければ sources は空配列です。自分側の観察に基づく説明として述べているのに、メモから根拠を特定できない場合は visualFeatures を null にしてください。' +
+    (sourceRules ? "\n" + AI_EXTRACTION_SOURCE_RULES_V25 : "") : original;
 };
 
-export function buildMemoAiExtractionMessages(input: AiPublicInput, terminology?: ShapeTerminologyVersion, visualFeatures = false) {
+export function buildMemoAiExtractionMessages(input: AiPublicInput, terminology?: ShapeTerminologyVersion, visualFeatures = false, sourceRules = false) {
   const snapshot = snapshotAiExtraction(input);
   const state = JSON.stringify({ ...snapshot, ...rotationLegendEntry(snapshot.observations, ROTATION_LAYER_OF_CALL.extraction),
     observations: withRotationLayer(withPartDescriptions(snapshot.observations), ROTATION_LAYER_OF_CALL.extraction) });
   if (state.length > 192000) fail("invalid_input");
   // Same transport as every other memo-bearing request: one message up to 20,000 characters, numbered chunks beyond.
-  return [{ role: "system" as const, content: memoAiExtractionPrompt(terminology, visualFeatures, hasPartGeometry(snapshot.observations), hasRotationMemory(snapshot.observations)) }, ...observationContextMessages(state)];
+  return [{ role: "system" as const, content: memoAiExtractionPrompt(terminology, visualFeatures, hasPartGeometry(snapshot.observations), hasRotationMemory(snapshot.observations), sourceRules) }, ...observationContextMessages(state)];
 }
 export type AiExtractionDiagnostics = { rejected: Array<{ segmentId: string; reason: "name_by_literal_path" | "nonpublic_quote" }> };
 export function parseAiExtraction(raw: unknown, input: AiPublicInput, diagnostics: AiExtractionDiagnostics = { rejected: [] },
@@ -96,7 +100,7 @@ export function parseAiExtraction(raw: unknown, input: AiPublicInput, diagnostic
 }
 type Client = { complete(messages: Array<{ role: "system" | "user"; content: string }>,
   options: { phase: string; timeoutMs: number; signal: AbortSignal }): Promise<{ text: string }> };
-export function createMemoAiExtractor(client: Client, terminology?: ShapeTerminologyVersion) {
+export function createMemoAiExtractor(client: Client, terminology?: ShapeTerminologyVersion, sourceRules = false) {
   let evidence = emptyAiEvidence(), diagnostics: AiExtractionDiagnostics = { rejected: [] };
   function start(input: AiPublicInput, options: { timeoutMs: number; signal: AbortSignal }, visualFeatures = false) {
     // Each invocation owns its evidence, including after its caller has timed out.
@@ -105,7 +109,7 @@ export function createMemoAiExtractor(client: Client, terminology?: ShapeTermino
     evidence = callEvidence; diagnostics = callDiagnostics;
     const result = (async () => {
       try {
-        const snapshot = snapshotAiExtraction(input), messages = buildMemoAiExtractionMessages(snapshot, terminology, visualFeatures);
+        const snapshot = snapshotAiExtraction(input), messages = buildMemoAiExtractionMessages(snapshot, terminology, visualFeatures, sourceRules);
         if (messages.some(m => typeof m.content !== "string")) fail("invalid_input");
         if (options.signal.aborted) fail("aborted");
         callEvidence.status = "error"; callEvidence.calls = 1;

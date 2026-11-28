@@ -10,8 +10,13 @@ export function s4UsesIssueHandling(version: unknown): boolean {
 export function s4UsesV22GenerationRules(version: unknown): boolean {
   return version === "jev_generation_retry_v22" || version === "jev_generation_retry_v23" || s4UsesV24GenerationRules(version);
 }
+/** v24 or later: the post-generation check setting and every procedure v24 introduced (v25 keeps all of them). */
 export function s4UsesV24GenerationRules(version: unknown): boolean {
-  return version === "jev_generation_retry_v24";
+  return version === "jev_generation_retry_v24" || s4UsesV25GenerationRules(version);
+}
+/** v25: v24's procedure with the tidied generation instructions and the ON source extraction rules. */
+export function s4UsesV25GenerationRules(version: unknown): boolean {
+  return version === "jev_generation_retry_v25";
 }
 export const S4_ISSUE_HANDLING_VERSION = "jev_issue_handling_v1";
 export const S4_ISSUE_HANDLING_POLICY = "bypass_acceptance_v3";

@@ -33,7 +33,7 @@ import { PARTICIPANT_STOP_HTML } from "../../../dialogue-model/runtime/v2/partic
 import { ReceptionError, validateReception, createReception, approveReception, validateReceptionApprovalInput, validateReceptionPlan, cancelReception, terminateReception,
   participantReception, receptionSummary, effectiveBetweenTrials, effectiveFigureSelection, effectiveRotationMode,
   validateParticipantLimits, isParticipantDialogueProfile, isPilot012ParticipantDialogueProfile,
-  participantMemoryPruneVersion, PILOT012_V24_PARTICIPANT_PROFILE, ROTATION_MODES } from '../../../dialogue-model/runtime/v2/reception.ts';
+  participantMemoryPruneVersion, hasPostGenerationCheckProfile, ROTATION_MODES } from '../../../dialogue-model/runtime/v2/reception.ts';
 import { isAdminTermination, isIncompleteTrialStatus } from '../../../dialogue-model/runtime/v2/admin-termination.ts';
 import type { AdminTermination } from '../../../dialogue-model/runtime/v2/admin-termination.ts';
 import { isSubmittedQuestionnaire } from '../../../dialogue-model/runtime/v2/questionnaire-gate.ts';
@@ -319,7 +319,7 @@ export class TangramSession extends DurableObject<Env> {
       const approval = { expectedRevision: input.expectedRevision, order: input.order, protocol, expected };
       validateReceptionApprovalInput(existing, approval);
       const { participant } = await resolveParticipantConfiguration(this.env, protocol);
-      const check = participant.participantDialogueProfile === PILOT012_V24_PARTICIPANT_PROFILE
+      const check = hasPostGenerationCheckProfile(participant.participantDialogueProfile)
         ? { postGenerationCheck: settings.postGenerationCheck?.value ?? 'off' as const } : {};
       // A new reception freezes the rotation-memory bundle and reads it at the start: it claims no prepared Terra memo, so approval never waits for stock.
       const rotationMemory = rotationMemoryFor(participant, protocol.referenceMemory);

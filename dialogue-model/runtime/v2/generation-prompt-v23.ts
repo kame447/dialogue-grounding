@@ -1,7 +1,7 @@
 import type { JevDecisionAction, JevTarget, JevVisualPurpose } from "../decision/contract.ts";
 import type { CarryDestination, JevIssueRef } from "../decision/issue-handling.ts";
 import type { repairQualityPublicQuestions } from "../decision/repair-quality.ts";
-import { ROTATION_FEATURE_SOURCES } from "../decision/rotation-memory-guidance.ts";
+import { ROTATION_FEATURE_SOURCES, ROTATION_FEATURE_SOURCES_V25 } from "../decision/rotation-memory-guidance.ts";
 
 export function generationTaskV23(figureCount: number) {
   return [
@@ -14,6 +14,10 @@ export function generationTaskV23(figureCount: number) {
 
 const UPTAKE_V23 = "短い受け止めだけでもかまいません。不確かさ・相槌・形式的な聞き返し・細部の説明を毎回付け足さず、呼び名や質問を毎回言い直さないでください。相手の理解を試す聞き方や、曖昧な指示語だけの聞き返しも避けてください。";
 const UPTAKE_V24 = "【相手への返答】相手が今求めていることに先に答えてください。説明には自分の見え方とその根拠、選択の依頼には選んだものと短い理由を返してください。呼び名や進め方の提案には計画の範囲で直接応じてください。分からない場合は、分かっている点と未確定の点を短く伝えてください。相手が訂正した点や依頼を言い直した内容を反映し、既に答えが出た点を聞き直さないでください。質問が必要なら原則一発話で一つに絞り、何に答えてほしいか明示してください。質問するときも問いだけで終えず、自分の見え方や今の理解を一言添えてください。相づちは「なるほど」程度にとどめ、長い言い直しや相づちだけの往復を避けてください。判断に必要なら、自分の観察と相手の説明のどこが一致し、どこが違うかを示してください。根拠のない同意で埋めないでください。";
+// v25 (#273): v24's text with one change. Asking about the figure is the only question that carries the AI's own view; the questions that ask how to go on
+// (consult, carry_over, close) say their own content in their action text, and consult says it states no observation feature. v24 added the sentence for the
+// complaint that the AI kept asking while only the partner explained; it was not meant to put observation features into a consult.
+const UPTAKE_V25 = "【相手への返答】相手が今求めていることに先に答えてください。説明には自分の見え方とその根拠、選択の依頼には選んだものと短い理由を返してください。呼び名や進め方の提案には計画の範囲で直接応じてください。分からない場合は、分かっている点と未確定の点を短く伝えてください。相手が訂正した点や依頼を言い直した内容を反映し、既に答えが出た点を聞き直さないでください。質問が必要なら原則一発話で一つに絞り、何に答えてほしいか明示してください。図形についての質問は、問いだけで終えず、自分の見え方や今の理解を一言添えてください。相づちは「なるほど」程度にとどめ、長い言い直しや相づちだけの往復を避けてください。判断に必要なら、自分の観察と相手の説明のどこが一致し、どこが違うかを示してください。根拠のない同意で埋めないでください。";
 const generationInstructions = [
   "【公開発話の生成】Jevが選んだ計画に沿って、自然な日本語のチャット発話を作ってください。",
   "【計画】指定の行動・対象を足したり削ったりせず、名前（candidateName または name）、論点（visualPurpose / issue）、移行先（destination）の範囲に従ってください。",
@@ -33,6 +37,7 @@ const generationInstructions = [
 ];
 export const GENERATION_INSTRUCTIONS_V23 = generationInstructions.join("\n");
 export const GENERATION_INSTRUCTIONS_V24 = generationInstructions.map(line => line === UPTAKE_V23 ? UPTAKE_V24 : line).join("\n");
+export const GENERATION_INSTRUCTIONS_V25 = generationInstructions.map(line => line === UPTAKE_V23 ? UPTAKE_V25 : line).join("\n");
 
 export const MULTIPLE_CANDIDATES_V23 = "対象は複数候補のままです。勝手に一つに絞らず、ある候補の特徴をすべての候補の性質として扱わず、相手が知らない前提で話さないでください。";
 export const CONCISE_GENERATION_V23 = "短いチャットとして、多くは1文を目安に相手の発話に応じてください。相槌は短い一言までとし、相手の言い直しや見立ての繰り返しを避けてください。計画の扱いや確認に必要な内容は残してください。";
@@ -46,6 +51,13 @@ const ACCEPT_V23 = "相手の発話を受け止めてください。相槌に同
 const CONFIRM_V23 = "選んだ論点の解消に必要な点だけを、形の参照枠に沿って短く尋ねてください。観察メモにない特徴を肯定したり、同じ図形だと断定したりしないでください。ほかの部分を確かめたり、決まった・それでいこうと言ったりしないでください。";
 const CONFIRM_V24 = "選んだ論点について聞かれたことには、自分の観察で答えられる点を先に述べてください。確認がまだ必要なら、答えを得ていない一点だけを形の参照枠に沿って尋ねてください。観察メモにない特徴、対象の一致、名前の合意は断定しないでください。";
 const CONTINUE_V24 = "【未確定のまま答える】相手の説明・選択・命名・進行の依頼に、今の論点の範囲で直接答えてください。自分の観察で答えられる内容とその根拠を先に述べ、決められない部分があれば何が未確定かを短く明示してください。相手から訂正や依頼の言い直しがあれば反映してください。名前を新しく提案・採用・撤回したり、未確定の対象を一つに決めたりしないでください。";
+// v25 (#273): the direct answer, the statement of the known and the unknown and the reflection of corrections are said once, in UPTAKE_V25; these three keep only what is the
+// action's own. CONFIRM_V24 and VISUAL_FEATURE_SELECTION_V23 repeated "answer what was asked first", CONTINUE_V24 repeated that and the other two.
+// "原則一発話で一つに絞り" (how many questions) stays in UPTAKE_V25. "一点だけ" / "一点" (which point the confirmation asks about: only the one point still unanswered) is the action's own
+// range of the question's content, a different constraint, so the confirm texts keep it (audit F1 of PR #290: a real-API confirm asked two points in one question when it was gone).
+const VISUAL_FEATURE_SELECTION_V25 = "対象と論点の範囲で観察メモから確認・修復に使う特徴を選んでください。肯否・訂正済みの点と未解決の点を区別してください。候補の区別や説明の対応に役立つ点を優先し、観察メモに記載がないことを特徴がない証拠にしないでください。根拠が不足する場合はその不確かさを示してください。";
+const CONFIRM_V25 = "選んだ論点について確認がまだ必要なら、答えを得ていない一点だけを形の参照枠に沿って尋ねてください。観察メモにない特徴、対象の一致、名前の合意は断定しないでください。";
+const CONTINUE_V25 = "【未確定のまま答える】答えは今の論点の範囲にとどめ、名前を新しく提案・採用・撤回したり、未確定の対象を一つに決めたりしないでください。";
 const REPAIR_V23 = "選んだ論点について、公開の食い違いを形の参照枠に沿って局所的に確かめ直すか、直してください。取り違えや名前の訂正を明示するのは、これまでの発話に根拠がある時だけです。";
 const HOLD_OPEN_V23 = "相手の提示に短く反応し、論点について理解できた、採用する、食い違っているのいずれも言い切らないでください。ためらい、相手が示した特徴や見立ての短い反復、観察メモに根拠のある候補を独り言のように挙げることのいずれかで、判断がまだ定まらないことを伝えてください。保留、後回し、移行、名前や対象の確定を宣言せず、観察メモで答えられる別の問いが publicQuestions にあれば先に短く答えてください。";
 
@@ -78,6 +90,8 @@ type ActionPrompt = {
   reconsidered: boolean;
   continuing: boolean;
   respondToRequest?: boolean;
+  /** v25 wording: the lines that restated the direct answer and the one question (CONFIRM, CONTINUE, the visual selection) keep only what is the action's own. */
+  tidied?: boolean;
   namingRequest: boolean;
   reconfirmation?: string;
   namingConflict: { agreedName: string; proposedNames: string[] } | null;
@@ -90,19 +104,21 @@ function closeScope(closing: Closing) {
   return "残っている局所論点があれば踏まえ、終わりにしてよいか相談してください。";
 }
 
-function actionScope(action: JevDecisionAction, partOnly: boolean, continuing: boolean, closing: Closing | null, respondToRequest?: boolean) {
+function actionScope(action: JevDecisionAction, partOnly: boolean, continuing: boolean, closing: Closing | null, respondToRequest?: boolean, tidied?: boolean) {
   const stay = partOnly ? "この扱いでは、論点を保留したり別の話に移ったりしないでください。" :
     "この発話では、論点を保留したり別の図形や論点へ移ったりしないでください。";
   switch (action) {
     case "accept":
-      if (respondToRequest && continuing) return CONTINUE_V24 + "答えられる内容と限界を伝え、新たな質問は加えないでください。";
+      if (respondToRequest && continuing) return tidied ? CONTINUE_V25 + "新たな質問は加えないでください。" : CONTINUE_V24 + "答えられる内容と限界を伝え、新たな質問は加えないでください。";
       return partOnly ? ACCEPT_V23.replace("新たな命名や", "この部分から新たな命名や") : ACCEPT_V23;
     case "confirm":
       return continuing
         ? respondToRequest
-          ? CONTINUE_V24 + "それでも次の返答に相手の情報が必要なときだけ、未回答の具体的な一点を尋ねてください。何を確かめるかを相手に委ねないでください。"
+          ? tidied
+            ? CONTINUE_V25 + "次の返答に相手の情報が必要なときだけ、未回答の具体的な一点を尋ねてください。何を確かめるかを相手に委ねないでください。"
+            : CONTINUE_V24 + "それでも次の返答に相手の情報が必要なときだけ、未回答の具体的な一点を尋ねてください。何を確かめるかを相手に委ねないでください。"
           : "同じ論点について何を確かめるとよいか、特定の図形や特徴を決めつけず、今の候補の範囲で短く尋ねてください。同じ図形や名前が決まったとは言わないでください。"
-        : (respondToRequest ? CONFIRM_V24 : CONFIRM_V23) + (partOnly ? "" : "未解決の図形の命名の先送りを提案しないでください。") + stay;
+        : (respondToRequest ? tidied ? CONFIRM_V25 : CONFIRM_V24 : CONFIRM_V23) + (partOnly ? "" : "未解決の図形の命名の先送りを提案しないでください。") + stay;
     case "repair":
       return REPAIR_V23 + stay;
     case "hold_open":
@@ -118,7 +134,7 @@ function actionScope(action: JevDecisionAction, partOnly: boolean, continuing: b
   throw new Error("Missing v23 generation scope for " + action);
 }
 
-function outputContract(multiple: boolean, visual: boolean, moveOn: boolean, omitVisualSources?: boolean, rotationSources?: boolean) {
+function outputContract(multiple: boolean, visual: boolean, moveOn: boolean, omitVisualSources?: boolean, rotationSources?: boolean, tidied?: boolean) {
   if (!multiple && !visual && !moveOn) return ["今回は公開発話の本文だけを返してください。"];
   const main = multiple ? "parts" : "text";
   const keys = [main, ...(!omitVisualSources && (multiple || visual) ? ["observationFeatures"] : []), ...(moveOn ? ["moveOn"] : [])];
@@ -127,7 +143,7 @@ function outputContract(multiple: boolean, visual: boolean, moveOn: boolean, omi
     multiple
       ? 'parts は公開する順に並べた {"item":番号,"text":"この扱いの公開文"} の配列です。items の全番号を一度ずつ使ってください。'
       : "text には自然な公開発話を書いてください。",
-    ...(omitVisualSources ? [] : visual ? [VISUAL_FEATURE_SOURCES_V23, ...(rotationSources ? [ROTATION_FEATURE_SOURCES] : [])] : multiple ? ["observationFeatures は必ず空配列 [] にしてください。"] : []),
+    ...(omitVisualSources ? [] : visual ? [VISUAL_FEATURE_SOURCES_V23, ...(rotationSources ? [tidied ? ROTATION_FEATURE_SOURCES_V25 : ROTATION_FEATURE_SOURCES] : [])] : multiple ? ["observationFeatures は必ず空配列 [] にしてください。"] : []),
     ...(moveOn ? [`相手が話題を移すことを求めています。${main} には今の命名への回答（未確定ならその旨）を書き、移行は述べないでください。moveOn には移行への自然な受け止めだけを書いてください。moveOn は最後に公開されます。`] : []),
   ];
 }
@@ -142,9 +158,9 @@ export function generationActionPromptV23(input: ActionPrompt) {
       ? "【複数の扱い】items の全扱いを一つの矛盾のない発話にまとめてください。0 番が主な扱いです。述べる順序とつなぎ方は自然にしてかまいません。"
       : "以下の計画に従って発話してください。",
     ...items.map(({ action }, index) => (multiple ? `items の ${index} 番（${action}）: ` : `【行動 ${action}】`) +
-      actionScope(action, multiple || humanLedTransition, continuing, closing, input.respondToRequest)),
+      actionScope(action, multiple || humanLedTransition, continuing, closing, input.respondToRequest, input.tidied)),
     ...(items.some(item => item.visualPurpose || item.issue) ? [ISSUE_KINDS_V23] : []),
-    ...(visualDetail && items.some(item => item.action === "confirm" || item.action === "repair") ? [VISUAL_FEATURE_SELECTION_V23] : []),
+    ...(visualDetail && items.some(item => item.action === "confirm" || item.action === "repair") ? [input.tidied ? VISUAL_FEATURE_SELECTION_V25 : VISUAL_FEATURE_SELECTION_V23] : []),
     ...(action === "confirm" && input.namingRequest && !(continuing && input.respondToRequest)
       ? ["相手が出した呼び名は採用・再提案せず、選んだ論点の確認に結び付けてください。その案に触れる場合は、相手の提案だと分かる引用にとどめてください。"] : []),
     ...(input.reconfirmation ? [input.reconfirmation] : []),
@@ -155,7 +171,7 @@ export function generationActionPromptV23(input: ActionPrompt) {
         : []),
     ...(reconsidered ? ["直前の未公開稿に代わる応答です。新しく指定された計画で応じ、未確認の名前や対応を決定しないでください。"] : []),
     ...(continuing && !input.respondToRequest ? ["命名・対象の対応は未確定です。その点について会話を続け、合意したとは言わず以前の採用も変更しないでください。"] : []),
-    ...outputContract(multiple, visualDetail, humanLedTransition, input.omitVisualSources, input.rotationSources),
+    ...outputContract(multiple, visualDetail, humanLedTransition, input.omitVisualSources, input.rotationSources, input.tidied),
     PUBLIC_QUESTIONS_V23,
     JSON.stringify({ publicQuestions: input.publicQuestions }),
     JSON.stringify(plan),

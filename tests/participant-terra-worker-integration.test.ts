@@ -7,9 +7,9 @@ import { MEMO_LOCAL_EXTRACTION_INSTRUCTIONS, memoExtractionPrompt } from '../dia
 import { MEMO_AI_PUBLIC_EXTRACTION_INSTRUCTIONS, memoAiExtractionPrompt } from '../dialogue-model/runtime/local-grounding/extract-ai.ts';
 import { approveReception, canonicalReceptionProtocolV2, canonicalReceptionProtocolV3, PILOT012_PARTICIPANT_PROFILE, PILOT012_V18_PARTICIPANT_PROFILE,
   PILOT012_V19_PARTICIPANT_PROFILE, PILOT012_V20_PARTICIPANT_PROFILE, PILOT012_V21_PARTICIPANT_PROFILE, PILOT012_V22_PARTICIPANT_PROFILE,
-  PILOT012_V23_PARTICIPANT_PROFILE, PILOT012_V24_PARTICIPANT_PROFILE,
+  PILOT012_V23_PARTICIPANT_PROFILE, PILOT012_V24_PARTICIPANT_PROFILE, PILOT012_V25_PARTICIPANT_PROFILE,
   receptionProtocolSha256, receptionSummary, validateReceptionPlan } from '../dialogue-model/runtime/v2/reception.ts';
-import { DEFERRED_AI_EXTRACTION_GENERATION, GENERATION_RETRY_V22, GENERATION_RETRY_V23, GENERATION_RETRY_V24, ISSUE_HANDLING_GENERATION,
+import { DEFERRED_AI_EXTRACTION_GENERATION, GENERATION_RETRY_V22, GENERATION_RETRY_V23, GENERATION_RETRY_V24, GENERATION_RETRY_V25, ISSUE_HANDLING_GENERATION,
   isGenerationV23, isIssueHandlingGeneration, usesV22GenerationRules } from '../dialogue-model/runtime/v2/deferred-ai-extraction.ts';
 import { createNamingTaskV2 } from '../dialogue-model/runtime/v2/naming-task-v2.mjs';
 import { VISUAL_FEATURE_GENERATION } from '../dialogue-model/runtime/v2/generation-guard.ts';
@@ -1754,7 +1754,10 @@ function v12Transport(t: TestContext, h: ReturnType<typeof harness>) {
       response = JSON.stringify(options.sharedReading
         ? latest.text === p5Support ? [segment(p5Support, 'construal', [decisionSlot], latest.turn - 1)] : []
         : latest.text === v12Answer ? [segment(v12Answer, 'contour', [], latest.turn - 1)] : []);
-    } else if (first === memoAiExtractionPrompt(SHAPE_TERMINOLOGY_GENERATION, true) || first === memoAiExtractionPrompt(SHAPE_TERMINOLOGY_GENERATION, true, false, true)) {
+    } else if (first === memoAiExtractionPrompt(SHAPE_TERMINOLOGY_GENERATION, true) || first === memoAiExtractionPrompt(SHAPE_TERMINOLOGY_GENERATION, true, false, true) ||
+        // v25: the extraction that reads the sources of a published sentence ends with the rules on what a source is (sourceRules), with or without the rotation memory.
+        first === memoAiExtractionPrompt(SHAPE_TERMINOLOGY_GENERATION, true, false, false, true) ||
+        first === memoAiExtractionPrompt(SHAPE_TERMINOLOGY_GENERATION, true, false, true, true)) {
       phase = 'ai_extraction';
       if (options.failVisualExtraction) {
         options.failVisualExtraction = false;
@@ -2033,10 +2036,14 @@ async function verifyPilot012WorkerProfile(t: TestContext,
 test('an already approved v23 reception keeps generated openings in both conditions after the scripted-opening update',
   t => verifyPilot012WorkerProfile(t, PILOT012_V23_PARTICIPANT_PROFILE, GENERATION_RETRY_V23, true));
 
+// v25 keeps every v24 procedure: the same setting is pinned at approval and read back through a cold restore, with the v25 generation version.
+for (const [label, profile, generation] of [
+  ['v24', PILOT012_V24_PARTICIPANT_PROFILE, GENERATION_RETRY_V24], ['v25', PILOT012_V25_PARTICIPANT_PROFILE, GENERATION_RETRY_V25],
+] as const)
 for (const [strategy, configured] of [
   ['repair-first', undefined], ['bypass-enabled', undefined], ['repair-first', 'off'], ['bypass-enabled', 'on'],
 ] as const) {
-  test(`v24 post-generation checking pins ${configured ?? 'default OFF'} for ${strategy} at approval through cold restore`, async t => {
+  test(`${label} post-generation checking pins ${configured ?? 'default OFF'} for ${strategy} at approval through cold restore`, async t => {
     const expected = configured ?? 'off';
     const h = harness(true, { ...figureBankProtocol, allowedOrders: [[strategy]] }, true);
     const transport = v12Transport(t, h);
@@ -2049,7 +2056,7 @@ for (const [strategy, configured] of [
         if (Object.keys(body.questions).some(key => key.startsWith('draft_'))) throw new Error('unexpected prepublication check');
       };
     }
-    h.env.PARTICIPANT_DIALOGUE_PROFILE = PILOT012_V24_PARTICIPANT_PROFILE;
+    h.env.PARTICIPANT_DIALOGUE_PROFILE = profile;
     h.env.PARTICIPANT_AI_PROXY.participantInitialObservationPolicy = transport.observationPolicy;
     const prepared = await h.prepare();
     assert.ok(prepared);
@@ -2066,7 +2073,7 @@ for (const [strategy, configured] of [
     const key = 'record:' + id;
     assert.equal(Object.hasOwn(trial, 'postGenerationCheck'), false);
     const started = await h.storage.get(key);
-    assert.equal(started.options.generationRetryVersion, GENERATION_RETRY_V24);
+    assert.equal(started.options.generationRetryVersion, generation);
     assert.equal(started.options.postGenerationCheck, expected);
     assert.equal(started.assignment.source.plan.postGenerationCheck, expected);
     assert.equal(started.strategy, strategy);
@@ -3902,18 +3909,20 @@ test('v23 recovers generated opening and final submission without another partic
 const threeFigureProtocol = { ...protocol, schemaVersion: 'reception_protocol_v3', allowedOrders: [['bypass-enabled', 'repair-first']],
   figureSelection: { mode: 'custom', figureIds: ['F1', 'F2', 'F8'] }, figureSetPolicy: 'shared' };
 const rotationOf = (record: any) => record.queueState.privateState.observationMemo.figures.map((figure: any) => figure.rotation);
-const bundleHarness = (t: TestContext) => {
+const bundleHarness = (t: TestContext, profile: typeof PILOT012_V24_PARTICIPANT_PROFILE | typeof PILOT012_V25_PARTICIPANT_PROFILE = PILOT012_V24_PARTICIPANT_PROFILE) => {
   const h = harness(true, threeFigureProtocol, true, true);
   const transport = v12Transport(t, h);
   transport.options.sharedReading = true;
   h.controlled.selectedAction = 'accept';
-  h.env.PARTICIPANT_DIALOGUE_PROFILE = PILOT012_V24_PARTICIPANT_PROFILE;
+  h.env.PARTICIPANT_DIALOGUE_PROFILE = profile;
   h.env.PARTICIPANT_AI_PROXY.participantInitialObservationPolicy = transport.observationPolicy;
   return { h, transport };
 };
 
-test('a new three-figure reception approves, starts and cold-restores with no prepared memo and no observation request', async t => {
-  const { h, transport } = bundleHarness(t);
+// The rotation-memory bundle (#276), three figures and the rotation modes work the same in v25: the same lifecycle runs for both profiles.
+for (const [label, profile] of [['v24', PILOT012_V24_PARTICIPANT_PROFILE], ['v25', PILOT012_V25_PARTICIPANT_PROFILE]] as const)
+test(`${label === 'v24' ? '' : 'v25: '}a new three-figure reception approves, starts and cold-restores with no prepared memo and no observation request`, async t => {
+  const { h, transport } = bundleHarness(t, profile);
   const bundlePin = rotationMemoryPin();
   await h.receive(); // nothing was prepared: a claim of stock would fail here
   const { plan } = await h.approve();

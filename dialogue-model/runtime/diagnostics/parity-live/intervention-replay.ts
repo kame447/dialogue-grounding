@@ -9,7 +9,7 @@ import {researchHash} from '../../v2/research-profile.ts';
 import {resolveInterventionPolicy} from '../../intervention-policy.ts';
 import {createProfileDialogue} from './replay.ts';
 import {hasVersionedViewpoint,isGenerationV17,validGenerationRetryVersion} from '../../v2/generation-guard.ts';
-import {isGenerationV24,isIssueHandlingGeneration,isPostGenerationCheck,usesV22GenerationRules} from '../../v2/deferred-ai-extraction.ts';
+import {usesV24GenerationRules,isIssueHandlingGeneration,isPostGenerationCheck,usesV22GenerationRules} from '../../v2/deferred-ai-extraction.ts';
 import type {PostGenerationCheck} from '../../v2/deferred-ai-extraction.ts';
 import type {RecordedGenerationRetryVersion} from '../../v2/generation-guard.ts';
 import {EVIDENCE_NORMALIZED_ENVELOPE_FIELDS,imageProjection,projectReplayValue} from './evidence.ts';
@@ -45,7 +45,7 @@ export async function pairedInterventionReplay(tape:InterventionReplayTape,own:O
  const stop=(s:ReplayError):never=>{materialFailure??=s;throw Error(s);};
  try{
   const issueHandling=isIssueHandlingGeneration(tape?.generationRetryVersion);
-  const generationV24=isGenerationV24(tape?.generationRetryVersion);
+  const generationV24=usesV24GenerationRules(tape?.generationRetryVersion);
   data(tape);if(!exact(tape,['schemaVersion','state','events','common','tails','recorded',...(Object.hasOwn(tape,'technicalTrial')?['technicalTrial']:[]),...(Object.hasOwn(tape,'generationRetryVersion')?['generationRetryVersion']:[]),...(issueHandling?['requestSeq']:[]),...(generationV24?['postGenerationCheck']:[])])||(Object.hasOwn(tape,'technicalTrial')&&(!exact(tape.technicalTrial,['version'])||!['adaptive_repair_v1','adaptive_repair_v2','adaptive_repair_v3'].includes(tape.technicalTrial!.version)))||tape.schemaVersion!=='parity_intervention_replay_v1'||!exact(tape.tails,['repair-first','bypass-enabled'])||!exact(tape.recorded,['label','expectedRequests'])||!['repair-first','bypass-enabled'].includes(tape.recorded.label)||!Array.isArray(tape.recorded.expectedRequests)||!Array.isArray(tape.events)||!tape.events.length||issueHandling&&(!Number.isSafeInteger(tape.requestSeq)||tape.requestSeq!<1))stop('replay_material_invalid');
   if(generationV24&&!isPostGenerationCheck(tape.postGenerationCheck))stop('replay_material_invalid');
   if(Object.hasOwn(tape,'generationRetryVersion')&&((tape.generationRetryVersion!=='jev_generation_retry_v2'&&!hasVersionedViewpoint(tape.generationRetryVersion))||!validGenerationRetryVersion(tape.generationRetryVersion,profile.questionLayout,profile.dialoguePolicy)))stop('replay_material_invalid');
