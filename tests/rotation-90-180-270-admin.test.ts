@@ -256,29 +256,32 @@ test('each rotation choice is accepted by the form, any other value is not', asy
   }
 });
 
-test('saved 4- and 6-figure protocols show their values and save again as they are, on the new mode and on an explicit ±90°', async () => {
+test('a saved 4- or 6-figure ±90° protocol is switched at startup with its figures kept; three figures then keep the new mode, and an explicit ±90° survives saves and starts', async () => {
   for (const figureIds of [['F1', 'F2', 'F3', 'F4'], ['F1', 'F2', 'F3', 'F4', 'F5', 'F6']]) {
     const storage = memory();
     assert.equal((await previousRelease(storage).saveReceptionProtocol({ expectedRevision: 0,
       fields: protocolFields({ rotationMode: 'relative_pm90', figureSelection: { mode: 'custom', figureIds } }) })).ok, true);
     const { index } = await started(storage), admin = adminOver(index);
-    const resave = async (patch: Record<string, string> = {}) => {
-      const page = await (await admin(SETTINGS)).text(), form = submittedFrom(page);
-      assert.deepEqual(checkedValues(page, 'figureIds'), figureIds); assert.deepEqual(checkedValues(page, 'figureMode'), ['custom']);
-      for (const [name, value] of Object.entries(patch)) form.set(name, value);
-      assert.equal((await admin(SETTINGS + '/protocol', form)).status, 303);
-      return { page, saved: (await index.readReceptionSettings()).protocol };
-    };
-    // The ±90° saved by the previous release was switched at startup (revision 2); the figures are kept.
-    assert.deepEqual(checkedValues(await (await admin(SETTINGS)).text(), 'rotationMode'), [NEW]);
-    let { page, saved } = await resave();
-    assert.deepEqual([saved.revision, saved.protocol.rotationMode, saved.protocol.figureSelection], [3, NEW, { mode: 'custom', figureIds }]);
-    // The researcher can choose the legacy ±90° explicitly, see it again and save it again.
-    ({ page, saved } = await resave({ rotationMode: 'relative_pm90' }));
+    const save = async (form: URLSearchParams) => { assert.equal((await admin(SETTINGS + '/protocol', form)).status, 303); return (await index.readReceptionSettings()).protocol; };
+    // The startup switch changed only the rotation (revision 2); the saved figures are history now, shown as a notice and not preselected.
+    let page = await (await admin(SETTINGS)).text();
+    assert.deepEqual((await index.readReceptionSettings()).protocol.protocol.figureSelection, { mode: 'custom', figureIds });
+    assert.deepEqual(checkedValues(page, 'rotationMode'), [NEW]); assert.deepEqual(checkedValues(page, 'figureIds'), []);
+    assert.ok(page.includes(`現在の設定は${figureIds.length}図形のため`));
+    // Choosing three figures saves them with the rotation the page showed.
+    const form = submittedFrom(page); form.set('figureMode', 'custom');
+    for (const id of ['F1', 'F2', 'F3']) form.append('figureIds', id);
+    let saved = await save(form);
+    assert.deepEqual([saved.revision, saved.protocol.rotationMode, saved.protocol.figureSelection], [3, NEW, { mode: 'custom', figureIds: ['F1', 'F2', 'F3'] }]);
+    // The researcher can then choose the legacy ±90° explicitly, see it again and save it again.
+    page = await (await admin(SETTINGS)).text();
+    const legacy = submittedFrom(page); legacy.set('rotationMode', 'relative_pm90');
+    saved = await save(legacy);
     assert.deepEqual([saved.revision, saved.protocol.rotationMode], [4, 'relative_pm90']);
-    ({ page, saved } = await resave());
+    page = await (await admin(SETTINGS)).text();
     assert.deepEqual(checkedValues(page, 'rotationMode'), ['relative_pm90']);
-    assert.deepEqual([saved.revision, saved.protocol.rotationMode, saved.protocol.figureSelection], [5, 'relative_pm90', { mode: 'custom', figureIds }]);
+    saved = await save(submittedFrom(page));
+    assert.deepEqual([saved.revision, saved.protocol.rotationMode, saved.protocol.figureSelection], [5, 'relative_pm90', { mode: 'custom', figureIds: ['F1', 'F2', 'F3'] }]);
     const settled = storage.snapshot(), again = await started(storage);
     assert.deepEqual(storage.snapshot(), settled, 'a later start does not rewrite the explicit ±90°'); assert.deepEqual(again.prepared, []);
   }

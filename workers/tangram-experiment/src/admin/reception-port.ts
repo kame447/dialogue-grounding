@@ -50,6 +50,8 @@ export type ReceptionProtocolStatus = { configured: false; mode: ReceptionMode }
   /** Absent for a protocol saved before the figure bank (v2). */
   figureSelection?: ProtocolFigureSelection;
   figureSetPolicy?: FigureSetPolicy;
+  /** Present when the setting is not three figures, so no new reception can be approved from it (#268). */
+  legacyFigures?: true;
 };
 export type ReceptionAdminError = 'not_found' | 'conflict' | 'invalid_order' | 'protocol_unconfigured' | 'protocol_changed' | 'reception_closed' | 'reception_unavailable' | 'prepared_observations_unavailable';
 /** The protocol version shown in the approval form. */

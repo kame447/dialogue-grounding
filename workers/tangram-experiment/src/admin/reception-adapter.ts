@@ -1,6 +1,6 @@
 import { PARTICIPANT_PRODUCTION_PROFILE } from '../../../../dialogue-model/runtime/web/participant-usage-policy.ts';
 import { ReceptionError, validateReception, effectiveRotationMode, effectiveBetweenTrials, effectiveFigureSelection } from '../../../../dialogue-model/runtime/v2/reception.ts';
-import { validateReceptionSettings } from './reception-settings.ts';
+import { usesThreeFigures, validateReceptionSettings } from './reception-settings.ts';
 import type { Reception, ReceptionSummary } from '../../../../dialogue-model/runtime/v2/reception.ts';
 import type { DisplayedProtocol, ProtocolFormInput, ReceptionAdminPort, ReceptionAdminRow, ReceptionAdminResult, ReceptionFailedStartUsage, ReceptionSettingsPort } from './reception-port.ts';
 import type { FigurePresetPort } from './figure-presets.ts';
@@ -82,7 +82,8 @@ export function createReceptionAdminPort(options: Options): ReceptionAdminPort {
       const p = s.protocol.protocol;
       return { configured:true, mode:s.mode.value, protocolId:p.protocolId, revision:s.protocol.revision, sha256:s.protocol.sha256,
         allowedOrders:p.allowedOrders, rotationMode:p.rotationMode, betweenTrials:p.betweenTrials,
-        ...(p.schemaVersion === 'reception_protocol_v3' ? { figureSelection:p.figureSelection, figureSetPolicy:p.figureSetPolicy } : {}) };
+        ...(p.schemaVersion === 'reception_protocol_v3' ? { figureSelection:p.figureSelection, figureSetPolicy:p.figureSetPolicy } : {}),
+        ...(usesThreeFigures(p) ? {} : { legacyFigures:true as const }) };
     },
     async listPage(after) {
       const summaries = await options.index.listReceptions();
@@ -172,7 +173,7 @@ type SettingsIndex = {
   saveReceptionPostGenerationCheck(input: unknown): Promise<unknown>;
   listFigurePresets: FigurePresetPort['list']; readFigurePreset: FigurePresetPort['read']; saveFigurePreset: FigurePresetPort['save'];
 };
-const SAVE_ERRORS = ['conflict', 'invalid', 'protocol_unconfigured', 'unavailable'];
+const SAVE_ERRORS = ['conflict', 'invalid', 'protocol_unconfigured', 'unavailable', 'three_figures_required'];
 function saveResult(value: unknown) {
   const v = structuredClone(value) as { ok?: unknown; error?: unknown };
   if (v?.ok === true) return { ok:true as const };

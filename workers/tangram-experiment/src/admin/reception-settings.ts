@@ -14,7 +14,6 @@
 import { ReceptionError, validateReceptionProtocolV2, validateReceptionProtocolV3, receptionProtocolSha256 } from '../../../../dialogue-model/runtime/v2/reception.ts';
 import type { ReceptionProtocolV2, ReceptionProtocolV3 } from '../../../../dialogue-model/runtime/v2/reception.ts';
 import { isPostGenerationCheck, type PostGenerationCheck } from '../../../../dialogue-model/runtime/v2/deferred-ai-extraction.ts';
-import { FIGURE_SET_SIZE } from '../../../../dialogue-model/runtime/stimuli/figure-bank.ts';
 import { readFigurePreset } from './figure-presets.ts';
 import { DEFAULT_ROTATION_MODE } from './rotation-choices.ts';
 import type { ProtocolFigureSelection, ProtocolFormInput } from './reception-port.ts';
@@ -34,7 +33,7 @@ export type ReceptionSettings = { protocol: ProtocolEntry | null; mode: ModeStat
 /** Reception is the default: only a researcher's explicit "off" closes it. The stored value is never rewritten. */
 export const receptionOpen = (mode: ModeState): boolean => mode.value !== 'off';
 export type ProtocolFields = Pick<ReceptionProtocolV3, 'allowedOrders' | 'seedPolicy' | 'referenceMemory' | 'betweenTrials' | 'receptionNumberFormat' | 'rotationMode' | 'figureSelection' | 'figureSetPolicy'>;
-export type SaveResult = { ok: true; revision: number } | { ok: false; error: 'conflict' | 'invalid' | 'protocol_unconfigured' | 'unavailable' };
+export type SaveResult = { ok: true; revision: number } | { ok: false; error: 'conflict' | 'invalid' | 'protocol_unconfigured' | 'unavailable' | 'three_figures_required' };
 
 const PROTOCOL = 'reception-protocol:current', PROTOCOL_REV = 'reception-protocol:rev:';
 const MODE = 'reception-mode:current', MODE_REV = 'reception-mode:rev:';
@@ -188,16 +187,16 @@ export async function migrateRotationDefault(storage: SettingsStorage, now: numb
   return revision;
 }
 
-function sameFigureSelection(a: ProtocolFigureSelection, b: ProtocolFigureSelection): boolean {
-  if (a.mode === 'seeded_random' && b.mode === 'seeded_random') {
-    return a.selectionSeed === b.selectionSeed && (a.figureCount ?? FIGURE_SET_SIZE) === (b.figureCount ?? FIGURE_SET_SIZE);
-  }
-  if (a.mode === 'preset' && b.mode === 'preset') return a.setId === b.setId;
-  return a.mode === 'custom' && b.mode === 'custom' &&
-    a.figureIds.length === b.figureIds.length && a.figureIds.every(id => b.figureIds.includes(id));
+/**
+ * Only a three-figure setting can make new receptions (#268): it is what can be saved, prepared for and approved.
+ * Four- and six-figure settings, and a v2 protocol with no figure fields, stay readable as history and for restores.
+ */
+export function usesThreeFigures(protocol: object): boolean {
+  const { figureSelection: selection } = protocol as { figureSelection?: ProtocolFigureSelection };
+  return selection?.mode === 'custom' && selection.figureIds.length === 3 || selection?.mode === 'seeded_random' && selection.figureCount === 3;
 }
 
-/** All reads and the write run inside one transaction. Only the frozen IDs enter the saved protocol. */
+/** All reads and the write run inside one transaction. Only the frozen IDs enter the saved protocol, and only three figures. */
 export async function saveProtocolFromForm(storage: SettingsStorage, input: ProtocolFormInput, now: number, newId: () => string): Promise<SaveResult> {
   const { expectedRevision, fields } = input;
   const selection = fields.figureSelection;
@@ -207,16 +206,10 @@ export async function saveProtocolFromForm(storage: SettingsStorage, input: Prot
     const preset = await readFigurePreset(storage, selection.id);
     if (!preset || preset.revision !== selection.revision) return { ok: false, error: 'conflict' };
     figureSelection = { mode: 'custom', figureIds: preset.figureIds };
-  } else if ((selection.mode === 'custom' && selection.figureIds.length === 3) ||
-    (selection.mode === 'seeded_random' && selection.figureCount === 3)) {
+  } else if (usesThreeFigures({ figureSelection: selection })) {
     figureSelection = selection;
   } else {
-    const { protocol } = await readSettings(storage);
-    if (expectedRevision !== (protocol?.revision ?? 0)) return { ok: false, error: 'conflict' };
-    const current = protocol?.protocol;
-    if (current?.schemaVersion !== 'reception_protocol_v3' || current.figureSetPolicy !== fields.figureSetPolicy ||
-      !sameFigureSelection(current.figureSelection, selection)) return { ok: false, error: 'invalid' };
-    figureSelection = current.figureSelection;
+    return { ok: false, error: 'three_figures_required' };
   }
   return saveProtocol(storage, { expectedRevision, fields: { ...fields, figureSelection } }, now, newId);
 }

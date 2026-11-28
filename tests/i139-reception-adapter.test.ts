@@ -23,7 +23,7 @@ const origin = 'https://i139-adapter.invalid';
 // Saved through the researcher settings store; env values are no longer read.
 const protocol = { allowedOrders:[['bypass-enabled','repair-first'],['repair-first']], seedPolicy:'shared', referenceMemory:false,
   betweenTrials:'none', receptionNumberFormat:'daily_seq3', rotationMode:'relative_pm90',
-  figureSelection:{ mode:'preset', setId:'legacy-v1' }, figureSetPolicy:'shared' };
+  figureSelection:{ mode:'custom', figureIds:['F1','F2','F3'] }, figureSetPolicy:'shared' };
 // The protocol version displayed in the management list; approval forms echo it.
 let shown: { protocolId: string; protocolRevision: string; protocolSha256: string } = { protocolId:'', protocolRevision:'', protocolSha256:'' };
 const clone = <T>(value: T): T => structuredClone(value);
