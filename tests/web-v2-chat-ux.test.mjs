@@ -63,15 +63,21 @@ function trial(id = "trial-private") {
   } };
 }
 const tick = async () => { for (let i = 0; i < 40; i++) await Promise.resolve(); };
-async function ui(initial = trial(), handler, { tabSessionId, busy = false } = {}) {
+async function ui(initial = trial(), handler, { tabSessionId, busy = false, storage = new Map(), startTime = 10000, initialReception, uuid } = {}) {
   const { root, ids: e } = makeDOM();
-  let state = { trial: initial, busy }, timerId = 0, now = 10000, clientSequence = 0;
+  let state = { trial: initial, busy, reception: initialReception }, timerId = 0, now = startTime, clientSequence = 0;
   const timers = new Map(), calls = [];
+  const document = {
+    visibilityState: "visible",
+    getElementById: (id) => e[id], createElement: (tag) => new Element(tag), createElementNS: (_, tag) => new Element(tag),
+    addEventListener: (type, listener) => root.addEventListener(type, listener),
+  };
   runInNewContext(script, {
     Date: class extends Date { static now() { return now; } },
-    crypto: { randomUUID: () => "browser-client-" + ++clientSequence },
+    crypto: { randomUUID: uuid ?? (() => "browser-client-" + ++clientSequence) },
     ...(tabSessionId ? { TangramTabSession: { resolve: async () => ({ kind: "restored", sessionId: tabSessionId }) } } : {}),
-    document: { getElementById: (id) => e[id], createElement: (tag) => new Element(tag), createElementNS: (_, tag) => new Element(tag) },
+    document,
+    sessionStorage: { getItem: (key) => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value), removeItem: (key) => storage.delete(key) },
     FormData: class {
       constructor(form) { this.values = Object.entries(form.elements).map(([name, node]) => [name, node.value]); }
       get(name) { return this.values.find(([key]) => key === name)?.[1] ?? null; }
@@ -82,18 +88,18 @@ async function ui(initial = trial(), handler, { tabSessionId, busy = false } = {
       const body = options?.body ? JSON.parse(options.body) : undefined;
       const tabHeader = options?.headers?.["X-Tab-Session"];
       if (tabSessionId) assert.equal(tabHeader, tabSessionId, path);
-      calls.push({ path, body });
+      calls.push({ path, body, tabHeader, now });
       const custom = await handler?.({ path, body, state });
       let value = state;
-      if (custom) return { ok: custom.status < 400, status: custom.status, json: async () => structuredClone(custom.body) };
+      if (custom) return { ok: custom.status < 400, status: custom.status,
+        headers: { get: (name) => custom.headers?.[name] ?? null }, json: async () => {
+          if (custom.invalidJson) throw new SyntaxError("truncated synthetic JSON");
+          return structuredClone(custom.body);
+        } };
       if (path === "/api/message") {
         const eventId = "event-" + (state.trial.events.length + 1);
         state.trial.events.push({ id: eventId, speaker: "human", text: body.text, clientId: body.clientId });
         state.trial.aiStatus = "thinking"; value = { eventId, ...state };
-      }
-      if (path === "/api/retry") {
-        state.trial.aiStatus = "idle";
-        state.trial.events.push({ id: "event-retry", speaker: "ai", text: "再試行した応答" });
       }
       return { ok: true, status: path === "/api/message" ? 202 : 200, json: async () => structuredClone(value) };
     },
@@ -108,7 +114,8 @@ async function ui(initial = trial(), handler, { tabSessionId, busy = false } = {
     }
     assert.fail("fixture timer did not settle");
   };
-  return { e, root, calls, getState: () => state, advance,
+  return { e, root, calls, storage, now: () => now, getState: () => state, advance,
+    visibility: async (value) => { document.visibilityState = value; root.fire("visibilitychange"); await tick(); },
     poll: async () => {
       const timer = [...timers.values()].filter((entry) => entry.delay === 700 || entry.delay === 2000).sort((a, b) => a.at - b.at)[0];
       assert.ok(timer, "a state refresh is scheduled"); await advance(timer.at - now);
@@ -123,7 +130,9 @@ const typingCount = (e) => e.history.children.filter(isTyping).length;
 const messageNodes = (e) => typingShown(e) ? e.history.children.slice(0, -1) : e.history.children;
 const messageBodies = (e) => messageNodes(e).map((node) => node.querySelectorAll("p")[0]?.textContent);
 const messageCalls = (calls) => calls.filter((call) => call.path === "/api/message");
-const STOPPED = "進行を確認できません。実験担当者にお知らせください。";
+const DELAYED = "応答に時間がかかっています。入力した内容は保持されています。";
+const RECOVERING = "応答に時間がかかっています。自動で再試行しています。入力した内容は保持されています。";
+const manualPaths = ["/api/retry", "/api/interrupt", "/api/ai-submit"];
 const gate = () => { let release; const wait = new Promise((resolve) => { release = resolve; }); return { wait, release }; };
 
 test("opening is the first ordinary AI bubble; send immediately clears, refocuses and appends before acknowledgement", async () => {
@@ -141,7 +150,7 @@ test("opening is the first ordinary AI bubble; send immediately clears, refocuse
 });
 
 test("active AI work, a held POST and polling keep the next draft and its IME editable", async () => {
-  const initial = { ...trial(), status: "dialogue", aiStatus: "thinking", dialogueRecovery: "active" };
+  const initial = { ...trial(), status: "dialogue", aiStatus: "thinking", dialogueRecovery: "active", recovering: true };
   const post = gate(), stateRead = gate();
   let posts = 0, reads = 0;
   const app = await ui(initial, async ({ path }) => {
@@ -152,6 +161,7 @@ test("active AI work, a held POST and polling keep the next draft and its IME ed
   assert.equal(typingShown(e), true);
   assert.equal(e.utterance.disabled, false);
   assert.equal(e["send-message"].disabled, false);
+  assert.equal(e["finish-conversation"].disabled, true);
 
   send(e, "最初の発話"); await tick();
   assert.equal(e.utterance.disabled, false);
@@ -185,49 +195,26 @@ test("active AI work, a held POST and polling keep the next draft and its IME ed
   assert.deepEqual(messageBodies(e).slice(1), ["最初の発話", "日本語の補足"]);
 });
 
-test("a held resume keeps the draft editable and sends it only on a later deliberate submit", async () => {
-  const initial = { ...trial(), status: "dialogue", aiStatus: "error", dialogueRecovery: "retry" };
-  const resume = gate();
-  const app = await ui(initial, async ({ path, state }) => {
-    if (path === "/api/retry") {
-      await resume.wait;
-      state.trial.aiStatus = "idle";
-      state.trial.dialogueRecovery = "active";
-      return { status: 200, body: state };
-    }
-  }, { tabSessionId: "mock-tab" });
-  const { e, calls } = app;
-  for (const recovery of ["paused", "unavailable", "retry"]) {
-    app.getState().trial.dialogueRecovery = recovery;
-    await app.poll();
-    assert.equal(e.utterance.disabled, false, recovery);
-    assert.equal(e["send-message"].disabled, true, recovery);
-  }
-  e.utterance.value = "復旧前の下書き";
-  e.chat.fire("submit"); await tick();
-  assert.equal(messageCalls(calls).length, 0);
-  e["retry-chat"].fire("click"); await tick();
-  assert.deepEqual(calls.filter(call => call.path === "/api/retry").map(call => call.body), [
-    { expectedRecordId: initial.sessionId },
-  ]);
-  assert.equal(e.utterance.disabled, false, "working while the /api/retry receipt is pending");
+
+test("old error states remain readable without manual recovery; only an explicit pause blocks sending", async () => {
+  const initial = { ...trial(), status: "dialogue", aiStatus: "error", dialogueRecovery: "paused" };
+  const { e, calls, getState, poll } = await ui(initial);
+  assert.equal(e["chat-recovery-message"].textContent, "会話を中断しました。");
   assert.equal(e["send-message"].disabled, true);
-  e.utterance.fire("compositionstart");
-  e.utterance.value = "復旧中に編集中";
-  e.utterance.fire("keydown", { key: "Enter", isComposing: true });
-  resume.release(); await tick();
-  assert.equal(e.utterance.value, "復旧中に編集中");
-  assert.equal(e.utterance.disabled, false);
-  assert.equal(e["send-message"].disabled, false);
+  e.utterance.value = "保った下書き";
+  await poll();
+  assert.equal(e.utterance.value, "保った下書き");
   assert.equal(messageCalls(calls).length, 0);
-  assert.equal(e.utterance.fire("keydown", { key: "Enter" }).prevented, false);
-  e.utterance.fire("compositionend"); await app.advance(0);
-  assert.equal(messageCalls(calls).length, 0);
-  e.utterance.fire("keydown", { key: "Enter" }); await tick(); await app.poll();
-  assert.deepEqual(messageCalls(calls).map(({ body }) => [body.text, body.expectedRecordId]), [
-    ["復旧中に編集中", initial.sessionId],
-  ]);
-  assert.equal(messageBodies(e).filter(text => text === "復旧中に編集中").length, 1);
+  for (const recovery of ["unavailable", "retry"]) {
+    getState().trial.dialogueRecovery = recovery;
+    await poll();
+    assert.equal(e.utterance.disabled, false);
+    assert.equal(e["send-message"].disabled, false);
+    assert.equal(e["finish-conversation"].disabled, true);
+    assert.equal(e["chat-recovery-message"].textContent, "応答を待っています。この画面のままお待ちください。");
+  }
+  assert.equal(e["chat-recovery"].querySelectorAll("button").length, 0);
+  assert.equal(calls.some(call => manualPaths.includes(call.path)), false);
 });
 
 test("202 with state reconciles the optimistic human once by clientId", async () => {
@@ -282,23 +269,61 @@ test("two identical texts have distinct clientIds and remain two messages in ser
   assert.notEqual(messageCalls(calls)[0].body.clientId, messageCalls(calls)[1].body.clientId);
 });
 
-test("failed send retains a subtle failure action, stops dots, and never automatically retries", async () => {
-  let failed = true;
-  const initial = trial(); initial.aiStatus = "thinking";
-  const { e, calls, poll } = await ui(initial, ({ path }) => path === "/api/message" && failed ? { status: 502, body: { error: "ai_unavailable" } } : undefined);
-  send(e, "失われない発話"); await tick(); await poll();
-  assert.equal(typingCount(e), 0);
-  assert.equal(messageBodies(e).at(-1), "失われない発話");
+
+test("a failed send retries in order with exactly the same body and tab", async () => {
+  let attempts = 0;
+  const { e, calls, advance } = await ui(trial(), ({ path }) =>
+    path === "/api/message" && ++attempts <= 2 ? { status: 502, body: { error: "ai_unavailable" } } : undefined,
+    { tabSessionId: "mock-tab" });
+  send(e, "失われない発話"); await tick();
+  send(e, "次に送る発話"); await tick();
   assert.equal(messageCalls(calls).length, 1);
-  const retry = e.history.querySelectorAll("button")[0];
-  assert.equal(retry.textContent, "再送"); assert.equal(retry.disabled, false);
-  assert.match(e["chat-status"].textContent, /送信を確認できません/u);
-  failed = false; retry.fire("click"); await tick();
-  assert.equal(messageCalls(calls).length, 2);
-  assert.deepEqual(messageCalls(calls)[1].body, messageCalls(calls)[0].body, "explicit retry reuses both id and exact text");
+  assert.equal(e["finish-conversation"].disabled, true);
   assert.equal(e.history.querySelectorAll("button").length, 0);
-  assert.equal(messageBodies(e).filter((text) => text === "失われない発話").length, 1);
+  assert.match(e["chat-status"].textContent, /入力を保持して送り直しています/u);
+  assert.deepEqual(messageBodies(e).slice(1), ["失われない発話", "次に送る発話"]);
+  await advance(1999);
+  assert.equal(messageCalls(calls).length, 1);
+  await advance(1);
+  assert.equal(messageCalls(calls).length, 2);
+  await advance(3999);
+  assert.equal(messageCalls(calls).length, 2);
+  await advance(1);
+  const messages = messageCalls(calls);
+  assert.equal(messages.length, 4);
+  assert.deepEqual(messages.slice(0, 3).map(call => call.body), Array(3).fill(messages[0].body));
+  assert.deepEqual(messages.slice(0, 3).map(call => call.tabHeader), Array(3).fill("mock-tab"));
+  assert.equal(messages[3].body.text, "次に送る発話");
+  assert.deepEqual(messageBodies(e).slice(1), ["失われない発話", "次に送る発話"]);
 });
+
+test("a 429 observes Retry-After and keeps the original clientId", async () => {
+  let attempts = 0;
+  const { e, calls, advance } = await ui(trial(), ({ path }) => path === "/api/message" && ++attempts === 1
+    ? { status: 429, body: { error: "rate_limited" }, headers: { "Retry-After": "3" } } : undefined);
+  send(e, "あとで届く発話"); await tick(); await advance(2999);
+  assert.equal(messageCalls(calls).length, 1);
+  await advance(1);
+  assert.deepEqual(messageCalls(calls).map(call => call.body), Array(2).fill(messageCalls(calls)[0].body));
+});
+
+for (const [condition, failure] of [
+  ["a temporary unavailable record", { status: 409, body: { error: "trial_unavailable" } }],
+  ["an unreadable success response", { status: 200, invalidJson: true }],
+]) {
+  test(`${condition} keeps the same message recoverable across reload`, async () => {
+    const first = await ui(trial(), ({ path }) => path === "/api/message" ? failure : undefined,
+      { tabSessionId: "mock-tab" });
+    send(first.e, "確認を失った発話"); await tick();
+    const original = messageCalls(first.calls)[0];
+    assert.equal(messageCalls(first.calls).length, 1);
+    const next = await ui(first.getState().trial, undefined, { tabSessionId: "mock-tab", storage: first.storage, startTime: first.now() });
+    await next.advance(2000);
+    assert.deepEqual(messageCalls(next.calls).map(({ body, tabHeader }) => ({ body, tabHeader })),
+      [{ body: original.body, tabHeader: original.tabHeader }]);
+    assert.equal(messageBodies(next.e).filter(text => text === original.body.text).length, 1);
+  });
+}
 
 test("an ambiguous response failure that was publicly accepted keeps one canonical bubble without a false retry", async () => {
   const { e, calls } = await ui(trial(), ({ path, body, state }) => {
@@ -330,73 +355,104 @@ test("three decorative dots and hidden polite status show during thinking, then 
   assert.equal(e["chat-status"].textContent, "");
 });
 
-test("AI errors replace dots with the neutral stop; checking the state resumes the turn without replaying human messages", async () => {
-  const state = trial(); state.aiStatus = "thinking";
-  const { e, getState, calls, poll } = await ui(state);
-  getState().trial.aiStatus = "error"; await poll();
+
+test("unchanged busy state reads do not renew the 60-second clock or block the next message", async () => {
+  const state = { ...trial(), aiStatus: "thinking", recovering: true, dialogueRecovery: "active" };
+  const { e, calls, advance, getState, poll } = await ui(state, undefined, { busy: true });
+  const initialCount = state.events.length;
+  await advance(59999);
+  assert.ok(typingShown(e));
+  await advance(1);
   assert.equal(typingCount(e), 0);
-  assert.equal(e["chat-recovery"].hidden, false);
-  assert.equal(e["chat-recovery-message"].textContent, STOPPED);
-  assert.equal(e["chat-status"].textContent, STOPPED);
-  assert.match(html, /<button id="retry-chat" type="button" class="quiet">状態を確認<\/button>/u, "one fixed label for every stop");
-  assert.doesNotMatch(e["chat-recovery"].textContent + e["chat-status"].textContent + e.notice.textContent, /AI|返答|再試行|取得/u);
-  assert.equal(calls.filter((call) => call.path === "/api/retry").length, 0);
-  e["retry-chat"].fire("click"); await tick();
-  assert.equal(calls.filter((call) => call.path === "/api/retry").length, 1);
-  assert.equal(messageCalls(calls).length, 0);
+  assert.equal(e["chat-recovery-message"].textContent, RECOVERING);
+  assert.equal(e["chat-recovery"].querySelectorAll("button").length, 0);
+  assert.equal(messageNodes(e).length, initialCount);
+  assert.equal(e["finish-conversation"].disabled, true);
+  e["finish-conversation"].fire("click");
+  assert.equal(e["name-stage"].hidden, true);
+  assert.ok(calls.filter(call => call.path === "/api/state").length > 2);
+  send(e, "回復中の追記"); await tick();
+  assert.equal(messageCalls(calls).length, 1);
+  assert.equal(e["chat-recovery-message"].textContent, RECOVERING, "another human message does not advance the AI reply");
+  getState().trial.events.push({ id: "event-3", speaker: "ai", text: "遅れて届いた返答" });
+  delete getState().trial.recovering;
+  getState().trial.aiStatus = "idle"; getState().busy = false; await poll();
   assert.equal(e["chat-recovery"].hidden, true);
+  assert.equal(e["finish-conversation"].disabled, false);
+  send(e, "回復後の次の発話"); await tick();
+  assert.equal(messageCalls(calls).length, 2);
+  assert.equal(calls.some(call => manualPaths.includes(call.path)), false);
 });
 
-test("no-progress watchdog stops animation after one minute; checking state cannot restart unchanged dots", async () => {
-  const state = trial(); state.aiStatus = "thinking";
-  const { e, calls, advance, getState, poll } = await ui(state);
-  assert.ok(typingShown(e));
+test("without a recovery marker a stall stays factual and returning to the tab polls immediately", async () => {
+  const state = { ...trial(), aiStatus: "thinking" };
+  const { e, calls, advance, visibility, getState } = await ui(state, undefined, { busy: true });
+  e.utterance.value = "編集中";
+  await visibility("hidden");
+  const count = calls.length;
   await advance(60001);
+  assert.equal(calls.length, count);
+  assert.equal(e["chat-recovery-message"].textContent, DELAYED);
   assert.equal(typingCount(e), 0);
-  assert.equal(e["chat-recovery"].hidden, false);
-  assert.equal(e["chat-recovery-message"].textContent, STOPPED);
-  assert.match(html, /<button id="retry-chat" type="button" class="quiet">状態を確認<\/button>/u, "one fixed label for every stop");
-  e["retry-chat"].fire("click"); await tick();
-  assert.equal(typingCount(e), 0);
-  assert.equal(calls.filter((call) => call.path === "/api/retry").length, 0);
-  getState().trial.events.push({ id: "event-2", speaker: "ai", text: "遅れて届いた返答" });
-  getState().trial.aiStatus = "idle"; await poll();
+  getState().trial.events.push({ id: "event-2", speaker: "ai", text: "非表示中の返答" });
+  getState().trial.aiStatus = "idle"; getState().busy = false;
+  await visibility("visible");
+  assert.equal(calls[count].path, "/api/state");
+  assert.equal(messageBodies(e).at(-1), "非表示中の返答");
   assert.equal(e["chat-recovery"].hidden, true);
+  assert.equal(e.utterance.value, "編集中");
 });
 
-// Issue #161: a short disconnection is not shown; polling recovers it. Only a
-// disconnection that outlasts the watchdog shows the neutral stop.
-test("a short disconnection stays invisible; a lasting one shows the neutral stop and recovery only re-reads", async () => {
-  let disconnected = false;
-  const state = trial(); state.aiStatus = "thinking";
-  const { e, calls, poll, advance, getState } = await ui(state, ({ path }) => { if (path === "/api/state" && disconnected) throw new Error("offline"); });
-  disconnected = true; await poll();
-  assert.ok(typingShown(e));
-  assert.equal(e["chat-recovery"].hidden, true);
-  disconnected = false; await poll();
-  assert.equal(e["chat-recovery"].hidden, true);
-  disconnected = true; await advance(60001);
-  assert.equal(typingCount(e), 0);
-  assert.equal(e["chat-recovery"].hidden, false);
-  assert.equal(e["chat-recovery-message"].textContent, STOPPED);
-  disconnected = false; e["retry-chat"].fire("click"); await tick();
-  assert.equal(typingCount(e), 0, "unchanged dots do not restart after the stall");
-  assert.equal(e["chat-recovery"].hidden, false, "no progress has been confirmed yet");
-  assert.equal(calls.filter((call) => call.path === "/api/retry").length, 0);
-  getState().trial.events.push({ id: "event-2", speaker: "ai", text: "遅れて届いた返答" });
-  getState().trial.aiStatus = "idle"; await poll();
-  assert.equal(e["chat-recovery"].hidden, true);
-});
-
-test("a missing POST acknowledgement times out to a retained retryable bubble without replay", async () => {
+test("an acknowledgement timeout retains the message then reuses its request", async () => {
   const held = gate();
-  const { e, calls, advance, poll } = await ui(trial(), async ({ path }) => { if (path === "/api/message") { await held.wait; return { status: 502, body: {} }; } });
-  send(e, "確認が返らない発話"); await tick(); await advance(20001); await poll();
+  let attempts = 0;
+  const { e, calls, advance } = await ui(trial(), async ({ path }) => {
+    if (path === "/api/message" && ++attempts === 1) { await held.wait; return { status: 502, body: {} }; }
+  });
+  send(e, "確認が返らない発話"); await tick(); await advance(20000);
   assert.equal(messageBodies(e).at(-1), "確認が返らない発話");
   assert.equal(typingCount(e), 0);
-  assert.equal(e.history.querySelectorAll("button")[0].disabled, false);
+  assert.equal(e.history.querySelectorAll("button").length, 0);
   assert.equal(messageCalls(calls).length, 1);
+  await advance(2000);
+  assert.deepEqual(messageCalls(calls).map(call => call.body), Array(2).fill(messageCalls(calls)[0].body));
   held.release(); await tick();
+  assert.equal(messageBodies(e).filter(text => text === "確認が返らない発話").length, 1);
+});
+
+test("reload reconciles a stored message before resending it only to its original record and tab", async () => {
+  for (const accepted of [false, true]) {
+    const first = await ui(trial(), ({ path }) => path === "/api/message" ? { status: 502, body: {} } : undefined,
+      { tabSessionId: "mock-tab" });
+    send(first.e, "再読み込みで保つ発話"); await tick();
+    const original = messageCalls(first.calls)[0];
+    if (accepted) first.getState().trial.events.push({ id: "event-2", speaker: "human", text: original.body.text, clientId: original.body.clientId });
+    const reload = await ui(first.getState().trial, undefined, { tabSessionId: "mock-tab", storage: first.storage, startTime: first.now() });
+    await reload.advance(2000);
+    assert.equal(messageCalls(reload.calls).length, Number(!accepted));
+    if (!accepted) {
+      assert.equal(messageCalls(reload.calls)[0].tabHeader, original.tabHeader);
+      assert.deepEqual(messageCalls(reload.calls)[0].body, original.body);
+    }
+    assert.equal(messageBodies(reload.e).filter(text => text === original.body.text).length, 1);
+  }
+});
+
+test("a retry never follows a changed tab, record or an ended trial", async () => {
+  for (const change of ["tab", "record", "ended"]) {
+    const first = await ui(trial(), ({ path }) => path === "/api/message" ? { status: 502, body: {} } : undefined,
+      { tabSessionId: "mock-tab" });
+    send(first.e, "前の試行の発話"); await tick();
+    const reload = await ui(change === "record" ? trial("another-trial") : change === "ended"
+      ? { ...trial(), closed: true, status: "submitting", submitted: true } : trial(),
+      undefined, { tabSessionId: change === "tab" ? "another-tab" : "mock-tab", storage: first.storage, startTime: first.now() });
+    await reload.advance(60000);
+    assert.equal(messageCalls(reload.calls).length, 0, change);
+    const state = first.getState();
+    state.trial = change === "ended" ? null : trial("another-trial");
+    await first.advance(60000);
+    assert.equal(messageCalls(first.calls).length, 1, change);
+  }
 });
 
 test("Shift+Enter and IME do not submit; plain Enter sends exact multiline text once", async () => {
@@ -457,20 +513,90 @@ test("typing motion is disabled by reduced-motion and the shortcut hint matches 
   assert.match(css, /#chat textarea\{[^}]*overflow-y:auto/u);
 });
 
-test("a hung recovery poll is bounded and cannot strand a failed-send retry button", async () => {
-  const held = gate(); let reads = 0;
-  const state = trial(); state.aiStatus = "thinking";
-  const { e, calls, advance } = await ui(state, async ({ path }) => {
-    if (path === "/api/message") return { status: 502, body: {} };
+
+test("a hung state read cannot strand the original message retry", async () => {
+  const held = gate(); let reads = 0, posts = 0;
+  const { e, calls, advance } = await ui(trial(), async ({ path }) => {
+    if (path === "/api/message" && ++posts === 1) return { status: 502, body: {} };
     if (path === "/api/state" && ++reads > 1) await held.wait;
   });
-  send(e, "失敗後の通信も止まった"); await tick();
-  assert.equal(typingCount(e), 0, "a POST failure immediately stops dots before recovery GET finishes");
-  await advance(10001);
-  assert.equal(e.history.querySelectorAll("button")[0].disabled, false);
+  send(e, "失敗後の状態取得も止まった"); await tick();
+  assert.equal(typingCount(e), 0);
+  await advance(9999);
   assert.equal(messageCalls(calls).length, 1);
-  await advance(50000);
-  assert.equal(e["chat-recovery"].hidden, false);
-  assert.equal(e["chat-recovery-message"].textContent, STOPPED);
+  await advance(1);
+  assert.equal(messageCalls(calls).length, 2);
+  assert.deepEqual(messageCalls(calls)[1].body, messageCalls(calls)[0].body);
   held.release(); await tick();
+});
+
+const startReception = () => ({ status: "ready", number: "試験受付", revision: 4 });
+const startUuid = () => "d5325b7f-1089-4221-9876-6b393fa77783";
+const startCalls = (calls) => calls.filter(call => call.path === "/api/start");
+
+test("a committed start is usable through GET while the original POST still hangs", async () => {
+  const held = gate();
+  const { e, calls, getState, poll, advance } = await ui(null, async ({ path, body, state }) => {
+    if (path !== "/api/start") return;
+    Object.assign(state, { starting: true, busy: true, startIntentId: body.startIntentId });
+    state.reception.revision++;
+    await held.wait;
+    return { status: 502, body: {} };
+  }, { tabSessionId: "mock-tab", initialReception: startReception(), uuid: startUuid });
+  e["start-trial"].fire("click"); await tick(); await poll();
+  assert.equal(e["start-trial"].disabled, true);
+  assert.deepEqual(startCalls(calls)[0].body, { version: 2, startIntentId: startUuid(), expectedReceptionRevision: 4 });
+  Object.assign(getState(), { trial: trial("new-record"), starting: undefined, busy: false });
+  await poll();
+  assert.equal(e.utterance.disabled, false);
+  assert.equal(messageBodies(e).at(-1), "まず、どの図形から話しましょうか？");
+  send(e, "開始後の発話"); await tick();
+  assert.equal(messageCalls(calls)[0].body.expectedRecordId, "new-record");
+  await advance(25000);
+  held.release(); await tick();
+  assert.equal(startCalls(calls).length, 1);
+  assert.equal(e.notice.textContent, "");
+});
+
+test("an unaccepted start survives reload and resends only the original intent after a state read", async () => {
+  const held = gate();
+  const admitted = new Map();
+  const deliver = (state, body) => {
+    if (!admitted.has(body.startIntentId)) admitted.set(body.startIntentId, trial("new-record"));
+    Object.assign(state, { trial: admitted.get(body.startIntentId), startIntentId: body.startIntentId });
+    state.reception.revision = body.expectedReceptionRevision + 1;
+    return { status: 200, body: state };
+  };
+  const first = await ui(null, async ({ path, body, state }) => {
+    if (path !== "/api/start") return;
+    await held.wait;
+    return deliver(state, body);
+  }, { tabSessionId: "mock-tab", initialReception: startReception(), uuid: startUuid });
+  first.e["start-trial"].fire("click"); await tick();
+  const next = await ui(null, ({ path, body, state }) => path === "/api/start" ? deliver(state, body) : undefined,
+    { tabSessionId: "mock-tab", initialReception: startReception(), storage: first.storage, startTime: first.now() });
+  await next.advance(1999);
+  assert.equal(startCalls(next.calls).length, 0);
+  await next.advance(102);
+  assert.equal(next.calls[0].path, "/api/state");
+  assert.equal(startCalls(next.calls).length, 1);
+  assert.deepEqual(startCalls(next.calls)[0].body, startCalls(first.calls)[0].body);
+  assert.equal(startCalls(next.calls)[0].tabHeader, "mock-tab");
+  held.release(); await tick();
+  assert.equal(admitted.size, 1);
+  assert.deepEqual(messageBodies(next.e), ["まず、どの図形から話しましょうか？"]);
+  assert.equal(next.e.utterance.disabled, false);
+  assert.equal(next.storage.has("joint-naming-v2-start"), false);
+});
+
+test("a start is not sent again after the reception changes or is ended", async () => {
+  for (const status of ["ready", "interrupted"]) {
+    const { e, calls, getState, advance } = await ui(null, ({ path }) =>
+      path === "/api/start" ? { status: 502, body: {} } : undefined,
+      { tabSessionId: "mock-tab", initialReception: startReception(), uuid: startUuid });
+    e["start-trial"].fire("click"); await tick();
+    Object.assign(getState().reception, { revision: 5, status });
+    await advance(65000);
+    assert.equal(startCalls(calls).length, 1);
+  }
 });

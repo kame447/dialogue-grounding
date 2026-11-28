@@ -186,7 +186,7 @@ test("accepted final names stay in Name stage until the server publishes a resul
 });
 
 test("rejected final names retain editable Name stage and never show Results", async () => {
-  const { e, calls } = await ui(trial(), ({ path }) => path === "/api/names" ? { status: 409, body: { error: "busy" } } : undefined);
+  const { e, calls } = await ui(trial(), ({ path }) => path === "/api/names" ? { status: 400, body: { error: "invalid_request" } } : undefined);
   e["finish-conversation"].fire("click");
   for (const path of paths(e)) { path.fire("click"); e["name-unknown"].fire("click"); }
   e.submission.fire("submit"); e["confirm-submit"].fire("click"); await tick();
