@@ -352,6 +352,29 @@ test('history classifies reception transitions and fail-closed states using only
     'repair-first', 'bypass-enabled', ...(await h.catalog(cookie)).map(item => item.doName)]);
 });
 
+test('new reception checks independent previous sessions concurrently without changing the catalog order', async () => {
+  const h = await harness(), cookie = await h.browser();
+  const ids = [await create(h, cookie), await create(h, cookie)];
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  let entered = 0;
+  for (const id of ids) {
+    const child = await h.entry(cookie, id);
+    const inspect = child.inspectEmptyTabSession.bind(child);
+    child.inspectEmptyTabSession = async (reclaim: boolean) => {
+      entered++;
+      await gate;
+      return inspect(reclaim);
+    };
+  }
+  const next = create(h, cookie);
+  try {
+    await new Promise<void>(resolve => setImmediate(resolve));
+    assert.equal(entered, 2, 'both child checks begin before either completes');
+  } finally { release(); await next; }
+  assert.deepEqual((await h.catalog(cookie)).map(item => item.sessionId), [...ids, await next]);
+});
+
 test('capacity reclaims old never-used slots while retaining a saved trial', async () => {
   const h = await harness(), cookie = await h.browser();
   const saved = await create(h, cookie);
