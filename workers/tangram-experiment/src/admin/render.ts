@@ -332,7 +332,7 @@ const BETWEEN_LABELS: Record<string, string> = { none: '指定なし', questionn
 export type ReceptionLive = { version: string; since: string };
 
 export function renderReceptions(items: ReceptionAdminRow[], next: string | null, protocol: ReceptionProtocolStatus, live: ReceptionLive | null = null,
-  forceEnd = false): string {
+  forceEnd = false, unavailableCount = 0): string {
   const form = (entry: ReceptionAdminRow, action: 'approve' | 'cancel' | 'force-end') => {
     // No preselected order: the researcher chooses one, and the form carries the protocol version it was shown with.
     const choices = action === 'approve' && protocol.configured
@@ -377,12 +377,13 @@ ${td('試行記録', trialLinks ? `<div class="reception-trials">${trialLinks}</
 ${td('操作', `${entry.status === 'pending' && unstarted && approvable ? form(entry, 'approve') : ''}${cancel ? form(entry, 'cancel') : ''}${end}${open}${usage}`, ' class="ops"')}</tr>`;
   }).join('');
   const names = ['受付番号', '受付時刻', '状態', '条件順序', '図形セット', '回転', '試行の間', '試行記録', '操作'];
-  const list = `<div id="reception-list"${live ? ` data-version="${escapeHtml(live.version)}" data-since="${escapeHtml(live.since)}"` : ''}>
+  const list = `<div id="reception-list"${live ? ` data-version="${escapeHtml(live.version)}" data-since="${escapeHtml(live.since)}"` : ''}${unavailableCount ? ' data-incomplete="true"' : ''}>
 <div data-part="status">${protocol.configured ? `<p>プロトコル設定済み: ${escapeHtml(protocol.protocolId)} / revision ${escapeHtml(protocol.revision)}</p>`
     : '<p class="bad">プロトコルが未設定のため、許可できません（<a href="/admin/reception-settings">受付の設定</a>）</p>'}
 ${protocol.configured && protocol.legacyFigures ? '<p class="bad">現在の設定は3図形ではないため、許可できません（<a href="/admin/reception-settings">受付の設定</a>）</p>' : ''}
 ${protocol.mode === 'off' ? '<p>受付を使わない設定です。許可済みの受付は、計画どおり続けられます。</p>' : ''}</div>
-${items.length ? `<div class="wrap cards" data-part="table"><table><thead>${head(names)}</thead><tbody>${rows}</tbody></table></div>` : '<p data-part="empty">受付はありません</p>'}
+${unavailableCount ? `<p data-part="incomplete" class="bad" role="status">受付 ${escapeHtml(unavailableCount)} 件の情報を取得できませんでした。${live ? '自動で再確認します。' : ''}</p>` : ''}
+${items.length ? `<div class="wrap cards" data-part="table"><table><thead>${head(names)}</thead><tbody>${rows}</tbody></table></div>` : unavailableCount ? '' : '<p data-part="empty">受付はありません</p>'}
 ${next ? `<p data-part="more"><a href="/admin/receptions?${escapeHtml(new URLSearchParams({ after: next }).toString())}">次のページ →</a></p>` : ''}</div>`;
   return page('受付一覧', `${adminNav('/admin/receptions')}<h1>受付一覧</h1>
 ${live ? '<p id="reception-new" role="status" aria-live="polite"></p><p id="reception-sync" class="muted" role="status"></p>' : ''}

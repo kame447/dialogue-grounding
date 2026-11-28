@@ -32,7 +32,7 @@ export const RECEPTIONS_LIVE_JS = `(function () {
   var known = new Set(), latest = new Map();
   // Empty when the server could not read it; the first good version then differs and the page is fetched again.
   var version = root.getAttribute('data-version') || '';
-  var stale = false, force = false, stopped = false, busy = false, failures = 0, timer = null, blockedUntil = 0, shown = -1;
+  var stale = root.getAttribute('data-incomplete') === 'true', force = false, stopped = false, busy = false, failures = 0, timer = null, blockedUntil = 0, shown = -1;
   var serverNew = 0, refreshedAt = Date.now();
 
   function rows(scope) { return Array.prototype.slice.call(scope.querySelectorAll('tr[data-id]')); }
@@ -142,7 +142,7 @@ export const RECEPTIONS_LIVE_JS = `(function () {
       if (!next || !HEX.test(nextVersion || '')) throw new Error('page');
       if (stopped) return;
       remember(next);
-      stale = !apply(next);
+      stale = !apply(next) || next.getAttribute('data-incomplete') === 'true';
       version = nextVersion;
       root.setAttribute('data-version', version);
       refreshedAt = Date.now();

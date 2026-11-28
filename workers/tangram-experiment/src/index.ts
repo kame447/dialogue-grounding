@@ -1545,8 +1545,15 @@ export default {
         token: index ? env.ADMIN_TOKEN : undefined,
         limiter: env.ADMIN_RATE_LIMIT,
         receptions: index ? createReceptionAdminPort({
-          index,
-          readSettings:() => index.readReceptionSettings(),
+          // DO RPC stubs can become unusable after an exception. A failed
+          // version probe must not poison the subsequent list or settings read.
+          index: {
+            listReceptions: () => env.ADMIN_INDEX!.get(env.ADMIN_INDEX!.idFromName(ADMIN_INDEX_NAME)).listReceptions(),
+            getReception: id => env.ADMIN_INDEX!.get(env.ADMIN_INDEX!.idFromName(ADMIN_INDEX_NAME)).getReception(id),
+            recordRoles: (ids, deleted) => env.ADMIN_INDEX!.get(env.ADMIN_INDEX!.idFromName(ADMIN_INDEX_NAME)).recordRoles(ids, deleted),
+            participantRoleRevision: () => env.ADMIN_INDEX!.get(env.ADMIN_INDEX!.idFromName(ADMIN_INDEX_NAME)).participantRoleRevision(),
+          },
+          readSettings:() => env.ADMIN_INDEX!.get(env.ADMIN_INDEX!.idFromName(ADMIN_INDEX_NAME)).readReceptionSettings(),
           owner,
         }) : undefined,
         receptionSettings: index ? createReceptionSettingsPort(index) : undefined,

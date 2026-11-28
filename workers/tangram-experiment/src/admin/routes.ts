@@ -484,10 +484,11 @@ export async function handleAdmin(request: Request, deps: AdminDeps): Promise<Re
         deps.receptions.protocol(), deps.receptions.listPage(url.searchParams.get('after')),
       ]);
       const listMs = performance.now() - started - versionMs;
+      if (page.unavailableCount && !wantsHtml(request)) return receptionError(503, 'reception_unavailable');
       // An unreadable version still starts the live list: an empty version differs from the first good one,
       // so the page is fetched again as soon as the version can be read.
       const live = deps.receptions.version ? { version: version !== null && /^[a-f0-9]{64}$/u.test(version) ? version : '', since } : null;
-      return respond(200, renderReceptions(page.items, page.next, protocol, live, Boolean(deps.receptions.forceEnd)), undefined, {
+      return respond(200, renderReceptions(page.items, page.next, protocol, live, Boolean(deps.receptions.forceEnd), page.unavailableCount ?? 0), undefined, {
         ...(live ? { 'Content-Security-Policy': LIVE_CSP } : {}),
         'Server-Timing': `version;dur=${versionMs.toFixed(1)}, reception-list;dur=${listMs.toFixed(1)}`,
       });

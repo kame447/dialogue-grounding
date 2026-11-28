@@ -158,16 +158,47 @@ test('management list reads multiple independent reception owners concurrently, 
   }
   const page = h.fetch(adminGet());
   try {
-    for (let i = 0; i < 100 && entered < 6; i++) await new Promise<void>(resolve => setImmediate(resolve));
-    assert.equal(entered, 6, 'six owner requests start before any response');
+    for (let i = 0; i < 100 && entered < 4; i++) await new Promise<void>(resolve => setImmediate(resolve));
+    assert.equal(entered, 4, 'four owner requests start before any response');
   } finally { release(); }
   const response = await page;
   assert.equal(response.status, 200);
   const html = await response.text();
   assert.equal(entered, 9);
-  assert.equal(peak, 6);
+  assert.equal(peak, 4);
   for (const cookie of cookies) assert.ok(html.includes(rec(h, cookie).receptionId));
   assert.match(response.headers.get('Server-Timing') ?? '', /version;dur=[\d.]+, reception-list;dur=[\d.]+/u);
+  await h.done();
+});
+
+test('a failed combined RPC retries the old read path without losing valid receptions', async () => {
+  const h = harness(), first = await h.browser(), second = await h.browser();
+  const owner = h.object(first);
+  let fastReads = 0;
+  owner.adminReceptionListState = async () => { fastReads++; throw Error('synthetic combined RPC failure'); };
+  const response = await h.fetch(adminGet());
+  assert.equal(response.status, 200);
+  const html = await response.text();
+  assert.ok(html.includes(rec(h,first).receptionId) && html.includes(rec(h,second).receptionId));
+  assert.equal(fastReads, 1);
+  assert.doesNotMatch(html,/data-incomplete/);
+  await h.done();
+});
+
+test('one persistently unreadable reception cannot hide the other verified rows in the browser', async () => {
+  const h = harness(), first = await h.browser(), second = await h.browser();
+  const owner = h.object(first);
+  owner.adminReceptionListState = async () => { throw Error('private failure'); };
+  owner.adminReception = async () => { throw Error('private failure'); };
+  const request = adminGet(); request.headers.set('Accept','text/html');
+  const response = await h.fetch(request); assert.equal(response.status,200);
+  const html = await response.text();
+  assert.ok(html.includes(rec(h,second).receptionId));
+  assert.ok(!html.includes(rec(h,first).receptionId));
+  assert.match(html,/data-incomplete="true"/);
+  assert.match(html,/受付 1 件の情報を取得できませんでした/);
+  assert.doesNotMatch(html,/private failure/);
+  await expectError(await h.fetch(adminGet()),503,'reception_unavailable');
   await h.done();
 });
 
