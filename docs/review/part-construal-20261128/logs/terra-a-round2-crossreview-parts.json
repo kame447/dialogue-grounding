@@ -1,0 +1,1874 @@
+{
+  "observer": "PolarFeynman",
+  "model": "gpt-6.1-terra",
+  "readOpusRound1": true,
+  "items": [
+    {
+      "item": "item-01",
+      "regions": [
+        {
+          "id": "P1",
+          "supports": [
+            "胴"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "首と翼に見える領域が接する中央の塊として低確信で支持する。",
+          "supportDetails": [
+            {
+              "noun": "胴",
+              "confidence": "低",
+              "reason": "首と翼に見える領域が接する中央の塊として低確信で支持する。"
+            }
+          ],
+          "ownCandidates": [],
+          "mergeAccepted": null
+        },
+        {
+          "id": "P2",
+          "supports": [
+            "首"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "左端の四角形と大きな領域をつなぐため低確信で支持する。初回は三角形が短く、02・25より首らしい細長さに乏しいと見たが、接続を再評価した。",
+          "supportDetails": [
+            {
+              "noun": "首",
+              "confidence": "低",
+              "reason": "左端の四角形と大きな領域をつなぐため低確信で支持する。初回は三角形が短く、02・25より首らしい細長さに乏しいと見たが、接続を再評価した。"
+            }
+          ],
+          "ownCandidates": [],
+          "mergeAccepted": null
+        },
+        {
+          "id": "P4",
+          "supports": [],
+          "objects": [
+            {
+              "noun": "腕",
+              "reason": "先が平らな帯が斜め上へ伸びるが、手や肘など腕に固有の形はない。"
+            }
+          ],
+          "proposals": [],
+          "note": "翼は維持する。",
+          "supportDetails": [],
+          "ownCandidates": [],
+          "mergeAccepted": null
+        },
+        {
+          "id": "P5",
+          "supports": [
+            "尾"
+          ],
+          "objects": [
+            {
+              "noun": "くちばし",
+              "reason": "右に尖るが幅が広く、頭として区別できる隣接領域がない。"
+            }
+          ],
+          "proposals": [],
+          "note": "尾びれから上位語の尾への統合を受け入れる。",
+          "supportDetails": [
+            {
+              "noun": "尾",
+              "confidence": "低",
+              "reason": "尾びれから上位語の尾への統合を受け入れる。"
+            }
+          ],
+          "ownCandidates": [
+            {
+              "noun": "尾びれ",
+              "decision": "維持"
+            }
+          ],
+          "mergeAccepted": true
+        }
+      ]
+    },
+    {
+      "item": "item-02",
+      "regions": [
+        {
+          "id": "P1",
+          "supports": [
+            "胴"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "頭・首・翼と見える領域が集まる大きな塊として低確信で支持する。",
+          "supportDetails": [
+            {
+              "noun": "胴",
+              "confidence": "低",
+              "reason": "頭・首・翼と見える領域が集まる大きな塊として低確信で支持する。"
+            }
+          ],
+          "ownCandidates": [],
+          "mergeAccepted": null
+        },
+        {
+          "id": "P4",
+          "supports": [],
+          "objects": [
+            {
+              "noun": "腕",
+              "reason": "先が平らな斜めの帯には手や肘の特徴が見えない。"
+            }
+          ],
+          "proposals": [],
+          "note": "翼は維持する。",
+          "supportDetails": [],
+          "ownCandidates": [],
+          "mergeAccepted": null
+        }
+      ]
+    },
+    {
+      "item": "item-03",
+      "regions": [
+        {
+          "id": "P2",
+          "supports": [],
+          "objects": [
+            {
+              "noun": "親指",
+              "reason": "先端が平らで、手のひらや他の指に対応する形が見えない。"
+            },
+            {
+              "noun": "つば",
+              "reason": "帽子の頂部と見分けられる接続がなく、左先端も広い。"
+            }
+          ],
+          "proposals": [],
+          "note": "くちばしは維持する。",
+          "supportDetails": [],
+          "ownCandidates": [],
+          "mergeAccepted": null
+        }
+      ]
+    },
+    {
+      "item": "item-04",
+      "regions": [
+        {
+          "id": "P1",
+          "supports": [],
+          "objects": [
+            {
+              "noun": "尾びれ",
+              "reason": "広い上辺から下へ一点に狭まり、尾の付け根と両葉を分けられない。"
+            }
+          ],
+          "proposals": [],
+          "note": "上下逆の傘という指摘を受け、傘のかさは取り下げる。",
+          "supportDetails": [],
+          "ownCandidates": [
+            {
+              "noun": "傘のかさ",
+              "decision": "取り下げ"
+            }
+          ],
+          "mergeAccepted": null
+        }
+      ]
+    },
+    {
+      "item": "item-05",
+      "regions": [
+        {
+          "id": "P1",
+          "supports": [
+            "胴"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "下側の足状の二領域と右の尾状領域が接する中央の塊として低確信で支持する。",
+          "supportDetails": [
+            {
+              "noun": "胴",
+              "confidence": "低",
+              "reason": "下側の足状の二領域と右の尾状領域が接する中央の塊として低確信で支持する。"
+            }
+          ],
+          "ownCandidates": [],
+          "mergeAccepted": null
+        },
+        {
+          "id": "P2",
+          "supports": [
+            "足"
+          ],
+          "objects": [
+            {
+              "noun": "後ろ足",
+              "reason": "前後を定める頭部が明確でない。"
+            }
+          ],
+          "proposals": [],
+          "note": "足での統合を支持し、前後の指定はしない。",
+          "supportDetails": [
+            {
+              "noun": "足",
+              "confidence": "低",
+              "reason": "足での統合を支持し、前後の指定はしない。"
+            }
+          ],
+          "ownCandidates": [
+            {
+              "noun": "足",
+              "decision": "維持"
+            }
+          ],
+          "mergeAccepted": true
+        },
+        {
+          "id": "P4",
+          "supports": [
+            "足"
+          ],
+          "objects": [
+            {
+              "noun": "前足",
+              "reason": "前後を定める頭部が明確でない。"
+            }
+          ],
+          "proposals": [],
+          "note": "足での統合を支持し、前後の指定はしない。",
+          "supportDetails": [
+            {
+              "noun": "足",
+              "confidence": "低",
+              "reason": "足での統合を支持し、前後の指定はしない。"
+            }
+          ],
+          "ownCandidates": [
+            {
+              "noun": "足",
+              "decision": "維持"
+            }
+          ],
+          "mergeAccepted": true
+        }
+      ]
+    },
+    {
+      "item": "item-06",
+      "regions": [
+        {
+          "id": "P1",
+          "supports": [],
+          "objects": [
+            {
+              "noun": "甲羅",
+              "reason": "横長の台形は平らな上辺と直線の斜辺を持ち、甲羅を示す丸みや境界がない。"
+            }
+          ],
+          "proposals": [],
+          "note": "屋根は低確信で維持する。",
+          "supportDetails": [],
+          "ownCandidates": [],
+          "mergeAccepted": null
+        },
+        {
+          "id": "P2",
+          "supports": [
+            "ひれ",
+            "耳"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "上へ尖る三角が左上斜面に立つため、耳も低確信で支持する。ひれへの統合にも同意する。",
+          "supportDetails": [
+            {
+              "noun": "ひれ",
+              "confidence": "低",
+              "reason": "上へ尖る三角が左上斜面に立つため、耳も低確信で支持する。ひれへの統合にも同意する。"
+            },
+            {
+              "noun": "耳",
+              "confidence": "低",
+              "reason": "上へ尖る三角が左上斜面に立つため、耳も低確信で支持する。ひれへの統合にも同意する。"
+            }
+          ],
+          "ownCandidates": [
+            {
+              "noun": "ひれ",
+              "decision": "維持"
+            }
+          ],
+          "mergeAccepted": true
+        }
+      ]
+    },
+    {
+      "item": "item-07",
+      "regions": [
+        {
+          "id": "P1",
+          "supports": [],
+          "objects": [],
+          "proposals": [],
+          "note": "最下部の平らな辺は残るが、上が一点に尖り台としての厚みが乏しいので台座を取り下げる。",
+          "supportDetails": [],
+          "ownCandidates": [
+            {
+              "noun": "台座",
+              "decision": "取り下げ"
+            }
+          ],
+          "mergeAccepted": null
+        },
+        {
+          "id": "P4",
+          "supports": [],
+          "objects": [
+            {
+              "noun": "頭",
+              "reason": "耳状の小片は接するが、大きい直角三角形に顔や頭の輪郭を区別する手掛かりがない。"
+            }
+          ],
+          "proposals": [],
+          "note": "見立てなしを維持する。",
+          "supportDetails": [],
+          "ownCandidates": [],
+          "mergeAccepted": null
+        },
+        {
+          "id": "P5",
+          "supports": [
+            "つの"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "上端で小さく尖って立つ形から、つのも低確信で支持する。耳は維持する。",
+          "supportDetails": [
+            {
+              "noun": "つの",
+              "confidence": "低",
+              "reason": "上端で小さく尖って立つ形から、つのも低確信で支持する。耳は維持する。"
+            }
+          ],
+          "ownCandidates": [],
+          "mergeAccepted": null
+        }
+      ]
+    },
+    {
+      "item": "item-08",
+      "regions": [
+        {
+          "id": "P1",
+          "supports": [
+            "矢じり"
+          ],
+          "objects": [
+            {
+              "noun": "鼻づら",
+              "reason": "左に尖るが鼻や口に相当する細部がなく幅が大きい。"
+            }
+          ],
+          "proposals": [],
+          "note": "矢じりは左右に広がる三角の輪郭から低確信で支持する。翼は幅広いが側方に張り出すため低確信で維持する。",
+          "supportDetails": [
+            {
+              "noun": "矢じり",
+              "confidence": "低",
+              "reason": "矢じりは左右に広がる三角の輪郭から低確信で支持する。翼は幅広いが側方に張り出すため低確信で維持する。"
+            }
+          ],
+          "ownCandidates": [
+            {
+              "noun": "翼",
+              "decision": "維持"
+            }
+          ],
+          "mergeAccepted": null
+        },
+        {
+          "id": "P2",
+          "supports": [],
+          "objects": [
+            {
+              "noun": "耳",
+              "reason": "上に尖る部分だけでなく下方へも長く続き、領域全体として耳と区別しにくい。"
+            }
+          ],
+          "proposals": [],
+          "note": "見立てなしを維持する。",
+          "supportDetails": [],
+          "ownCandidates": [],
+          "mergeAccepted": null
+        },
+        {
+          "id": "P3",
+          "supports": [],
+          "objects": [
+            {
+              "noun": "尾",
+              "reason": "右に張り出すが四角く尾に特徴的な細さや先細りがない。"
+            },
+            {
+              "noun": "首",
+              "reason": "短い四角形の先に頭と区別できる領域がない。"
+            }
+          ],
+          "proposals": [],
+          "note": "見立てなしを維持する。",
+          "supportDetails": [],
+          "ownCandidates": [],
+          "mergeAccepted": null
+        }
+      ]
+    },
+    {
+      "item": "item-09",
+      "regions": [
+        {
+          "id": "P1",
+          "supports": [
+            "帆"
+          ],
+          "objects": [
+            {
+              "noun": "胴",
+              "reason": "大きな三角形は胴と断定できる輪郭に乏しい。"
+            }
+          ],
+          "proposals": [],
+          "note": "単独の三角形として帆を低確信で支持する。翼は横への張り出しから維持するが、対翼は見えない。",
+          "supportDetails": [
+            {
+              "noun": "帆",
+              "confidence": "低",
+              "reason": "単独の三角形として帆を低確信で支持する。翼は横への張り出しから維持するが、対翼は見えない。"
+            }
+          ],
+          "ownCandidates": [
+            {
+              "noun": "翼",
+              "decision": "維持"
+            }
+          ],
+          "mergeAccepted": null
+        },
+        {
+          "id": "P3",
+          "supports": [
+            "頭"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "右側の細長い領域が口元なら、その付け根の上部の塊を頭と低確信で読めるが顔の細部はない。",
+          "supportDetails": [
+            {
+              "noun": "頭",
+              "confidence": "低",
+              "reason": "右側の細長い領域が口元なら、その付け根の上部の塊を頭と低確信で読めるが顔の細部はない。"
+            }
+          ],
+          "ownCandidates": [],
+          "mergeAccepted": null
+        },
+        {
+          "id": "P4",
+          "supports": [
+            "くちばし"
+          ],
+          "objects": [
+            {
+              "noun": "鼻",
+              "reason": "下へ伸びる帯で、鼻の先端に相当する細部がない。"
+            }
+          ],
+          "proposals": [],
+          "note": "上部の塊から下方へ伸びる長いくちばしとして低確信で支持し、先に頭がない首は取り下げる。",
+          "supportDetails": [
+            {
+              "noun": "くちばし",
+              "confidence": "低",
+              "reason": "上部の塊から下方へ伸びる長いくちばしとして低確信で支持し、先に頭がない首は取り下げる。"
+            }
+          ],
+          "ownCandidates": [
+            {
+              "noun": "首",
+              "decision": "取り下げ"
+            }
+          ],
+          "mergeAccepted": null
+        }
+      ]
+    },
+    {
+      "item": "item-10",
+      "regions": [
+        {
+          "id": "P1",
+          "supports": [
+            "頭"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "上部左の四角い張り出しを鼻づらと見れば、接続する大きな領域は頭と低確信で読める。",
+          "supportDetails": [
+            {
+              "noun": "頭",
+              "confidence": "低",
+              "reason": "上部左の四角い張り出しを鼻づらと見れば、接続する大きな領域は頭と低確信で読める。"
+            }
+          ],
+          "ownCandidates": [],
+          "mergeAccepted": null
+        },
+        {
+          "id": "P2",
+          "supports": [
+            "脚"
+          ],
+          "objects": [
+            {
+              "noun": "前足",
+              "reason": "左下に伸びるが、全体から前後を確定できない。"
+            }
+          ],
+          "proposals": [],
+          "note": "脚での統合を支持する。",
+          "supportDetails": [
+            {
+              "noun": "脚",
+              "confidence": "低",
+              "reason": "脚での統合を支持する。"
+            }
+          ],
+          "ownCandidates": [
+            {
+              "noun": "脚",
+              "decision": "維持"
+            }
+          ],
+          "mergeAccepted": true
+        },
+        {
+          "id": "P3",
+          "supports": [
+            "鼻づら"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "上側の大きな領域から左に四角く突き出すため、口元として低確信で支持する。",
+          "supportDetails": [
+            {
+              "noun": "鼻づら",
+              "confidence": "低",
+              "reason": "上側の大きな領域から左に四角く突き出すため、口元として低確信で支持する。"
+            }
+          ],
+          "ownCandidates": [],
+          "mergeAccepted": null
+        }
+      ]
+    },
+    {
+      "item": "item-11",
+      "regions": [
+        {
+          "id": "P1",
+          "supports": [
+            "尾"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "左側に張り出す三角形を尾と低確信で支持する。先細りではないがひれも維持する。",
+          "supportDetails": [
+            {
+              "noun": "尾",
+              "confidence": "低",
+              "reason": "左側に張り出す三角形を尾と低確信で支持する。先細りではないがひれも維持する。"
+            }
+          ],
+          "ownCandidates": [
+            {
+              "noun": "ひれ",
+              "decision": "維持"
+            }
+          ],
+          "mergeAccepted": null
+        },
+        {
+          "id": "P2",
+          "supports": [
+            "胴"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "左右に張り出す領域に挟まれた中央の塊として低確信で支持する。",
+          "supportDetails": [
+            {
+              "noun": "胴",
+              "confidence": "低",
+              "reason": "左右に張り出す領域に挟まれた中央の塊として低確信で支持する。"
+            }
+          ],
+          "ownCandidates": [],
+          "mergeAccepted": null
+        },
+        {
+          "id": "P3",
+          "supports": [
+            "頭"
+          ],
+          "objects": [
+            {
+              "noun": "首",
+              "reason": "四角く短いうえ、先に頭と区別できる塊がない。"
+            }
+          ],
+          "proposals": [],
+          "note": "右端の細長い領域の付け根にある塊を頭として低確信で支持する。",
+          "supportDetails": [
+            {
+              "noun": "頭",
+              "confidence": "低",
+              "reason": "右端の細長い領域の付け根にある塊を頭として低確信で支持する。"
+            }
+          ],
+          "ownCandidates": [],
+          "mergeAccepted": null
+        },
+        {
+          "id": "P4",
+          "supports": [
+            "くちばし"
+          ],
+          "objects": [
+            {
+              "noun": "鼻",
+              "reason": "帯全体が斜め下に長く、鼻先を区切れない。"
+            }
+          ],
+          "proposals": [],
+          "note": "四角形から下向きに伸びるくちばしとして低確信で支持し、垂れた尾も維持する。",
+          "supportDetails": [
+            {
+              "noun": "くちばし",
+              "confidence": "低",
+              "reason": "四角形から下向きに伸びるくちばしとして低確信で支持し、垂れた尾も維持する。"
+            }
+          ],
+          "ownCandidates": [
+            {
+              "noun": "尾",
+              "decision": "維持"
+            }
+          ],
+          "mergeAccepted": null
+        }
+      ]
+    },
+    {
+      "item": "item-12",
+      "regions": [
+        {
+          "id": "P2",
+          "supports": [
+            "耳"
+          ],
+          "objects": [
+            {
+              "noun": "帆",
+              "reason": "細い三角形の位置は上部だが、下辺全体で支える帆の形には見えにくい。"
+            }
+          ],
+          "proposals": [],
+          "note": "上に尖る小三角形の耳を低確信で支持し、ひれも維持する。",
+          "supportDetails": [
+            {
+              "noun": "耳",
+              "confidence": "低",
+              "reason": "上に尖る小三角形の耳を低確信で支持し、ひれも維持する。"
+            }
+          ],
+          "ownCandidates": [
+            {
+              "noun": "ひれ",
+              "decision": "維持"
+            }
+          ],
+          "mergeAccepted": null
+        }
+      ]
+    },
+    {
+      "item": "item-13",
+      "regions": [
+        {
+          "id": "P1",
+          "supports": [
+            "胴"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "左右の張り出しと上のひれ状領域が接する塊として低確信で支持する。",
+          "supportDetails": [
+            {
+              "noun": "胴",
+              "confidence": "低",
+              "reason": "左右の張り出しと上のひれ状領域が接する塊として低確信で支持する。"
+            }
+          ],
+          "ownCandidates": [],
+          "mergeAccepted": null
+        },
+        {
+          "id": "P2",
+          "supports": [
+            "翼"
+          ],
+          "objects": [
+            {
+              "noun": "腕",
+              "reason": "先端の斜辺が長く、手や肘に当たる形が見えない。"
+            }
+          ],
+          "proposals": [],
+          "note": "側方に広がる翼を低確信で支持し、くちばしも維持する。",
+          "supportDetails": [
+            {
+              "noun": "翼",
+              "confidence": "低",
+              "reason": "側方に広がる翼を低確信で支持し、くちばしも維持する。"
+            }
+          ],
+          "ownCandidates": [
+            {
+              "noun": "くちばし",
+              "decision": "維持"
+            }
+          ],
+          "mergeAccepted": null
+        },
+        {
+          "id": "P3",
+          "supports": [
+            "尾翼"
+          ],
+          "objects": [
+            {
+              "noun": "頭",
+              "reason": "三角形が小さく上端に付き、顔に当たる広がりが乏しい。"
+            }
+          ],
+          "proposals": [],
+          "note": "上向きに立つ三角形を尾翼としても低確信で支持し、背びれを維持する。",
+          "supportDetails": [
+            {
+              "noun": "尾翼",
+              "confidence": "低",
+              "reason": "上向きに立つ三角形を尾翼としても低確信で支持し、背びれを維持する。"
+            }
+          ],
+          "ownCandidates": [
+            {
+              "noun": "背びれ",
+              "decision": "維持"
+            }
+          ],
+          "mergeAccepted": null
+        },
+        {
+          "id": "P4",
+          "supports": [],
+          "objects": [
+            {
+              "noun": "腕",
+              "reason": "四角く短く手や肘に相当する形を区別できない。"
+            },
+            {
+              "noun": "翼",
+              "reason": "左右の張り出しはあるが、この四角形自体は翼らしい先細りがない。"
+            }
+          ],
+          "proposals": [],
+          "note": "見立てなしを維持する。",
+          "supportDetails": [],
+          "ownCandidates": [],
+          "mergeAccepted": null
+        }
+      ]
+    },
+    {
+      "item": "item-14",
+      "regions": [
+        {
+          "id": "P2",
+          "supports": [
+            "頭"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "大きな領域の上に付く四角い塊として低確信で支持し、煙突も維持する。",
+          "supportDetails": [
+            {
+              "noun": "頭",
+              "confidence": "低",
+              "reason": "大きな領域の上に付く四角い塊として低確信で支持し、煙突も維持する。"
+            }
+          ],
+          "ownCandidates": [],
+          "mergeAccepted": null
+        },
+        {
+          "id": "P4",
+          "supports": [
+            "脚",
+            "足"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "脚と足を共通の脚として低確信で統合することに同意する。",
+          "supportDetails": [
+            {
+              "noun": "脚",
+              "confidence": "低",
+              "reason": "脚と足を共通の脚として低確信で統合することに同意する。"
+            },
+            {
+              "noun": "足",
+              "confidence": "低",
+              "reason": "脚と足を共通の脚として低確信で統合することに同意する。"
+            }
+          ],
+          "ownCandidates": [
+            {
+              "noun": "脚",
+              "decision": "維持"
+            }
+          ],
+          "mergeAccepted": true
+        }
+      ]
+    },
+    {
+      "item": "item-15",
+      "regions": [
+        {
+          "id": "P3",
+          "supports": [
+            "とさか"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "上端に立ち上がる三角の形からとさかを低確信で支持する。耳も維持する。",
+          "supportDetails": [
+            {
+              "noun": "とさか",
+              "confidence": "低",
+              "reason": "上端に立ち上がる三角の形からとさかを低確信で支持する。耳も維持する。"
+            }
+          ],
+          "ownCandidates": [],
+          "mergeAccepted": null
+        }
+      ]
+    },
+    {
+      "item": "item-16",
+      "regions": [
+        {
+          "id": "P1",
+          "supports": [
+            "胴"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "上の四角と下の脚状領域の間にある大きな塊として低確信で支持する。",
+          "supportDetails": [
+            {
+              "noun": "胴",
+              "confidence": "低",
+              "reason": "上の四角と下の脚状領域の間にある大きな塊として低確信で支持する。"
+            }
+          ],
+          "ownCandidates": [],
+          "mergeAccepted": null
+        },
+        {
+          "id": "P2",
+          "supports": [
+            "頭"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "中央の上に付く四角い塊として低確信で支持し、煙突も維持する。",
+          "supportDetails": [
+            {
+              "noun": "頭",
+              "confidence": "低",
+              "reason": "中央の上に付く四角い塊として低確信で支持し、煙突も維持する。"
+            }
+          ],
+          "ownCandidates": [],
+          "mergeAccepted": null
+        },
+        {
+          "id": "P3",
+          "supports": [],
+          "objects": [
+            {
+              "noun": "尾",
+              "reason": "右へ四角く突き出るが、細さや先細りがなく尾を特定しにくい。"
+            }
+          ],
+          "proposals": [],
+          "note": "見立てなしを維持する。",
+          "supportDetails": [],
+          "ownCandidates": [],
+          "mergeAccepted": null
+        },
+        {
+          "id": "P4",
+          "supports": [
+            "脚"
+          ],
+          "objects": [
+            {
+              "noun": "前足",
+              "reason": "下へ斜めに伸びるが、前後を確定できない。"
+            }
+          ],
+          "proposals": [],
+          "note": "脚への統合を支持する。",
+          "supportDetails": [
+            {
+              "noun": "脚",
+              "confidence": "低",
+              "reason": "脚への統合を支持する。"
+            }
+          ],
+          "ownCandidates": [
+            {
+              "noun": "脚",
+              "decision": "維持"
+            }
+          ],
+          "mergeAccepted": true
+        }
+      ]
+    },
+    {
+      "item": "item-17",
+      "regions": [
+        {
+          "id": "P1",
+          "supports": [
+            "頭"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "自身の上端と隣の耳状の尖り、右側の口元状の小片との関係から低確信で支持する。",
+          "supportDetails": [
+            {
+              "noun": "頭",
+              "confidence": "低",
+              "reason": "自身の上端と隣の耳状の尖り、右側の口元状の小片との関係から低確信で支持する。"
+            }
+          ],
+          "ownCandidates": [],
+          "mergeAccepted": null
+        },
+        {
+          "id": "P3",
+          "supports": [
+            "尾"
+          ],
+          "objects": [
+            {
+              "noun": "首",
+              "reason": "下方に伸びる先に頭として区別できる領域がない。"
+            }
+          ],
+          "proposals": [],
+          "note": "細長く斜め下へ伸びる尾を低確信で支持し、脚も維持する。",
+          "supportDetails": [
+            {
+              "noun": "尾",
+              "confidence": "低",
+              "reason": "細長く斜め下へ伸びる尾を低確信で支持し、脚も維持する。"
+            }
+          ],
+          "ownCandidates": [
+            {
+              "noun": "脚",
+              "decision": "維持"
+            }
+          ],
+          "mergeAccepted": null
+        },
+        {
+          "id": "P5",
+          "supports": [
+            "鼻づら"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "耳状の尖りの下から右へ突き出す小三角として低確信で支持する。くちばしも維持する。",
+          "supportDetails": [
+            {
+              "noun": "鼻づら",
+              "confidence": "低",
+              "reason": "耳状の尖りの下から右へ突き出す小三角として低確信で支持する。くちばしも維持する。"
+            }
+          ],
+          "ownCandidates": [],
+          "mergeAccepted": null
+        }
+      ]
+    },
+    {
+      "item": "item-18",
+      "regions": [
+        {
+          "id": "P1",
+          "supports": [],
+          "objects": [
+            {
+              "noun": "前足",
+              "reason": "下へ張り出すが大きく幅広い五角形で、足と特定する手掛かりが弱い。"
+            }
+          ],
+          "proposals": [],
+          "note": "見立てなしを維持する。",
+          "supportDetails": [],
+          "ownCandidates": [],
+          "mergeAccepted": null
+        },
+        {
+          "id": "P2",
+          "supports": [],
+          "objects": [
+            {
+              "noun": "胴",
+              "reason": "斜めの帯は耳状領域と小さな下端をつなぐが、胴と特定できる幅や輪郭が乏しい。"
+            }
+          ],
+          "proposals": [],
+          "note": "見立てなしを維持する。",
+          "supportDetails": [],
+          "ownCandidates": [],
+          "mergeAccepted": null
+        },
+        {
+          "id": "P3",
+          "supports": [
+            "足"
+          ],
+          "objects": [
+            {
+              "noun": "後ろ足",
+              "reason": "図の前後を独立に定める手掛かりが不足する。"
+            }
+          ],
+          "proposals": [],
+          "note": "足での統合を支持する。",
+          "supportDetails": [
+            {
+              "noun": "足",
+              "confidence": "低",
+              "reason": "足での統合を支持する。"
+            }
+          ],
+          "ownCandidates": [
+            {
+              "noun": "足",
+              "decision": "維持"
+            }
+          ],
+          "mergeAccepted": true
+        }
+      ]
+    },
+    {
+      "item": "item-19",
+      "regions": [
+        {
+          "id": "P1",
+          "supports": [
+            "尾"
+          ],
+          "objects": [
+            {
+              "noun": "頭",
+              "reason": "縦に細長く上下に尖り、顔のまとまりを特定できない。"
+            }
+          ],
+          "proposals": [],
+          "note": "左上に伸びる尾として低確信で支持し、耳も維持する。",
+          "supportDetails": [
+            {
+              "noun": "尾",
+              "confidence": "低",
+              "reason": "左上に伸びる尾として低確信で支持し、耳も維持する。"
+            }
+          ],
+          "ownCandidates": [
+            {
+              "noun": "耳",
+              "decision": "維持"
+            }
+          ],
+          "mergeAccepted": null
+        },
+        {
+          "id": "P2",
+          "supports": [],
+          "objects": [
+            {
+              "noun": "胴",
+              "reason": "中央の大きな三角形だが、隣の領域の役割が定まらず胴を特定しにくい。"
+            }
+          ],
+          "proposals": [],
+          "note": "見立てなしを維持する。",
+          "supportDetails": [],
+          "ownCandidates": [],
+          "mergeAccepted": null
+        },
+        {
+          "id": "P3",
+          "supports": [],
+          "objects": [],
+          "proposals": [],
+          "note": "外側への張り出しが小さく輪郭の段を埋める形なので、ひれを取り下げる。",
+          "supportDetails": [],
+          "ownCandidates": [
+            {
+              "noun": "ひれ",
+              "decision": "取り下げ"
+            }
+          ],
+          "mergeAccepted": null
+        },
+        {
+          "id": "P4",
+          "supports": [
+            "腕"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "中央から右へ平行な辺を持って横に伸びるため低確信で支持するが、手は見えない。",
+          "supportDetails": [
+            {
+              "noun": "腕",
+              "confidence": "低",
+              "reason": "中央から右へ平行な辺を持って横に伸びるため低確信で支持するが、手は見えない。"
+            }
+          ],
+          "ownCandidates": [],
+          "mergeAccepted": null
+        }
+      ]
+    },
+    {
+      "item": "item-20",
+      "regions": [
+        {
+          "id": "P1",
+          "supports": [
+            "屋根"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "横に長い底辺と上の頂点を持つ三角形から低確信で支持する。帆も維持する。",
+          "supportDetails": [
+            {
+              "noun": "屋根",
+              "confidence": "低",
+              "reason": "横に長い底辺と上の頂点を持つ三角形から低確信で支持する。帆も維持する。"
+            }
+          ],
+          "ownCandidates": [],
+          "mergeAccepted": null
+        },
+        {
+          "id": "P2",
+          "supports": [
+            "船体"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "甲板に見える上辺から下の、両端が斜めの横長領域全体は船体として低確信で支持する。船底だけより適切なので自分の語は統合する。",
+          "supportDetails": [
+            {
+              "noun": "船体",
+              "confidence": "低",
+              "reason": "甲板に見える上辺から下の、両端が斜めの横長領域全体は船体として低確信で支持する。船底だけより適切なので自分の語は統合する。"
+            }
+          ],
+          "ownCandidates": [
+            {
+              "noun": "船底",
+              "decision": "統合"
+            }
+          ],
+          "mergeAccepted": null
+        },
+        {
+          "id": "P3",
+          "supports": [
+            "船室"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "船体状の領域の上に載る四角い塊として低確信で支持する。窓は見えず煙突も維持する。",
+          "supportDetails": [
+            {
+              "noun": "船室",
+              "confidence": "低",
+              "reason": "船体状の領域の上に載る四角い塊として低確信で支持する。窓は見えず煙突も維持する。"
+            }
+          ],
+          "ownCandidates": [],
+          "mergeAccepted": null
+        }
+      ]
+    },
+    {
+      "item": "item-21",
+      "regions": [
+        {
+          "id": "P1",
+          "supports": [
+            "頭"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "上端の二つの尖りが耳のように並ぶ広い領域として低確信で支持する。",
+          "supportDetails": [
+            {
+              "noun": "頭",
+              "confidence": "低",
+              "reason": "上端の二つの尖りが耳のように並ぶ広い領域として低確信で支持する。"
+            }
+          ],
+          "ownCandidates": [],
+          "mergeAccepted": null
+        },
+        {
+          "id": "P2",
+          "supports": [],
+          "objects": [
+            {
+              "noun": "前足",
+              "reason": "左下へ広がるが三角形で足先を区別できず、前後も定まらない。"
+            },
+            {
+              "noun": "足",
+              "reason": "底辺は平らだが図形の最下線より上にあり、脚としての縦の長さがない。"
+            }
+          ],
+          "proposals": [],
+          "note": "ひれも付け根が点に近く根拠が弱いため取り下げる。",
+          "supportDetails": [],
+          "ownCandidates": [
+            {
+              "noun": "ひれ",
+              "decision": "取り下げ"
+            }
+          ],
+          "mergeAccepted": null
+        },
+        {
+          "id": "P4",
+          "supports": [
+            "足"
+          ],
+          "objects": [
+            {
+              "noun": "後ろ足",
+              "reason": "四角形の位置だけでは前後の区別ができない。"
+            }
+          ],
+          "proposals": [],
+          "note": "足への統合を支持する。",
+          "supportDetails": [
+            {
+              "noun": "足",
+              "confidence": "低",
+              "reason": "足への統合を支持する。"
+            }
+          ],
+          "ownCandidates": [
+            {
+              "noun": "足",
+              "decision": "維持"
+            }
+          ],
+          "mergeAccepted": true
+        },
+        {
+          "id": "P5",
+          "supports": [
+            "尾"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "尾びれは尾の一種として尾への統合を低確信で支持する。",
+          "supportDetails": [
+            {
+              "noun": "尾",
+              "confidence": "低",
+              "reason": "尾びれは尾の一種として尾への統合を低確信で支持する。"
+            }
+          ],
+          "ownCandidates": [
+            {
+              "noun": "尾びれ",
+              "decision": "維持"
+            }
+          ],
+          "mergeAccepted": true
+        }
+      ]
+    },
+    {
+      "item": "item-22",
+      "regions": [
+        {
+          "id": "P2",
+          "supports": [],
+          "objects": [
+            {
+              "noun": "首",
+              "reason": "細長い帯はあるが先に頭と区別できる領域がない。"
+            }
+          ],
+          "proposals": [],
+          "note": "柄は維持する。",
+          "supportDetails": [],
+          "ownCandidates": [],
+          "mergeAccepted": null
+        }
+      ]
+    },
+    {
+      "item": "item-23",
+      "regions": [
+        {
+          "id": "P1",
+          "supports": [
+            "胴"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "上の耳状領域と下の足状領域に接する大きな塊として低確信で支持する。",
+          "supportDetails": [
+            {
+              "noun": "胴",
+              "confidence": "低",
+              "reason": "上の耳状領域と下の足状領域に接する大きな塊として低確信で支持する。"
+            }
+          ],
+          "ownCandidates": [],
+          "mergeAccepted": null
+        },
+        {
+          "id": "P2",
+          "supports": [
+            "くちばし"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "左へ尖る三角形として低確信で支持する。翼も側方の三角形として維持する。",
+          "supportDetails": [
+            {
+              "noun": "くちばし",
+              "confidence": "低",
+              "reason": "左へ尖る三角形として低確信で支持する。翼も側方の三角形として維持する。"
+            }
+          ],
+          "ownCandidates": [
+            {
+              "noun": "翼",
+              "decision": "維持"
+            }
+          ],
+          "mergeAccepted": null
+        },
+        {
+          "id": "P3",
+          "supports": [
+            "くちばし"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "左上へ細長く突き出す口先として低確信で支持するが、幅が一定で先端は平ら。耳も維持する。",
+          "supportDetails": [
+            {
+              "noun": "くちばし",
+              "confidence": "低",
+              "reason": "左上へ細長く突き出す口先として低確信で支持するが、幅が一定で先端は平ら。耳も維持する。"
+            }
+          ],
+          "ownCandidates": [],
+          "mergeAccepted": null
+        }
+      ]
+    },
+    {
+      "item": "item-24",
+      "regions": [
+        {
+          "id": "P1",
+          "supports": [],
+          "objects": [
+            {
+              "noun": "胴",
+              "reason": "隣接領域の役割が定まらず、大きな台形を胴と特定する根拠が弱い。"
+            }
+          ],
+          "proposals": [],
+          "note": "見立てなしを維持する。",
+          "supportDetails": [],
+          "ownCandidates": [],
+          "mergeAccepted": null
+        },
+        {
+          "id": "P2",
+          "supports": [],
+          "objects": [
+            {
+              "noun": "頭",
+              "reason": "三角形の二方向の尖りに顔や頭のまとまりを区別できない。"
+            }
+          ],
+          "proposals": [],
+          "note": "尾びれは片側だけ下へ長く伸びるため取り下げる。",
+          "supportDetails": [],
+          "ownCandidates": [
+            {
+              "noun": "尾びれ",
+              "decision": "取り下げ"
+            }
+          ],
+          "mergeAccepted": null
+        },
+        {
+          "id": "P4",
+          "supports": [
+            "尾"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "外端から斜め上に細長く伸びる形を尾として低確信で支持する。頭に接する根拠が乏しい耳は取り下げる。",
+          "supportDetails": [
+            {
+              "noun": "尾",
+              "confidence": "低",
+              "reason": "外端から斜め上に細長く伸びる形を尾として低確信で支持する。頭に接する根拠が乏しい耳は取り下げる。"
+            }
+          ],
+          "ownCandidates": [
+            {
+              "noun": "耳",
+              "decision": "取り下げ"
+            }
+          ],
+          "mergeAccepted": null
+        }
+      ]
+    },
+    {
+      "item": "item-25",
+      "regions": [
+        {
+          "id": "P1",
+          "supports": [
+            "胴"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "首・頭と翼に見える領域が接する中央の塊として低確信で支持する。",
+          "supportDetails": [
+            {
+              "noun": "胴",
+              "confidence": "低",
+              "reason": "首・頭と翼に見える領域が接する中央の塊として低確信で支持する。"
+            }
+          ],
+          "ownCandidates": [],
+          "mergeAccepted": null
+        }
+      ]
+    },
+    {
+      "item": "item-26",
+      "regions": [
+        {
+          "id": "P1",
+          "supports": [
+            "足"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "最下端に平らな底辺を持つ三角形を足として低確信で支持する。台座も維持する。",
+          "supportDetails": [
+            {
+              "noun": "足",
+              "confidence": "低",
+              "reason": "最下端に平らな底辺を持つ三角形を足として低確信で支持する。台座も維持する。"
+            }
+          ],
+          "ownCandidates": [
+            {
+              "noun": "台座",
+              "decision": "維持"
+            }
+          ],
+          "mergeAccepted": null
+        },
+        {
+          "id": "P2",
+          "supports": [
+            "胴"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "上の頭状の塊と右の腕状の帯、下の台座に挟まれる中央として低確信で支持する。",
+          "supportDetails": [
+            {
+              "noun": "胴",
+              "confidence": "低",
+              "reason": "上の頭状の塊と右の腕状の帯、下の台座に挟まれる中央として低確信で支持する。"
+            }
+          ],
+          "ownCandidates": [],
+          "mergeAccepted": null
+        },
+        {
+          "id": "P3",
+          "supports": [
+            "肩"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "頭状の四角形の下で横に広がる上辺を持つため低確信で支持するが、逆三角形で関節は見えない。",
+          "supportDetails": [
+            {
+              "noun": "肩",
+              "confidence": "低",
+              "reason": "頭状の四角形の下で横に広がる上辺を持つため低確信で支持するが、逆三角形で関節は見えない。"
+            }
+          ],
+          "ownCandidates": [],
+          "mergeAccepted": null
+        },
+        {
+          "id": "P5",
+          "supports": [
+            "腕"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "中央右から右上へ長く挙がる帯を腕として低確信で支持する。枝は幹に相当する形が乏しいため取り下げる。",
+          "supportDetails": [
+            {
+              "noun": "腕",
+              "confidence": "低",
+              "reason": "中央右から右上へ長く挙がる帯を腕として低確信で支持する。枝は幹に相当する形が乏しいため取り下げる。"
+            }
+          ],
+          "ownCandidates": [
+            {
+              "noun": "枝",
+              "decision": "取り下げ"
+            }
+          ],
+          "mergeAccepted": null
+        }
+      ]
+    },
+    {
+      "item": "item-27",
+      "regions": [
+        {
+          "id": "P1",
+          "supports": [
+            "頭"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "上端の尖りと隣の耳状三角が並ぶ大きな塊として低確信で支持する。",
+          "supportDetails": [
+            {
+              "noun": "頭",
+              "confidence": "低",
+              "reason": "上端の尖りと隣の耳状三角が並ぶ大きな塊として低確信で支持する。"
+            }
+          ],
+          "ownCandidates": [],
+          "mergeAccepted": null
+        },
+        {
+          "id": "P2",
+          "supports": [
+            "耳"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "隣の尖りとV字に並ぶ見え方は17P4と同様で、中に変更する。",
+          "supportDetails": [
+            {
+              "noun": "耳",
+              "confidence": "中",
+              "reason": "隣の尖りとV字に並ぶ見え方は17P4と同様で、中に変更する。"
+            }
+          ],
+          "ownCandidates": [
+            {
+              "noun": "耳",
+              "decision": "維持・中"
+            }
+          ],
+          "mergeAccepted": null
+        },
+        {
+          "id": "P3",
+          "supports": [],
+          "objects": [
+            {
+              "noun": "前足",
+              "reason": "左へ広がる三角形で足先や前後が特定できない。"
+            },
+            {
+              "noun": "足",
+              "reason": "底辺は平らだが図形の最下線より上にあり、縦に伸びる脚とは見分けにくい。"
+            }
+          ],
+          "proposals": [],
+          "note": "翼は側方へ広がる三角形として低確信で維持する。",
+          "supportDetails": [],
+          "ownCandidates": [
+            {
+              "noun": "翼",
+              "decision": "維持"
+            }
+          ],
+          "mergeAccepted": null
+        },
+        {
+          "id": "P5",
+          "supports": [
+            "後ろ足"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "右下へ伸び下端が平らなため後ろ足を低確信で支持するが、前後の判定は不確か。尾も維持する。",
+          "supportDetails": [
+            {
+              "noun": "後ろ足",
+              "confidence": "低",
+              "reason": "右下へ伸び下端が平らなため後ろ足を低確信で支持するが、前後の判定は不確か。尾も維持する。"
+            }
+          ],
+          "ownCandidates": [],
+          "mergeAccepted": null
+        }
+      ]
+    },
+    {
+      "item": "item-28",
+      "regions": [
+        {
+          "id": "P1",
+          "supports": [],
+          "objects": [
+            {
+              "noun": "胴",
+              "reason": "上端が尖る大きな三角形で、耳状の領域との関係から頭にも見え、胴と定めにくい。"
+            }
+          ],
+          "proposals": [],
+          "note": "見立てなしを維持する。",
+          "supportDetails": [],
+          "ownCandidates": [],
+          "mergeAccepted": null
+        },
+        {
+          "id": "P2",
+          "supports": [
+            "足"
+          ],
+          "objects": [
+            {
+              "noun": "前足",
+              "reason": "左下の四角形だけでは動物の前後が定まらない。"
+            }
+          ],
+          "proposals": [],
+          "note": "足への統合を支持する。",
+          "supportDetails": [
+            {
+              "noun": "足",
+              "confidence": "低",
+              "reason": "足への統合を支持する。"
+            }
+          ],
+          "ownCandidates": [
+            {
+              "noun": "足",
+              "decision": "維持"
+            }
+          ],
+          "mergeAccepted": true
+        },
+        {
+          "id": "P3",
+          "supports": [
+            "くちばし"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "左へ尖る小三角形を低確信で支持する。耳も維持する。",
+          "supportDetails": [
+            {
+              "noun": "くちばし",
+              "confidence": "低",
+              "reason": "左へ尖る小三角形を低確信で支持する。耳も維持する。"
+            }
+          ],
+          "ownCandidates": [],
+          "mergeAccepted": null
+        },
+        {
+          "id": "P5",
+          "supports": [
+            "翼"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "中央から右上へ細長く斜めに伸びるので低確信で支持する。尾も維持する。",
+          "supportDetails": [
+            {
+              "noun": "翼",
+              "confidence": "低",
+              "reason": "中央から右上へ細長く斜めに伸びるので低確信で支持する。尾も維持する。"
+            }
+          ],
+          "ownCandidates": [],
+          "mergeAccepted": null
+        }
+      ]
+    },
+    {
+      "item": "item-29",
+      "regions": [
+        {
+          "id": "P1",
+          "supports": [
+            "脚"
+          ],
+          "objects": [
+            {
+              "noun": "前足",
+              "reason": "下へ垂れるが頭と前後の位置は明確でない。"
+            }
+          ],
+          "proposals": [],
+          "note": "脚への統合を支持する。",
+          "supportDetails": [
+            {
+              "noun": "脚",
+              "confidence": "低",
+              "reason": "脚への統合を支持する。"
+            }
+          ],
+          "ownCandidates": [
+            {
+              "noun": "脚",
+              "decision": "維持"
+            }
+          ],
+          "mergeAccepted": true
+        },
+        {
+          "id": "P2",
+          "supports": [
+            "胴"
+          ],
+          "objects": [],
+          "proposals": [],
+          "note": "下の脚状領域と右上の尾状領域に接する斜めの塊として低確信で支持する。",
+          "supportDetails": [
+            {
+              "noun": "胴",
+              "confidence": "低",
+              "reason": "下の脚状領域と右上の尾状領域に接する斜めの塊として低確信で支持する。"
+            }
+          ],
+          "ownCandidates": [],
+          "mergeAccepted": null
+        }
+      ]
+    },
+    {
+      "item": "item-30",
+      "regions": [
+        {
+          "id": "P2",
+          "supports": [],
+          "objects": [],
+          "proposals": [],
+          "note": "外形への張り出しが小さく段を埋める三角形なので、ひれを取り下げる。",
+          "supportDetails": [],
+          "ownCandidates": [
+            {
+              "noun": "ひれ",
+              "decision": "取り下げ"
+            }
+          ],
+          "mergeAccepted": null
+        },
+        {
+          "id": "P3",
+          "supports": [],
+          "objects": [],
+          "proposals": [],
+          "note": "左へ広がるが平らな外辺が長く、翼としての先細りが乏しいため取り下げる。",
+          "supportDetails": [],
+          "ownCandidates": [
+            {
+              "noun": "翼",
+              "decision": "取り下げ"
+            }
+          ],
+          "mergeAccepted": null
+        },
+        {
+          "id": "P4",
+          "supports": [
+            "銃身"
+          ],
+          "objects": [
+            {
+              "noun": "鼻づら",
+              "reason": "右へ伸びるが上下が平らで、鼻や口の細部が見えない。"
+            }
+          ],
+          "proposals": [],
+          "note": "上部から右へ平行な辺を持って水平に伸びる形を銃身として低確信で支持する。",
+          "supportDetails": [
+            {
+              "noun": "銃身",
+              "confidence": "低",
+              "reason": "上部から右へ平行な辺を持って水平に伸びる形を銃身として低確信で支持する。"
+            }
+          ],
+          "ownCandidates": [],
+          "mergeAccepted": null
+        }
+      ]
+    }
+  ]
+}
