@@ -55,24 +55,33 @@
 ### 3.4 提案（D）と統括の決定
 Jev の state には名詞の層だけ（最悪の組で 3/4/6図形 ≤ 約 0.9k / 1.2k / 1.7k 字）、詳しい層（役割・姿勢・向き）は生成と抽出の memo にだけ。ブロックの上限を固定した上で Jev の削り順に組み込むか `reserve` に加算し、最悪の6図形の組（F15/F1/F19/F23/F13/F27）＋長い履歴でも `invalid_input` が出ないことを構成上示す。
 
-## 4. 試験の状況
+## 4. 試験の状況（2026-11-28 18:58 時点）
 
-| 項目 | 状況 |
+試験は `exp/AquaGauss` の `tests/rotation-memory-audit-*.test.ts`。統合ブランチでは `AUDIT_REQUIRE_ROTATION_MEMORY=1` を付け、B1・C のコードか元データが無ければ失敗にする（付けない木では該当の試験を skip する）。
+
+| 項目 | 状況（コミット） |
 |---|---|
-| 旧受付の観察キャッシュ鍵（36通り） | 済（固定試験、B2 の 471a11b で一致） |
+| 旧受付の観察キャッシュ鍵（36通り） | 済（`a7c1966`。基点・B2 の 471a11b・C の b896dbc で一致） |
+| 旧受付の承認済み記録（plan 含む、46通り。拒否も同じ） | 済（`af9d11c`。基点・B2 の eb9dfc7 で一致。許す差は新規受付の `rotationMemory` の pin 3キーだけ） |
 | 旧版のバイト（旧 Jev 要求・回転条件文・旧生成指示） | 既存の試験（rotation-legacy-bytes ほか）で確認。B2 の 471a11b で77/77 |
-| 120方向・468領域・領域ID/members の一致・未合意3領域・全方向なしの合成 | 未（実装に依存しない。SandyCurie の集計 `sol-data-audit.md` と照合する） |
-| 回転の向き（ラベル r の幾何が bank の r 度回転か。テンプレートの `key` と `FIGURE_BANK`＋`transformPolygon` の照合） | 未 |
-| 新 pin: 承認→開始→冷復元が #262/#268 の準備待ち・`prepared_observations_unavailable`・`trial_unavailable` に入らない（3図形の新規受付） | 未（B2 の実装後。SandyCurie の指摘: 承認側 `adminApproveReception` が production＋model pin＋referenceMemory で無条件に claim する） |
-| 新 pin のモデル入力に旧テンプレートの見立てが無い（F6@0 の旧全体候補、F15@270 の現方向 P3 の旧「翼や尖った突起」。F15@0#P2・P3 と F15@90#P3 の最終採用の「翼」は除外しない） | 未 |
-| モデル入力に絶対回転・回転方式・figureId・bank ID・相手の向きが無い（相対回転の識別子はあってよい） | 未 |
-| 両方略・3回転方式で回転別メモの部分がバイト同一 | 未 |
-| 3/4/6図形の予算（最悪の組 × 典型/ストレス × 24・32 AI 手番で `buildJevDecisionPayload` が throw しない） | 未（C・B1 の実装後） |
-| 初回の追加 API ゼロ・冷復元（保存分だけ）・pin と束の不一致で止まらない | 未 |
-| プロンプト整理の監査（旧メモ前提の指示の残り、同一呼び出しの重複、角度の読み上げ・順序の強制・追加の質問・停止が無いか、自然な日本語） | 未着手（C のコミット待ち） |
+| 120方向・468領域・領域ID/members の一致・未合意3領域・全方向なしの合成 | 済（`7be915d`。B1 の作業中の木と C の b896dbc で9/9。SandyCurie の集計と一致） |
+| 回転の向き（ラベル r の幾何 = 実際の提示で時計回り r 度） | 済（`7be915d`。提示された自側・相手側の重心が確定分割を時計回りに回した幾何と120方向すべてで一致。逆向きなら不一致を検出） |
+| 投影の全件照合（現在・相対90/180/270・確信度の印・wholeAnywhere・プライバシー・決定性） | 済（`7be915d`） |
+| 3/4/6図形の予算: Jev の state が回転別メモで `invalid_input` にならない | 済（`4ff6b3c`。C の作業中の木と b896dbc で378件、基点で通る条件はすべて通る。増分の最大 +1,454/+1,833/+2,540 字 = 統括の目安より大きい） |
+| 回転別メモの部分が3回転方式でバイト同一・課題条件の文が重ならない | 済（`f1c35cb`。C の b896dbc で合格） |
+| 生成へ渡る特徴の文言に領域IDが無い（P-3） | 済（`5b15d85`。B1 の cd7f326 を取り込んだ木で2件合格。修正前の b896dbc は失敗） |
+| 新 pin: 承認→開始→冷復元が準備待ちに入らない・claim ゼロ・初回 API ゼロ | SandyCurie が B2 の作業中の差分で先に確認（承認200・claim 0・初回推論0・束なしの冷復元）。D の独立試験は B2 の次のコミット後 |
+| 新 pin のモデル入力に旧テンプレートの見立てが無い（F6@0 の旧全体候補、F15@270 の現方向 P3 の旧「翼や尖った突起」。F15@0#P2・P3 と F15@90#P3 の最終採用の「翼」は除外しない） | 未（生成・局所抽出・AI 抽出・再観察の組立済みプロンプトの確認と一緒に、C のコミット後） |
+| 両方略（repair-first・bypass-enabled）で生成・抽出の回転別メモの部分がバイト同一 | 未（C の生成側のコミット後。Jev の呼び出しは方略に依らず同一入力） |
+| 層ごとの最悪値（名詞・役割・full の 3/4/6図形） | 未（B1・C の層の関数が固定された後） |
+| 冷復元は保存分だけ・pin と束の不一致で止まらない | SandyCurie が確認。D の独立試験は B2 の次のコミット後 |
+| プロンプト整理の監査（旧メモ前提の指示の残り、同一呼び出しの重複、角度の読み上げ・順序の強制・追加の質問・停止が無いか、自然な日本語） | 途中（Jev 判断の組立済み: P-1〜P-4 を統括が採用。C の最終コミット後に Jev・生成・抽出・再観察を再確認） |
+
+プロンプト監査の途中所見（C の作業中の木、Jev の `action` 問い）: P-1 同一呼び出し内の重複3か所（instructions の追加段落・accept の基準・request_observation の基準）→ 追加段落を削除、P-2 accept と confirm の基準の重複 → accept 側に残す、P-3 領域IDが特徴の文言に入る → B1 が文言を修正済み、P-4 prospect の前置き4文が3つの問いに重複（基点から不変）→ 新しい版で1回にまとめる。旧メモ前提の再観察の誘導は消え、回転条件の文と回転別メモの凡例は分かれている。
 
 ## 5. 再現手順
-- 旧鍵: `node --test tests/rotation-memory-audit-old-keys.test.ts`（他の木は `AUDIT_REPO_ROOT`）。
+- 旧鍵・旧受付の記録: `node --test tests/rotation-memory-audit-old-keys.test.ts tests/rotation-memory-audit-old-plans.test.ts`（他の木は `AUDIT_REPO_ROOT=<worktree>`、読み取りだけ）。
+- 投影・幾何・予算・回転方式・領域ID: `AUDIT_REPO_ROOT=<B1・C の変更を取り込んだ木> AUDIT_DATA_DIR=<consensus-120.json などの置き場（統合ブランチでは不要）> AUDIT_REQUIRE_ROTATION_MEMORY=1 node --test tests/rotation-memory-audit-projection.test.ts tests/rotation-memory-audit-budget.test.ts tests/rotation-memory-audit-modes.test.ts tests/rotation-memory-audit-region-id.test.ts`。B1 の木と C の木が別なら `AUDIT_MEMORY_ROOT=<B1 の木>`。
 - Jev state の実測: `node tests/support/rotation-memory-audit-measure-jev-state.mjs [<repo root>]`。
 - 描画サイズ: `git show 4e09b62:docs/review/construal-consensus-20261128/consensus-120.json`、`git show 1c5fd3e:docs/review/part-construal-20261128/part-construal-468.json` を取り出して `node tests/support/rotation-memory-audit-measure-render.mjs <consensus> <part>`。
 - node: `export PATH="/Users/Shogo/.local/share/fnm/aliases/default/bin:$PATH"`（v24）。zsh では変数を単語分割しない（`files=(…)` の配列で渡す）。
