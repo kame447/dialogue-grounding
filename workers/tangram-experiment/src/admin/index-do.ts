@@ -1,4 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
+import { PreparedObservationCoordinator } from "../prepared-observation-coordinator.ts";
+import type { ParticipantConfigurationEnv } from "../participant-configuration.ts";
+import type { PreparedClaimRequest } from "../prepared-observation-pool.ts";
 import type { AdminSummary } from "./summary";
 import { getSummary, listAudit, listPage, PARTICIPANT_ROLE_REVISION, recordHash, recordRoles, removeSummaries, setParticipantRole, upsertSummary } from "./index-store.ts";
 import type { AuditEntry, DeletionReason } from "./index-store.ts";
@@ -13,14 +16,30 @@ import type { ModeEntry, ProtocolEntry, ReceptionSettings, SaveResult } from './
  * (allowlisted, no PII). Entries are removed only together with their record;
  * see index-store.ts for the storage layout and the audit log.
  */
-export class AdminIndex extends DurableObject {
+export class AdminIndex extends DurableObject<ParticipantConfigurationEnv> {
+  private readonly observations = new PreparedObservationCoordinator({
+    storage: this.ctx.storage, env: this.env,
+    readSettings: tx => tx ? readSettings(tx) : this.readReceptionSettings(),
+    setAlarm: time => this.ctx.storage.setAlarm(time),
+  });
+  async preparedObservationStatus() { return this.observations.status(); }
+  async prepareObservations(input: { expectedProtocolRevision: number }) { return this.observations.prepare(input); }
+  async claimPreparedObservations(input: PreparedClaimRequest) { return this.observations.claim(input); }
+  async alarm() { await this.observations.alarm(); }
   /** Researcher reception settings: one consistent snapshot of protocol and mode (see reception-settings.ts). */
   async readReceptionSettings(): Promise<ReceptionSettings> { return this.ctx.storage.transaction(tx => readSettings(tx)); }
   async saveReceptionProtocol(input: { expectedRevision: unknown; fields: unknown }): Promise<SaveResult> {
-    return this.ctx.storage.transaction(tx => saveProtocol(tx, input, Date.now(), () => crypto.randomUUID()));
+    const result = await this.ctx.storage.transaction(tx => saveProtocol(tx, input, Date.now(), () => crypto.randomUUID()));
+    if (result.ok) await this.observations.prepare({ expectedProtocolRevision: result.revision });
+    return result;
   }
   async saveReceptionMode(input: { expectedRevision: unknown; value: unknown }): Promise<SaveResult> {
-    return this.ctx.storage.transaction(tx => saveMode(tx, input, Date.now()));
+    const result = await this.ctx.storage.transaction(tx => saveMode(tx, input, Date.now()));
+    if (result.ok && input.value === 'on') {
+      const settings = await this.readReceptionSettings();
+      if (settings.protocol) await this.observations.prepare({ expectedProtocolRevision: settings.protocol.revision });
+    }
+    return result;
   }
   async receptionProtocolHistory(): Promise<ProtocolEntry[]> { return protocolHistory(this.ctx.storage); }
   async receptionModeHistory(): Promise<ModeEntry[]> { return modeHistory(this.ctx.storage); }
