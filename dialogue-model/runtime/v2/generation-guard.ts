@@ -2,9 +2,9 @@
 // validated judgment determines state; detected wording never changes its act.
 import type { DialoguePolicy, DraftAct, JevExecutedDecision, PublicNameCandidate } from "../decision/contract.ts";
 import { isGenerationV18, type ShapeTerminologyVersion } from "../shape-terminology.ts";
-import { GENERATION_RETRY_V22, GENERATION_RETRY_V23, isDeferredAiExtractionGeneration, isGenerationV22, isGenerationV23, isIssueHandlingGeneration, usesV22GenerationRules } from "./deferred-ai-extraction.ts";
+import { GENERATION_RETRY_V22, GENERATION_RETRY_V23, GENERATION_RETRY_V24, isDeferredAiExtractionGeneration, isGenerationV22, isGenerationV23, isGenerationV24, isIssueHandlingGeneration, usesV22GenerationRules } from "./deferred-ai-extraction.ts";
 import type { DeferredAiExtractionGeneration } from "./deferred-ai-extraction.ts";
-export { GENERATION_RETRY_V22, GENERATION_RETRY_V23, isGenerationV22, isGenerationV23 };
+export { GENERATION_RETRY_V22, GENERATION_RETRY_V23, GENERATION_RETRY_V24, isGenerationV22, isGenerationV23, isGenerationV24 };
 export const VISUAL_FEATURE_GENERATION = "jev_generation_retry_v19";
 type VisualFeatureGeneration = typeof VISUAL_FEATURE_GENERATION | DeferredAiExtractionGeneration;
 type GenerationV17Plus = "jev_generation_retry_v17" | ShapeTerminologyVersion | VisualFeatureGeneration;
@@ -562,7 +562,9 @@ export function findOrientationLeaks(text: string, policy?: DialoguePolicy, vers
     const said = v11SaidWords(recentHumanTexts, v5ExpandedOrientationTerms);
     // A bracketed span quotes something the participant said: its direction words must occur in their words (taken back ones excluded), never only in the AI's own past turns.
     const quotable = new Set([...said, ...v11SaidWords(humanTexts, v5ExpandedOrientationTerms)]);
-    return v5OrientationLeaks(v11Unbracket(normalize(text), quotable, v5ExpandedOrientationTerms), true, true, true, true, word => said.has(word), true);
+    const violations = v5OrientationLeaks(v11Unbracket(normalize(text), quotable, v5ExpandedOrientationTerms), true, true, true, true, word => said.has(word), true);
+    // A missing lexical viewpoint marker does not establish a claim about the partner's screen.
+    return isGenerationV24(version) ? violations.filter(code => code !== "orientation_leak") : violations;
   }
   const unquoted = normalize(text).replace(/「[^」]*」|『[^』]*』/gu, "「」");
   const humanText = isGenerationV10(version) ? humanTexts.map(normalize).join("\n") : "";

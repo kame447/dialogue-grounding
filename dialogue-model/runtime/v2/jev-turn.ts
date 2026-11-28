@@ -46,7 +46,7 @@ import { findNamingActHints, hasOrientationWords, draftViolationCodes, deriveGen
 import { isGenerationV15, currentTurnNamingSource, semanticNamingCodes, namingCodesWithoutQuestion, contentPublicationRecovery, namingPublicationHold,
   type NamingHoldReason, type PublicationRecovery } from "./generation-guard.ts";
 import { isGenerationV16, isGenerationV17, isGenerationV19, confirmationDraftText, canReconsiderPublication, HUMAN_MOVE_ON_V17, PUBLICATION_RECOVERY_V17 } from "./generation-guard.ts";
-import { ISSUE_HANDLING_GENERATION, isGenerationV23, isIssueHandlingGeneration, usesV22GenerationRules, classificationExtraction, classificationMatchesPublication, extractionDigest,
+import { ISSUE_HANDLING_GENERATION, isGenerationV23, isGenerationV24, isIssueHandlingGeneration, usesV22GenerationRules, classificationExtraction, classificationMatchesPublication, extractionDigest,
   isDeferredAiExtractionGeneration, validDeferredAiPublicJob, type DeferredAiPublicJob,
   type DeferredClassificationExtraction } from "./deferred-ai-extraction.ts";
 import { isJevVisualPurpose, SEMANTIC_DRAFT_ACTS, visualPurposeMatchesSource } from "../decision/contract.ts";
@@ -1141,6 +1141,8 @@ function validateGeneratedPublication(j: CommittedAct, ledger: OwnLedger, ownSlo
   const lastDraft = j.jevTurn.draftActs?.at(-1);
   if (usesV22GenerationRules(generation) && (lastDraft?.status !== "ok" || !lastDraft.triggers.includes("topic_shift") ||
       !validDraftTopicShift(lastDraft.topicShift) || lastDraft.topicShift.choice !== "within_plan" || !digestShape(lastDraft.draftSha256))) throw Error();
+  if (isGenerationV24(generation) && execution.action === "propose_name" &&
+      (lastDraft?.choice !== "propose_chosen" || !lastDraft.triggers.includes("propose_action"))) throw Error();
   const turns = publicTurns ?? [{ turn: j.turnIndex, speaker: "human" as const, text: "" }];
   const proposedWithdrawal = recovery && execution.action === "repair" && recovery.reason !== "publication_mismatch"
     ? readNamingWithdrawal(detail, ledger, execution.target, j.turnIndex, turns) : null;
@@ -1533,7 +1535,8 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
   const visualFeatureGeneration = isGenerationV19(generationRetryVersion);
   const issueHandling = isIssueHandlingGeneration(generationRetryVersion);
   const hasV22Rules = usesV22GenerationRules(generationRetryVersion);
-  const generationV23 = isGenerationV23(generationRetryVersion);
+  const generationV24 = isGenerationV24(generationRetryVersion);
+  const generationV23 = isGenerationV23(generationRetryVersion) || generationV24;
   const semanticTopicShift = hasV22Rules;
   if (issueHandling !== Boolean(intervention && isIssueHandlingPolicy(intervention))) throw new JevTurnError("invalid_intervention");
   const requestedReplayHistory = options.issueHandlingReplayHistory;
@@ -2230,6 +2233,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
         const moving = transitionText === null ? [] : ["human_led_transition"];
         if (withdrawal) return ["withdraw_prior_name", ...moving];
         if (judgment.action === "agree") return ["agree_action", ...moving];
+        if (generationV24 && judgment.action === "propose_name") return ["propose_action", ...moving];
         const hints = findNamingActHints(text);
         return [...(openHumanProposal ? ["typed_context"] : []), // A reconfirmation of an already agreed name (holistic_v3): affirming it matches the ledger, so wording alone does not open the question (a quoted other name still does).
           ...(hints.wording && record.namingReconfirm !== true ? ["naming_words"] : []),
