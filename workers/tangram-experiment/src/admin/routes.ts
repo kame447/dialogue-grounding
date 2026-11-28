@@ -5,7 +5,7 @@
 import { checkAdmin, presentedToken } from "./auth.ts";
 import { RECEPTIONS_LIVE_JS } from './receptions-live.ts';
 import { LOG_LIVE_JS } from './log-live.ts';
-import { ADMIN_CSS, applyFilter, parseFilter, renderDetail, renderList, renderMessage, renderReceptions, renderEntry, renderSettings, renderExperimentPreview, renderFigures, renderFigurePresets, renderFigurePresetEditor } from "./render.ts";
+import { ADMIN_CSS, applyFilter, parseFilter, renderDetail, renderList, renderMessage, renderReceptions, renderEntry, renderSettings, renderExperimentPreview, renderFigures, renderFigureMemo, renderFigurePresets, renderFigurePresetEditor } from "./render.ts";
 import { FIGURE_SETS, FIGURE_BANK, isSupportedFigureCount } from '../../../../dialogue-model/runtime/stimuli/figure-bank.ts';
 import { OBJECT_ID, RECORD_ID } from "./summary.ts";
 import type { AdminSummary } from "./summary.ts";
@@ -565,7 +565,15 @@ export async function handleAdmin(request: Request, deps: AdminDeps): Promise<Re
   }
   if (url.pathname === "/admin/log-live.js") return respond(200, LOG_LIVE_JS, "text/javascript; charset=utf-8");
   if (url.pathname === "/admin/style.css") return respond(200, ADMIN_CSS, "text/css; charset=utf-8");
-  if (url.pathname === "/admin/figures") return respond(200, renderFigures());
+  if (url.pathname === "/admin/figures") {
+    const presets = await deps.receptionSettings?.figurePresets?.list().catch(() => null) ?? null;
+    return respond(200, renderFigures(presets));
+  }
+  const figureMemo = url.pathname.match(/^\/admin\/figures\/(F[1-9][0-9]?)$/u);
+  if (figureMemo) {
+    const html = renderFigureMemo(figureMemo[1]);
+    return html === null ? notFound() : respond(200, html);
+  }
   if (url.pathname === "/admin" || url.pathname === "/admin/") {
     const filter = parseFilter(url.searchParams);
     const page = await deps.listPage(url.searchParams.get("after"));

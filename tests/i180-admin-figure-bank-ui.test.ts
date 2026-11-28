@@ -5,12 +5,14 @@ import { randomUUID } from 'node:crypto';
 import { handleAdmin } from '../workers/tangram-experiment/src/admin/routes.ts';
 import type { AdminDeps } from '../workers/tangram-experiment/src/admin/routes.ts';
 import { summarizeLatency } from '../workers/tangram-experiment/src/admin/latency.ts';
-import { renderSettings, renderReceptions, renderDetail, renderExperimentPreview, renderFigures } from '../workers/tangram-experiment/src/admin/render.ts';
+import { renderSettings, renderReceptions, renderDetail, renderExperimentPreview, renderFigures, escapeHtml } from '../workers/tangram-experiment/src/admin/render.ts';
 import { readSettings, saveProtocol, protocolHistory } from '../workers/tangram-experiment/src/admin/reception-settings.ts';
 import type { SettingsStorage } from '../workers/tangram-experiment/src/admin/reception-settings.ts';
 import { validateReceptionProtocolV2, receptionProtocolSha256 } from '../dialogue-model/runtime/v2/reception.ts';
 import { createTrialV2, participantView } from '../dialogue-model/runtime/stimuli/scatter-v2.mjs';
 import { FIGURE_BANK, FIGURE_SETS, resolveFigureSelection } from '../dialogue-model/runtime/stimuli/figure-bank.ts';
+
+import { ABSOLUTE_ROTATIONS, rotationMemoryEntry, rotationMemoryPin } from '../dialogue-model/runtime/stimuli/rotation-memory.ts';
 
 const TOKEN = 'synthetic-admin-token-01234567890123456789';
 const ORIGIN = 'https://example.test';
@@ -39,7 +41,7 @@ async function saved(extra: string[][]) {
   return { status: response.status, fields: (f.calls[0]?.args[0] as any)?.fields, writes: f.calls.length };
 }
 
-test('figure catalogue page: authenticated, strict CSP, 30 figures and six candidate sets drawn as inline SVG with no inline style', async () => {
+test('figure catalogue page: authenticated, strict CSP, all 30 figures link to their memo and no legacy candidate sets are displayed', async () => {
   const f = fixture();
   assert.equal((await handleAdmin(new Request(ORIGIN + '/admin/figures'), f.deps)).status, 401);
   const response = await handleAdmin(new Request(ORIGIN + '/admin/figures', { headers: auth }), f.deps);
@@ -47,11 +49,54 @@ test('figure catalogue page: authenticated, strict CSP, 30 figures and six candi
   assert.match(response.headers.get('Content-Security-Policy') ?? '', /style-src 'self'/u);
   const html = await response.text();
   assert.equal(FIGURE_BANK.length, 30);
-  assert.equal((html.match(/<svg /gu) ?? []).length, 30 + 30 + 4, 'all figures once, five legacy sets of six and the four-figure pilot set');
-  for (const id of Object.keys(FIGURE_SETS)) assert.ok(html.includes(`<h3>${id}</h3>`), id);
+  assert.equal((html.match(/<svg /gu) ?? []).length, 30);
+  for (const figure of FIGURE_BANK) assert.ok(html.includes(`href="/admin/figures/${figure.id}"`), figure.id);
+  for (const id of Object.keys(FIGURE_SETS)) assert.ok(!html.includes(`<h3>${id}</h3>`), id);
   assert.doesNotMatch(html, /<style|\sstyle=/u);
-  assert.match(html, /予備検討用/u);
+  assert.match(html, /現在の3図形プリセット/u);
+  assert.match(html, /現在のプリセットを取得できませんでした/u);
   assert.match(html, /<a href="\/admin\/figures" aria-current="page">図形一覧<\/a>/u);
+});
+
+test('all 120 rotation memo views display their saved candidates and confirmed region drawings behind admin authentication', async () => {
+  const f = fixture();
+  const path = ORIGIN + '/admin/figures/';
+  assert.equal((await handleAdmin(new Request(path + 'F1'), f.deps)).status, 401);
+  assert.equal((await handleAdmin(new Request(path + 'F31', { headers: auth }), f.deps)).status, 404);
+  assert.equal((await handleAdmin(new Request(path + 'F1', { method: 'POST', headers: auth }), f.deps)).status, 404);
+  for (const figure of FIGURE_BANK) {
+    const response = await handleAdmin(new Request(path + figure.id, { headers: auth }), f.deps);
+    assert.equal(response.status, 200);
+    assert.match(response.headers.get('Cache-Control') ?? '', /no-store/u);
+    const html = await response.text();
+    const entry = rotationMemoryEntry(figure.id)!;
+    assert.equal((html.match(/<svg /gu) ?? []).length, 8, figure.id);
+    assert.ok(html.includes(rotationMemoryPin().catalogRevision));
+    assert.doesNotMatch(html, /対応する分割図を確認できません|<script|<style|\sstyle=/u);
+    for (const rotation of ABSOLUTE_ROTATIONS) {
+      const start = html.indexOf(`id="rotation-${rotation}"`);
+      const next = html.indexOf('<section class="memo-view"', start + 1);
+      const section = html.slice(start, next < 0 ? undefined : next);
+      const view = entry.views[rotation];
+      assert.ok(start > 0);
+      assert.ok(section.includes(`${rotation}°`));
+      assert.ok(section.includes('全体の見立て'));
+      assert.equal(section.includes('全体の見立て候補なし'), !view.whole.length);
+      for (const candidate of view.whole) {
+        for (const field of [candidate.noun, candidate.posture, candidate.direction, ...candidate.parts.map(p => p.role)]) {
+          assert.ok(section.includes(escapeHtml(field)), figure.id + ':' + rotation + ':' + field);
+        }
+      }
+      for (const region of entry.regions) {
+        assert.ok(section.includes(escapeHtml(region.members.join('+'))));
+        assert.ok(section.includes(escapeHtml(region.shapeName)));
+      }
+      for (const part of view.parts) for (const candidate of part.candidates) {
+        assert.ok(section.includes(escapeHtml(candidate.noun)));
+        if (candidate.owner) assert.ok(section.includes(escapeHtml(candidate.owner)));
+      }
+    }
+  }
 });
 
 test('protocol form: each figure mode and policy is explicit, and the saved fields follow it', async () => {

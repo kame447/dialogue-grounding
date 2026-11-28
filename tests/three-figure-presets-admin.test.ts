@@ -88,6 +88,23 @@ const protocolForm = (expectedRevision: number, mode: string, choices: string[][
 const selectPreset = (expectedRevision: number, presetRevision: number) =>
   protocolForm(expectedRevision, 'preset', [['figureSetId', `${TRIO}:${presetRevision}`]]);
 
+test('figure catalogue reads current three-figure presets including edits and hides, not legacy static sets', async () => {
+  const h = harness();
+  const original = await h.request('/admin/figures');
+  assert.equal(original.status, 200);
+  const before = await original.text();
+  assert.equal((before.match(/class="catalog-preset"/gu) ?? []).length, 10);
+  assert.doesNotMatch(before, /bank-set-a|pilot-four-v1|legacy-v1/u);
+  assert.equal((await h.request(PRESETS + '/' + TRIO, editorForm(1, '変更済みセット', ['F1','F9','F30']))).status, 303);
+  assert.equal((await h.request(PRESETS + '/trio-02-v1/hide', new URLSearchParams([['expectedRevision', '1']]))).status, 303);
+  h.reopen();
+  const after = await (await h.request('/admin/figures')).text();
+  assert.equal((after.match(/class="catalog-preset"/gu) ?? []).length, 9);
+  const edited = after.match(/<section class="catalog-preset">[^]*?変更済みセット[^]*?<\/section>/u)?.[0] ?? '';
+  assert.ok(edited.includes('href="/admin/figures/F9"') && edited.includes('href="/admin/figures/F30"'));
+  assert.doesNotMatch(after, /href="\/admin\/figure-presets\/trio-02-v1"/u);
+});
+
 test('the preset editor creates, renames, replaces and hides three-figure choices across cold reads', async () => {
   const h = harness();
   const initial = await h.index.listFigurePresets();
