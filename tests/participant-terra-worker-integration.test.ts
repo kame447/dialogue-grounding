@@ -1742,7 +1742,10 @@ function v12Transport(t: TestContext, h: ReturnType<typeof harness>) {
       }
     } else if (first === memoExtractionPrompt(true, false) || first === memoExtractionPrompt(true, true) ||
         first === memoExtractionPrompt(true, false, SHAPE_TERMINOLOGY_GENERATION) ||
-        first === memoExtractionPrompt(true, true, SHAPE_TERMINOLOGY_GENERATION)) {
+        first === memoExtractionPrompt(true, true, SHAPE_TERMINOLOGY_GENERATION) ||
+        // A memo that carries a rotation memory adds one sentence of its own to the extraction prompts (withRotation).
+        first === memoExtractionPrompt(true, false, SHAPE_TERMINOLOGY_GENERATION, false, true) ||
+        first === memoExtractionPrompt(true, true, SHAPE_TERMINOLOGY_GENERATION, false, true)) {
       phase = 'dialogue';
       const state = JSON.parse(body.messages.slice(1).map((m: { content: string }) => m.content.split('\n').at(-1)).join(''));
       const latest = state.publicTurns.at(-1);
@@ -1750,7 +1753,7 @@ function v12Transport(t: TestContext, h: ReturnType<typeof harness>) {
       response = JSON.stringify(options.sharedReading
         ? latest.text === p5Support ? [segment(p5Support, 'construal', [decisionSlot], latest.turn - 1)] : []
         : latest.text === v12Answer ? [segment(v12Answer, 'contour', [], latest.turn - 1)] : []);
-    } else if (first === memoAiExtractionPrompt(SHAPE_TERMINOLOGY_GENERATION, true)) {
+    } else if (first === memoAiExtractionPrompt(SHAPE_TERMINOLOGY_GENERATION, true) || first === memoAiExtractionPrompt(SHAPE_TERMINOLOGY_GENERATION, true, false, true)) {
       phase = 'ai_extraction';
       if (options.failVisualExtraction) {
         options.failVisualExtraction = false;
@@ -1762,7 +1765,8 @@ function v12Transport(t: TestContext, h: ReturnType<typeof harness>) {
         segment('そちらの形にも半円の切り込みがありますか？', 'question', [decisionSlot])] : [], visualFeatures: { sources: [
         { source: visualSource(), quote: 'そちらの形にも半円の切り込みがありますか？' },
       ] } });
-    } else if (first === MEMO_AI_PUBLIC_EXTRACTION_INSTRUCTIONS || first === memoAiExtractionPrompt(SHAPE_TERMINOLOGY_GENERATION)) {
+    } else if (first === MEMO_AI_PUBLIC_EXTRACTION_INSTRUCTIONS || first === memoAiExtractionPrompt(SHAPE_TERMINOLOGY_GENERATION) ||
+        first === memoAiExtractionPrompt(SHAPE_TERMINOLOGY_GENERATION, false, false, true)) {
       phase = 'ai_extraction';
       if (options.sharedReading) {
         const { candidateText } = JSON.parse(body.messages[1].content);

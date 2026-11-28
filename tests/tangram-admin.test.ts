@@ -488,14 +488,16 @@ test("wrangler keeps migration v1 unchanged, adds AdminIndex under v2, sets 30-d
 
 test("participant state gates the result and /admin is routed before the participant API", async () => {
   const source = await readFile(new URL("../workers/tangram-experiment/src/index.ts", import.meta.url), "utf8");
+  // The Durable Object's storage is `this.storage`, the part-catalog wrapper over `this.ctx.storage`; the checks below read the code through it.
+  assert.match(source, /private readonly storage = createPartCatalogStorage\(this\.ctx\.storage\);/);
   // Participant state is the live state, with only the result withheld until the questionnaire is submitted.
-  assert.match(source, /private async state\(starting = false, startIntentId\?: string\): Promise<unknown> \{\n\s+const live = starting \? null : this\.trial\?\.getState\(\) \?\? null;\n\s+const trial = live && typeof live\.sessionId === "string"\n\s+\? lockResult\(live, await readQuestionnaire\(this\.ctx\.storage, live\.sessionId\)\) : live;\n\s+return \{ trial, hideStrategy: true, busy: starting \|\| Boolean\(live\?\.busy\)/);
+  assert.match(source, /private async state\(starting = false, startIntentId\?: string\): Promise<unknown> \{\n\s+const live = starting \? null : this\.trial\?\.getState\(\) \?\? null;\n\s+const trial = live && typeof live\.sessionId === "string"\n\s+\? lockResult\(live, await readQuestionnaire\(this\.storage, live\.sessionId\)\) : live;\n\s+return \{ trial, hideStrategy: true, busy: starting \|\| Boolean\(live\?\.busy\)/);
   assert.ok(source.indexOf("isAdminPath(url.pathname)") < source.indexOf('url.pathname.startsWith("/api/")'));
   // S5: archive-only initialization never restores a legacy active task.
   const initStart=source.indexOf("private async initialize()"),initEnd=source.indexOf("/** Narrow metadata RPCs",initStart);
   assert.ok(initStart>=0&&initEnd>initStart,"initialization slice boundaries exist");
   const init = source.slice(initStart,initEnd);
-  const order=["backfillActive(","await this.scheduleRecoveryAlarm();","const record = await this.ctx.storage.get<StoredTrial>(ACTIVE_KEY)","this.registerSummary(record)"].map(n=>init.indexOf(n));
+  const order=["backfillActive(","await this.scheduleRecoveryAlarm();","const record = await this.storage.get<StoredTrial>(ACTIVE_KEY)","this.registerSummary(record)"].map(n=>init.indexOf(n));
   assert.ok(order.every(at=>at>=0)&&order.every((at,i)=>i===0||at>order[i-1]),String(order));
   assert.doesNotMatch(init,/this\.createTrial\(/);
   const assertStartBeforeInitialize=(text:string)=>{
@@ -511,17 +513,17 @@ test("participant state gates the result and /admin is routed before the partici
   assert.throws(()=>assertStartBeforeInitialize(specimen("validateBaseStart(body)")),"missing initialization is not an order proof");
   assert.throws(()=>assertStartBeforeInitialize(specimen("await this.initialize();validateBaseStart(body)")),"reversed calls fail");
   assert.throws(()=>assertStartBeforeInitialize("validateBaseStart(body);await this.initialize()"),"missing slice boundaries fail");
-  assert.match(source,/compareAndSwap:[\s\S]*?this\.serialized\(\(\)=>this\.ctx\.storage\.transaction\([\s\S]*?await tx\.put\(updates\)[\s\S]*?await this\.updateRecoveryAlarm\(tx\)/);
+  assert.match(source,/compareAndSwap:[\s\S]*?this\.serialized\(\(\)=>this\.storage\.transaction\([\s\S]*?await tx\.put\(updates\)[\s\S]*?await this\.updateRecoveryAlarm\(tx\)/);
   // Explicit deletion also removes the owner's embedded copy in the same transaction.
   const deletion = source.slice(source.indexOf('async adminDelete('), source.indexOf('async alarm()'));
-  assert.match(deletion, /this\.serialized\(\(\) => this\.ctx\.storage\.transaction\(async tx => \{/);
+  assert.match(deletion, /this\.serialized\(\(\) => this\.storage\.transaction\(async tx => \{/);
   assert.match(deletion, /return deleteArchived\(tx, recordId\)/);
   for (const call of ["backfillActive("]) {
     const uses=source.split(call).length-1,wrapped=source.split("this.serialized(() => "+call).length-1;
     assert.ok(uses>=1&&uses===wrapped,`${call} ${wrapped}/${uses}`);
   }
   // The alarm re-registers remaining records, repairing a missed best-effort index write (audit L2).
-  assert.match(source.slice(source.indexOf("async alarm()")), /^async alarm\(\)[\s\S]*?ledgerIds\(this\.ctx\.storage\)[\s\S]*?this\.registerSummary\(/);
+  assert.match(source.slice(source.indexOf("async alarm()")), /^async alarm\(\)[\s\S]*?ledgerIds\(this\.storage\)[\s\S]*?this\.registerSummary\(/);
   assert.doesNotMatch(source, /runExpiry|expireRecords|nextExpiry/, "no Worker entrypoint invokes expiry");
   assert.match(source, /private async updateRecoveryAlarm\([\s\S]*?if \(!await this\.hasStoredRecoveryWork\(storage\)\) \{\s+await storage\.deleteAlarm\?\.\(\);\s+return;[\s\S]*?await storage\.setAlarm\?\.\(due\)/);
   assert.doesNotMatch(source, /deleteAll/);

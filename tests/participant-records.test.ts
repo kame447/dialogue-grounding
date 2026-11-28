@@ -213,10 +213,11 @@ test("Worker routes: one indistinguishable not_found, own records only, and name
   assert.match(route, /RECORD_ID\.test\(recordId\) \? await this\.readOwnedArchive\(recordId\)/);
   assert.match(route, /this\.serialized\(async \(\) => \{[\s\S]*writeQuestionnaire\(/);
   // Only a submission updates the ledger timestamp; this never sets an expiry.
-  assert.match(route, /writeQuestionnaire\(this\.ctx\.storage, recordId, next\.questionnaire, Date\.now\(\),\s+next\.questionnaire\.status === "submitted"\)/);
+  // The Durable Object reads and writes through `this.storage`, the part-catalog wrapper over `this.ctx.storage` (it passes every value that holds no part geometry through unchanged).
+  assert.match(route, /writeQuestionnaire\(this\.storage, recordId, next\.questionnaire, Date\.now\(\),\s+next\.questionnaire\.status === "submitted"\)/);
   assert.doesNotMatch(route, /archiveSnapshot|storage\.put|humanSubmission|scoring/);
   // The review's result is withheld until that record's questionnaire is submitted.
-  assert.match(route, /lockResult\(participantReview\(record\), await readQuestionnaire\(this\.ctx\.storage, recordId\)\)/);
+  assert.match(route, /lockResult\(participantReview\(record\), await readQuestionnaire\(this\.storage, recordId\)\)/);
   assert.doesNotMatch(source, /(?<!await )this\.state\(\)/, "state() is always awaited, never sent as a promise");
   assert.ok(source.indexOf('pathname === "/api/records"') < source.indexOf("if (!this.trial) throw"));
 });
