@@ -32,7 +32,7 @@ import { PARTICIPANT_STOP_HTML } from "../../../dialogue-model/runtime/v2/partic
 import { ReceptionError, validateReception, createReception, approveReception, validateReceptionApprovalInput, validateReceptionPlan, cancelReception, terminateReception,
   participantReception, receptionSummary, effectiveBetweenTrials, effectiveFigureSelection, effectiveRotationMode,
   validateParticipantLimits, isParticipantDialogueProfile, isPilot012ParticipantDialogueProfile,
-  participantMemoryPruneVersion } from '../../../dialogue-model/runtime/v2/reception.ts';
+  participantMemoryPruneVersion, PILOT012_V24_PARTICIPANT_PROFILE } from '../../../dialogue-model/runtime/v2/reception.ts';
 import { isAdminTermination, isIncompleteTrialStatus } from '../../../dialogue-model/runtime/v2/admin-termination.ts';
 import type { AdminTermination } from '../../../dialogue-model/runtime/v2/admin-termination.ts';
 import { isSubmittedQuestionnaire } from '../../../dialogue-model/runtime/v2/questionnaire-gate.ts';
@@ -298,6 +298,8 @@ export class TangramSession extends DurableObject<Env> {
       const approval = { expectedRevision: input.expectedRevision, order: input.order, protocol, expected };
       validateReceptionApprovalInput(existing, approval);
       const { participant } = await resolveParticipantConfiguration(this.env, protocol);
+      const check = participant.participantDialogueProfile === PILOT012_V24_PARTICIPANT_PROFILE
+        ? { postGenerationCheck: settings.postGenerationCheck?.value ?? 'off' as const } : {};
       const needsPrepared = participant.participantRuntimeProfile === PARTICIPANT_PRODUCTION_PROFILE &&
         participant.participantModelPin !== undefined && protocol.referenceMemory;
       let prepared: { reception: Reception; entries: PreparedObservationBundle['entries'] } | undefined;
@@ -335,7 +337,9 @@ export class TangramSession extends DurableObject<Env> {
           if (checked.size !== entries.size) throw new Error();
           const preparedObservations = validatePreparedObservations({ schemaVersion: 'prepared_observations_v1',
             bundleId: bundle.bundleId, preparedAt: bundle.preparedAt, trials }, proposed.plan.trials.length);
-          const reception = validateReception({ ...proposed, plan: { ...proposed.plan, preparedObservations } });
+          // The prepared template has the default check setting. Freeze the
+          // researcher setting only after validating the bundle against it.
+          const reception = validateReception({ ...proposed, plan: { ...proposed.plan, ...check, preparedObservations } });
           prepared = { reception, entries: [...checked].map(([key, entry]) => ({ key, entry })) };
         } catch { throw new ReceptionError('prepared_observations_unavailable'); }
       }
@@ -353,7 +357,7 @@ export class TangramSession extends DurableObject<Env> {
           await tx.put(saved);
           return prepared.reception;
         }
-        const next = await approveReception(raw, { ...approval, ...participant, approvedAt: new Date().toISOString(),
+        const next = await approveReception(raw, { ...approval, ...participant, ...check, approvedAt: new Date().toISOString(),
           randomSeed: () => crypto.getRandomValues(new Uint32Array(1))[0] });
         await tx.put({ 'reception:v1': next }); return next;
       }));
@@ -1019,9 +1023,10 @@ export class TangramSession extends DurableObject<Env> {
           if (current && current.errorCode === 'record_deleted') return {kind:'expired'};
           const source = current?.assignment.source;
           if (source?.kind === 'reception_plan_v2' || source?.kind === 'reception_plan_v3') {
-            const plan = reception?.plan;
-            const dialogueProfile = plan?.schemaVersion === 'reception_plan_v1' ? undefined : plan?.participantDialogueProfile;
+            const plan = reception?.plan?.schemaVersion === 'reception_plan_v1' ? undefined : reception?.plan;
+            const dialogueProfile = plan?.participantDialogueProfile;
             if (dialogueProfile !== source.plan.participantDialogueProfile ||
+                plan?.postGenerationCheck !== source.plan.postGenerationCheck ||
                 current?.record && !matchesWorkerDialogueProfile(dialogueProfile, current.record)) {
               throw new BaseSessionError('trial_unavailable');
             }
@@ -1136,7 +1141,7 @@ export class TangramSession extends DurableObject<Env> {
   }
 
   private async createTrial(binding: Parameters<MakeBaseTask>[0]): Promise<NamingTask> {
-    const {seed,strategy,referenceMemory,restore,participantRuntime,initialObservationGeneration,memoryPruneVersion,participantDialogueProfile,openingMode,preparedObservation} = binding;
+    const {seed,strategy,referenceMemory,restore,participantRuntime,initialObservationGeneration,memoryPruneVersion,participantDialogueProfile,openingMode,preparedObservation,postGenerationCheck} = binding;
     if (restore && !matchesWorkerDialogueProfile(participantDialogueProfile, restore) ||
         participantDialogueProfile !== undefined &&
           (memoryPruneVersion !== participantMemoryPruneVersion(participantDialogueProfile) ||
@@ -1188,7 +1193,7 @@ export class TangramSession extends DurableObject<Env> {
       const figureSelection = restore ? restore.options.figureSelection : binding.figureSelection;
       const { trial, figures, own } = participantTrialMaterial(seed, rotationMode, figureSelection);
       const runtime = createWorkerParticipantRuntime({
-        proxy: policy.proxy, pin, ...runtimeMode, initialObservationGeneration, participantDialogueProfile, preparedObservation,
+        proxy: policy.proxy, pin, ...runtimeMode, initialObservationGeneration, participantDialogueProfile, preparedObservation, postGenerationCheck,
         own, cache: preparedObservation ? {
           read: key => this.ctx.storage.get(key),
           async putIfAbsent() { throw new NamingTaskError('invalid_options'); },

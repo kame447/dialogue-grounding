@@ -240,6 +240,7 @@ export async function createNamingTaskV2({
       ...(jev.profile.dialoguePolicy ? { dialoguePolicy: jev.profile.dialoguePolicy } : {}),
       ...(jev.participantPrompts ? { participantPrompts: true } : {}),
       generationRetryVersion: jev.generationRetryVersion,
+      ...(jev.postGenerationCheck ? { postGenerationCheck: jev.postGenerationCheck } : {}),
       ...(deferredExtraction ? { deferredAiExtractionProfileSha256: researchHash(jev.profile) } : {}),
       judgmentMaterialVersion: jev.profile.judgmentMaterialVersion,
       newTrialAgreeNameScopeVersion: jev.newTrialAgreeNameScopeVersion,
@@ -574,6 +575,7 @@ export async function createNamingTaskV2({
           // The policy a new two_stage_v3 trial was created with; a record without one never gains it.
           ...(jev.profile.dialoguePolicy ? { dialoguePolicy: jev.profile.dialoguePolicy } : {}),
           ...(jev.namingRestoreVersion ? { jevNamingRestoreVersion: jev.namingRestoreVersion } : {}),
+          ...(jev.postGenerationCheck ? { postGenerationCheck: jev.postGenerationCheck } : {}),
           ...(hasVersionedViewpoint(jev.generationRetryVersion) ? { generationRetryVersion: jev.generationRetryVersion } : {}) } : {}) },
       ...(rotation.legacy ? {} : { stimulus: clone(stimulus) }),
       status: result ? "completed" : closed ? "submitting" : "dialogue",
