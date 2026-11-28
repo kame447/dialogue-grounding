@@ -1633,7 +1633,10 @@ export default {
         }
         const object = env.NAMING_SESSIONS.get(target);
         const forwardHeaders = new Headers(request.headers);forwardHeaders.delete('Authorization');forwardHeaders.delete('Cookie');
-        result = await object.fetch(new Request(`https://session.internal${url.pathname}${url.search}`,{method:request.method,headers:forwardHeaders,body:['GET','HEAD'].includes(request.method)?null:request.body}));
+        // The object never reads the body of /api/reception. A forwarded body stream left unread is read after the response has been sent
+        // (workerd: "Can't read from request stream after response has been sent"), so it is not forwarded.
+        const forwardBody = !['GET','HEAD'].includes(request.method) && url.pathname !== '/api/reception';
+        result = await object.fetch(new Request(`https://session.internal${url.pathname}${url.search}`,{method:request.method,headers:forwardHeaders,body:forwardBody?request.body:null}));
       } else {
         if (!['/','/index.html','/app.js','/style.css','/tab-session.js'].includes(url.pathname) || request.method !== 'GET') return withHeaders(json(404,{error:'not_found'}));
         if (url.pathname === '/' || url.pathname === '/index.html') {
