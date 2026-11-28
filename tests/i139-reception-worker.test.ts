@@ -733,6 +733,8 @@ test('deleting trial logs removes their reception links and hides the row once a
   assert.ok(!after.includes(r.receptionId) && !after.includes(first) && !after.includes(second));
   assert.ok(after.includes(pending.receptionId));
   assert.deepEqual(await browserHistory(), []);
+  assert.equal((await (await h.edge(req('/api/sessions', undefined, cookie))).json()).hadDeletedReception, true);
+  assert.equal((await (await h.edge(req('/api/sessions', undefined, other))).json()).hadDeletedReception, undefined);
   assert.equal((await browserHistory(other)).length, 1);
   assert.notDeepEqual(await version(), partialVersion);
   // Persisted admission identity and deletion audit remain; no other trial is deleted.

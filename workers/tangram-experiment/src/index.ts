@@ -1006,7 +1006,7 @@ export class TangramSession extends DurableObject<Env> {
   }
 
   /** Read only history metadata, leaving dialogue restoration and model calls to explicit routes. */
-  async tabHistorySummary(sessionId: string, createdAt: string | null, protocolAvailable: boolean): Promise<BrowserSessionSummary | null> {
+  async tabHistorySummary(sessionId: string, createdAt: string | null, protocolAvailable: boolean): Promise<BrowserSessionSummary | { deletedReception: true } | null> {
     await this.initialize();
     let reception: Reception | null = null, receptionUnreadable = false;
     try { reception = await this.readReception(); }
@@ -1017,7 +1017,7 @@ export class TangramSession extends DurableObject<Env> {
     if (reception?.trials.some(t => t.recordId !== null)) {
       const deleted = new Set(await this.storage.get<string[]>('tombstones') ?? []);
       if (allRecordedTrialsDeleted(reception.trials, id => deleted.has(id)) &&
-          !await this.hasRecoverableUnrecordedAdmission(reception)) return null;
+          !await this.hasRecoverableUnrecordedAdmission(reception)) return { deletedReception: true };
     }
     const [active, ids] = await Promise.all([this.storage.get<StoredTrial>(ACTIVE_KEY), ledgerIds(this.storage)]);
     const records = [];
@@ -1035,7 +1035,7 @@ export class TangramSession extends DurableObject<Env> {
       activeRecordId: active?.recordId ?? null, records });
   }
 
-  async browserHistory(): Promise<{ receptionMode: ReceptionMode; sessions: BrowserSessionSummary[] }> {
+  async browserHistory(): Promise<{ receptionMode: ReceptionMode; sessions: BrowserSessionSummary[]; hadDeletedReception?: true }> {
     const [settings, entries] = await Promise.all([this.settings().catch(() => null), this.browserSessions()]);
     const protocolAvailable = Boolean(settings?.protocol);
     const results = await Promise.all([
@@ -1043,9 +1043,12 @@ export class TangramSession extends DurableObject<Env> {
       ...entries.map(({ sessionId, doName, createdAt }) =>
         this.tabObject(doName).tabHistorySummary(sessionId, createdAt, protocolAvailable)),
     ]);
-    const summaries = results.filter((summary): summary is BrowserSessionSummary => summary !== null);
+    const summaries = results.filter((summary): summary is BrowserSessionSummary => summary !== null && !('deletedReception' in summary));
     return { receptionMode: settings ? receptionOpen(settings.mode) ? 'on' : 'off' : 'unavailable',
-      sessions: sortBrowserSessions(summaries) };
+      sessions: sortBrowserSessions(summaries),
+      // A browser with deleted history is not a first-time visitor. No IDs or
+      // removed record content are returned, only this owned-history flag.
+      ...(results.some(summary => summary !== null && 'deletedReception' in summary) ? { hadDeletedReception: true } : {}) };
   }
   private async baseReadRecord(id: string): Promise<BaseRecord|null> {
     if (!RECORD_ID.test(id)) return null;
