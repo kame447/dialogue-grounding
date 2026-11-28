@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // RESEARCHER ONLY. Entry point for the rotation discrimination diagnostics.
-//   offline [--rotation-mode relative_pm90|relative_0]  geometry tables, no network
+//   offline [--rotation-mode relative_pm90|relative_0|relative_90_180_270]  geometry tables, no network
 //   plan  [--bench ...]      dry-run request count, no network
 //   live  --bench ... --out <dir outside the repository>
 // Live runs go only through the research Worker (createChatClient(loadConfig())).

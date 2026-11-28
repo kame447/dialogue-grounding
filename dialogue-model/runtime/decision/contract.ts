@@ -8,6 +8,7 @@ import type { CarryDestination, ExtraSelection, JevActionV21, JevIssueRef, ISSUE
 import type { ObservationMemo } from "../observation/contract.ts";
 import type { LocalAct, LocalClaimView, PublicTurn } from "../local-grounding/contract.ts";
 import type { OwnLedger } from "../judgment/schema.mjs";
+import type { RotationMode } from "../v2/reception.ts";
 import { isIssueHandlingGeneration, type DeferredAiExtractionGeneration, type DEFERRED_AI_EXTRACTION_GENERATION } from "../v2/deferred-ai-extraction.ts";
 
 export const JEV_ACTIONS = Object.freeze(["accept", "propose_name", "confirm", "repair", "defer", "revisit", "agree", "move_on", "close", "request_observation"] as const);
@@ -155,8 +156,8 @@ export type JevDecisionInput = {
   repairFacts?: RepairFact[];
   /** holistic_v5 only: every action executed in earlier turns. Its presence (even empty) selects the compact judgment material (decision/judgment-material-v5.ts). */
   judgmentLedger?: readonly LedgerAction[];
-  /** holistic_v5 only: the stimulus rotation of the trial. The rotation premise is stated only for relative_pm90 (omitted means that original mode). */
-  rotationMode?: "relative_pm90" | "relative_0";
+  /** holistic_v5 only: the stimulus rotation of the trial. The rotation premise is stated for relative_pm90 and relative_90_180_270, each with its own sentence, and not for relative_0 (omitted means relative_pm90, the original mode). */
+  rotationMode?: RotationMode;
   /** jev_generation_retry_v6 only: every question of the request, the repair-prospect questions included, carries the notation legend and the rotation premise. */
   notationV6?: true;
   /** jev_generation_retry_v11 only: the legend also describes the `answerClaims` rows (an answer the graph no longer carries has a null source turn). */

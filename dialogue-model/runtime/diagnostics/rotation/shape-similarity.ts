@@ -5,8 +5,9 @@
 import { FIGURES } from "../../stimuli/figures.mjs";
 import { boundarySegments } from "../../stimuli/geometry.mjs";
 import { createLayoutsV2 } from "../../stimuli/scatter-v2.mjs";
+import type { RotationMode } from "../../v2/reception.ts";
 
-export type RotationMode = "relative_pm90" | "relative_0";
+export type { RotationMode };
 
 export type Point = readonly [number, number];
 export type Figure = { id: string; pieces: ReadonlyArray<{ points: ReadonlyArray<Point> }> };
