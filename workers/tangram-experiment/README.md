@@ -127,9 +127,9 @@ npm run deploy:tangram
 
 ### 参加者の Terra 実行プロファイル
 
-`PARTICIPANT_TERRA_ENABLED=on` と `PARTICIPANT_TERRA_PROFILE=participant_production_usage_v1` を設定した Worker で新規に承認した受付は、`participant_production_usage_v1` と Jev、Luna、Terra の期待返却 ID を受付計画に固定します。両条件と復元は同じ計画を使います。旧受付の保存済み上限と、モデル ID だけを固定した旧受付向けの `PARTICIPANT_TERRA_LIMITS_JSON` の互換経路も残ります。隔離 Worker は新プロファイルを指定せず、従来の予算付き経路を使えます。
+`PARTICIPANT_TERRA_ENABLED=on` と `PARTICIPANT_TERRA_PROFILE=participant_production_usage_v1` を設定した Worker で新規に承認した受付は、`participant_production_usage_v1` と Jev、Luna、Terra の期待返却 ID を受付計画に固定します。両条件と復元は同じ計画を使います。本番 Worker で旧受付を続ける場合、旧台帳の使用量と上限の到達は研究記録に残り、試行は続きます。モデル ID だけを固定した旧受付も `PARTICIPANT_TERRA_LIMITS_JSON` の設定なしで開始できます。隔離 Worker は本番プロファイルを指定せず、従来の上限を適用できます。
 
-新プロファイルは試行全体の費用、トークン、送信件数を停止条件に使いません。既存の段階数、再試行、個別リクエストの期限、レート制限は適用されます。送信予約を残した保留入力の復元は既存のエラー表示と再試行操作を使います。研究者用の記録の `jevLedger` は、段階ごとに既知費用と欠測件数、入出力トークン、送信予約、結果不明、初回観察のキャッシュ再利用を集計します。最新の送信結果で費用が取得できない場合は `null` を保存します。これらは参加者 API の応答に含まれません。
+本番プロファイルでは、試行全体の費用、トークン、送信件数は観測の対象です。既存の段階数、個別リクエストの期限、レート制限は適用されます。保存済みの未応答の入力は、サーバが同じ試行の中で自動回復します。研究者用の記録の `jevLedger` は、段階ごとに既知費用と欠測件数、入出力トークン、送信予約、結果不明、初回観察のキャッシュ再利用を集計します。最新の送信結果で費用が取得できない場合は `null` を保存します。参加者 API は台帳を非公開にします。
 
 固定 ID を照合した上流応答が本文や選択肢の検査で棄却された場合も、検証済みの費用・トークンは台帳に残ります。初回観察後に開始が失敗して試行記録 ID がない場合は、研究者の受付一覧から「開始失敗の使用量 JSON」を開きます。認証付きの `GET /admin/reception/<receptionId>/usage.json` で、失敗した割付 ID、試行順、失敗コード、台帳を照合できます。`usage:null` は台帳が保存されていない状態です。
 

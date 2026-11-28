@@ -439,6 +439,8 @@ for (const strategy of strategies) {
     // Deliberately offer a good model reply if the server accidentally sends.
     app.script('confirm', generated);
     const blocked = await app.read();
+    assert.equal(blocked.dialogueRecovery, 'unavailable', 'the isolated research allowance still stops the trial');
+    assert.equal(blocked.recovering, undefined);
     assert.deepEqual(blocked.events, failed.events);
     for (const refusal of [await app.names(blocked), await app.submitAI()]) {
       assert.ok(refusal.status >= 400);
@@ -452,7 +454,7 @@ for (const strategy of strategies) {
     const rendered = await browser(blocked);
     assert.ok(!visible(rendered.ids['retry-chat']) || rendered.ids['retry-chat'].disabled,
       'a participant control cannot offer another send once the allowance is exhausted');
-    assert.ok(interruptionOffered(rendered), 'the participant can leave the incomplete trial through a non-dialogue operation');
+    assert.ok(!interruptionOffered(rendered), 'the participant UI offers no manual recovery for a research fixture');
   });
 
   test(strategy + ' keeps the first rejection off the participant screen during a successful rewrite', { timeout: 20000 }, async t => {

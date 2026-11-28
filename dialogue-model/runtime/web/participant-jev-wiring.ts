@@ -41,7 +41,25 @@ import type { GenerationRetryVersion } from '../v2/generation-guard.ts';
 import { isIssueHandlingGeneration, type DeferredAiExtractionGeneration } from '../v2/deferred-ai-extraction.ts';
 import { ISSUE_HANDLING_VERSION } from '../decision/issue-handling.ts';
 
-export type JevResearchLedger = RunBudget | ParticipantUsageLedger;
+type ParticipantRunBudget = RunBudget<BudgetLimits | null>;
+export type JevResearchLedger = ParticipantRunBudget | ParticipantUsageLedger;
+
+/** Historical participant accounting, used by the production Worker for old plans. */
+export class LegacyParticipantUsageLedger extends RunBudget<BudgetLimits | null> {
+  constructor(limits: BudgetLimits | null) { super(limits, 'observe_only'); }
+  override stopReason() { return this.halted ? 'model_mismatch' : null; }
+  override stop(reason: string) { if (reason === 'model_mismatch') super.stop(reason); }
+  resumeAfterModelMismatch() { this.halted = false; this.haltReason = null; }
+  override snapshot() {
+    const saved = super.snapshot(), { limits } = saved;
+    const observed = { jevUsd: saved.observedJevUsd, lunaCalls: saved.lunaCalls, lunaPosts: saved.lunaPosts,
+      jevPosts: saved.jevPosts, lunaTokens: saved.observedLunaTokens };
+    const thresholdsReached = limits === null ? [] : (Object.keys(observed) as (keyof BudgetLimits)[])
+      .filter(key => observed[key] >= limits[key]);
+    return { ...saved, budgetEnforcement: 'observe_only' as const, thresholdsReached,
+      usdScope: 'observed_jev_subtotal', tokenScope: 'observed_lower_bound_unknown_fields_excluded' };
+  }
+}
 const AI_NAME_ACCEPTANCES_V1 = 'ai_name_acceptances_v1';
 type ParticipantJevVersionPin = Readonly<{
   generationRetryVersion: 'jev_generation_retry_v12' | 'jev_generation_retry_v13' | 'jev_generation_retry_v15' | 'jev_generation_retry_v16' |
@@ -340,9 +358,9 @@ export async function createParticipantCacheObserver(options: {directory:string;
 }
 
 type Scope = {turn:number|null;phase:string|null;boundary:'common'|'tail'};
-const contexts = new WeakMap<RunBudget,AsyncLocalStorage<Scope>>();
-function scope(ledger:RunBudget) { let value=contexts.get(ledger);if(!value){value=new AsyncLocalStorage();contexts.set(ledger,value);}return value; }
-export function withParticipantJevTurn<T>(ledger:RunBudget,turn:number,operation:()=>Promise<T>):Promise<T> {
+const contexts = new WeakMap<ParticipantRunBudget,AsyncLocalStorage<Scope>>();
+function scope(ledger:ParticipantRunBudget) { let value=contexts.get(ledger);if(!value){value=new AsyncLocalStorage();contexts.set(ledger,value);}return value; }
+export function withParticipantJevTurn<T>(ledger:ParticipantRunBudget,turn:number,operation:()=>Promise<T>):Promise<T> {
   return scope(ledger).run({turn,phase:null,boundary:'common'},operation);
 }
 type ChatClient = {complete(messages:any[],options?:any):Promise<any>};
@@ -360,7 +378,7 @@ export function participantLunaClient(client:ChatClient,ledger:JevResearchLedger
       ()=>timed.complete(messages,options));
   }};
 }
-async function jevOperation<T>(ledger:RunBudget,kind:string,operation:()=>Promise<T>):Promise<T> {
+async function jevOperation<T>(ledger:ParticipantRunBudget,kind:string,operation:()=>Promise<T>):Promise<T> {
   ledger.beforeSend();
   try{return await operation();}catch(error){
     if(error instanceof JevDecisionError||error instanceof JevLocalTestError){
@@ -373,7 +391,7 @@ async function jevOperation<T>(ledger:RunBudget,kind:string,operation:()=>Promis
 type WireReceipt = SendReceipt & {requestSha256:string;requestedId:string;returnedId:string|null;version:string|null;boundary:'common'|'tail'};
 const safeModel = (v:unknown):string|null => typeof v==='string' && v.length<=128 && /^[A-Za-z0-9][A-Za-z0-9._/-]*$/u.test(v)?v:null;
 /** Reservations happen at the real POST boundary, including native client retries. */
-export function participantLedgerFetch(ledger:RunBudget,provider:'luna'|'jev',expectedLunaModel:string,fetchImpl:typeof fetch):typeof fetch {
+export function participantLedgerFetch(ledger:ParticipantRunBudget,provider:'luna'|'jev',expectedLunaModel:string,fetchImpl:typeof fetch):typeof fetch {
   return async (url,init={}) => {
     if ((init.method??'GET').toUpperCase()!=='POST') throw new ParticipantJevError('invalid_config');
     if (init.signal?.aborted) throw Object.assign(Error('aborted'),{name:'AbortError'});
@@ -402,7 +420,7 @@ export function participantLedgerFetch(ledger:RunBudget,provider:'luna'|'jev',ex
 }
 
 /** R2: carry all reservations and observed thresholds across a process restart. */
-export function restoreParticipantJevLedger(ledger:RunBudget,saved:any):void {
+export function restoreParticipantJevLedger(ledger:ParticipantRunBudget,saved:any):void {
   try {
     if(researchHash(jsonData(saved.limits))!==researchHash(ledger.limits)||!nonnegative(saved.lunaCalls)||
       !Array.isArray(saved.sends)||!Array.isArray(saved.refusals)||!Array.isArray(saved.stops)||
@@ -418,6 +436,7 @@ export function restoreParticipantJevLedger(ledger:RunBudget,saved:any):void {
     ledger.sends.splice(0,ledger.sends.length,...sends);
     ledger.refusals.splice(0,ledger.refusals.length,...structuredClone(saved.refusals));
     ledger.stops.splice(0,ledger.stops.length,...structuredClone(saved.stops));
+    if(ledger instanceof LegacyParticipantUsageLedger&&ledger.haltReason!=='model_mismatch')ledger.resumeAfterModelMismatch();
     for(const send of ledger.sends)if(send.status==='in_flight')ledger.unknown(send);
     ledger.checkObservedLimits();
   }catch{return invalid();}
