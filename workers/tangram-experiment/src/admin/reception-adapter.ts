@@ -124,12 +124,17 @@ export function createReceptionAdminPort(options: Options): ReceptionAdminPort {
     async listPage(after) {
       const summaries = snapshotRpc(await options.index.listReceptions());
       const position = after ? summaries.findIndex(r => r.receptionId === after) : -1;
-      const start = position + 1, page = summaries.slice(start,start+PAGE_SIZE), items: ReceptionAdminRow[] = [];
+      // Cancellation is terminal and can only occur before a trial exists.
+      // Skip indexed cancellations before pagination, keeping the index rows
+      // themselves so old cursors and reception identities remain valid.
+      const remaining = summaries.slice(position + 1).filter(row => row.status !== 'cancelled');
+      const page = remaining.slice(0, PAGE_SIZE), items: ReceptionAdminRow[] = [];
       const seen = new Set<string>(), liveRecords: string[] = [];
       const sources = new Map<string, { owner: Owner; listState?: ReceptionListState }>();
       async function readRow(summary: ReceptionSummary, fast: boolean) {
         const resolved = await resolve(summary, summary.receptionId, fast);
-        if (!resolved) return null;
+        // The owner may already be cancelled even if the index update failed.
+        if (!resolved || resolved.reception.status === 'cancelled') return null;
         const item = project(resolved.reception);
         if (options.index.recordRoles) {
           const ids = item.trials.flatMap(trial => trial.recordId === null ? [] : [trial.recordId]);
@@ -188,7 +193,7 @@ export function createReceptionAdminPort(options: Options): ReceptionAdminPort {
           if (recoverable !== false) visible.push(item);
         }
       }
-      return { items: visible, next:start+PAGE_SIZE < summaries.length ? page.at(-1)!.receptionId : null,
+      return { items: visible, next:remaining.length > PAGE_SIZE ? page.at(-1)!.receptionId : null,
         ...(unavailableCount ? { unavailableCount } : {}) };
     },
     async version(since) {
