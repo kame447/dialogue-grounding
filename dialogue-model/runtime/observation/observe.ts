@@ -1,5 +1,6 @@
 import { readPreparedInitial } from '../stimuli/primary-regions.ts';
 import { validateOwnRotationMemory } from '../stimuli/rotation-memory-shape.ts';
+import { hasRotationMemory, withRotationLayer, rotationLegendEntry, ROTATION_LAYER_OF_CALL, REOBSERVATION_ROTATION_USE } from '../decision/rotation-memory-guidance.ts';
 import { modelPartGeometry, withPartDescriptions } from './part-consumers.ts';
 import { PART_OBSERVATION_INSTRUCTIONS, REVIEWED_PART_OBSERVATION_INSTRUCTIONS, hasReviewedOwnParts, validateOwnParts, validatePartsForRegion } from "./parts.ts";
 import { isSupportedFigureCount } from '../stimuli/figure-bank.ts';
@@ -206,11 +207,15 @@ export function buildObservationMessages(input: ObservationInput): ObservationMe
 export function buildReobservationMessages(input: ReobservationInput): ObservationMessage[] {
   const own = snapshotTargeted(input);
   const ids = new Set(own.figureIds);
-  return [{ role: "system", content: OBSERVATION_TARGETED_INSTRUCTIONS },
+  const shown = (hasReviewedOwnParts(own.ownParts) ? withPartDescriptions(own.memo).figures : own.memo.figures).filter(f => ids.has(f.id));
+  // The requested figures that carry a rotation memory show its nouns layer with its legend and one sentence saying it is not evidence in the image; the others keep the old bytes.
+  const rotation = hasRotationMemory({ figures: shown });
+  return [{ role: "system", content: OBSERVATION_TARGETED_INSTRUCTIONS + (rotation ? "\n" + REOBSERVATION_ROTATION_USE : "") },
     ...(own.ownParts ? [{ role: "user" as const, content: hasReviewedOwnParts(own.ownParts) ? REVIEWED_PART_OBSERVATION_INSTRUCTIONS : PART_OBSERVATION_INSTRUCTIONS }] : []),
     ...observationContextMessages(JSON.stringify({
     figureIds: own.figureIds, issue: own.issue, ownAnchors: own.ownAnchors.filter(a => ids.has(a.id)),
-    figures: (hasReviewedOwnParts(own.ownParts) ? withPartDescriptions(own.memo).figures : own.memo.figures).filter(f => ids.has(f.id)),
+    ...(rotation ? rotationLegendEntry({ figures: shown }, ROTATION_LAYER_OF_CALL.reobservation) : {}),
+    figures: rotation ? withRotationLayer({ figures: shown }, ROTATION_LAYER_OF_CALL.reobservation).figures : shown,
   })), ...ownImageMessage(own.ownImage) as ImageMessage[]];
 }
 export function parseInitialObservation(raw: unknown, input: ObservationInput, { observedAt }: { observedAt: string }): ObservationMemo {

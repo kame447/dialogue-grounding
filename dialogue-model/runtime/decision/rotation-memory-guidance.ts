@@ -84,10 +84,6 @@ export function rotationLegendEntry(memo: { figures: readonly unknown[] } | unde
 /** Replaces the one common-instruction sentence that sends a different construal to re-observation first. */
 export const COMMON_DIFFERENT_CONSTRUAL = "AIが馬、相手が牛と呼んだだけで誤同定や名称不一致を確定しないでください。同じ図形の異なる見立てかを照合し、必要なら画像の再観察を選べます。";
 export const COMMON_DIFFERENT_CONSTRUAL_ROTATION = "AIが馬、相手が牛と呼んだだけで誤同定や名称不一致を確定しないでください。同じ図形の異なる見立てかを、別の向きの見立てを含む観察メモで照合してください。";
-/** Added to the action question only. */
-export const ROTATION_ACTION_USE = "回転別メモ（rotation）で答えられる問いには再観察を求めず、acceptで直接答えます。今の向きに全体の見立てがなくても、別の向きの見立てや部分の候補があれば、答えの材料にできます。" +
-  "相手の説明がrotationの別の向きの見立てや部分に合うと分かるときも、再観察ではなくメモとの照合で扱います。見立ての一致は候補の根拠にとどまり、対象・合意・命名の確定ではありません。" +
-  "メモにない、自分の画像でしか確かめられない視覚上の事実が必要なときだけ、再観察を選びます。";
 /** Added to the target question and to the partner-referent estimate. */
 export const ROTATION_MATCH_USE = "相手の説明は、今の向きの見立てだけでなく、rotationの別の向きの見立てや部分の候補とも照合してください。同じ図形の別の向きの見立てに合うことは候補の根拠にとどまり、図形や名前の確定ではありません。";
 
@@ -96,6 +92,9 @@ export const ROTATION_ACCEPT_ANSWER = "相手が図形全体や見た目・特�
   "全体の問いには全体の見立てを先に、細部の問いにはその細部を、ある・ない・不明のいずれかで答える。今の向きに全体の見立てがなくても、別の向きの見立てや部分の候補があれば答えられる。見立ては説明であり、名前の提案・採用ではない。";
 export const ROTATION_ACCEPT_BACKCHANNEL = "相手の発話が相槌だけ（新しい情報も問いもない）で、直前のAI行動もacceptだった場合は同じ受け止めを繰り返さず、より具体的な説明や次に役立つ見立てがあれば返す。" +
   "見立てを否定された後などで対象がまだ特定できていないなら、観察メモに根拠のある別の説明（別の向きの見立てを含む）や弁別特徴の確認など、対象探しを進める行動を選ぶ。相槌は名称採用や対象同定の根拠にならない。問いが複数ならそれぞれに応答し、観察で分かる点と未特定の点を分ける。";
+/** Narrowed so that answering what the memo can answer stays with accept alone; the older confirm text repeated it. */
+export const ROTATION_CONFIRM = "対象や話の理解に具体的な未解決点があり、相手の情報で確かめられるときだけ選ぶ。既に明らかになった点は聞き直さず、次に解消すべき論点を判断する。候補が複数というだけで細部へ進まず、今の目的に必要で、相手の情報が決め手になる点を選ぶ。";
+export const ROTATION_PROPOSE_NAME = "特定の図形に呼び名を提案する。見立ては候補であり共同採用済みではない。対象が公開上で相手に伝わり、命名の流れに入って、呼び名が共同作業に役立つときに、自分側の観察の仮説（回転別メモの見立てを含む）を候補として提案できる。提案する必要がなければ見立てを返すだけでよい。相手が先に公開した呼び名は新しい提案として出し直さず、相手の提案を自分の新案にしない。";
 /** The observer name is written as Luna (the older request) and replaced by Terra where the request already does so. */
 export const ROTATION_REQUEST_OBSERVATION = "回転別メモ（rotation）にない、自分の画像でしか確かめられない視覚上の事実（細部の形・位置・つながり）を確かめるために、図形と論点を指定してLunaへ再観察を依頼する。" +
   "回転別メモの今の向き・別の向き・部分の候補で答えられる問いや、相手の別の見立てがメモの別の向きの見立てで説明できる場合、呼び名の好みなど視覚に無関係な変更や相手にしか分からない点の解決には選ばない。" +
@@ -128,3 +127,7 @@ export function applyGenerationRotationEdits(instructions: string): string {
 export const EXTRACTION_ROTATION_USE = "相手の説明は、今の向きだけでなくrotationの別の向きの見立てや部分の候補とも照合し、合う図形をtargetsの候補に残してください。一致は候補の根拠にとどまり、同じ図形・名前の合意の確定ではありません。";
 export const AI_EXTRACTION_ROTATION_USE = "「向きを変えて見ると〜」「見る角度によっては〜」は、rotationに根拠がある自分側の想像の見立て（construal）として抽出してください。相手の画面の向きの主張ではありません。";
 export const REOBSERVATION_ROTATION_USE = "figuresのrotationは自分の図形を向きを変えて見たと想像した見立ての記録で、今の画像上の根拠ではありません。画像で確かめられる点だけをsupports・contradicts・unknownへ書いてください。";
+
+/** Every rotation text a call can carry, for the guard that keeps instruction text out of public utterances. */
+export const ROTATION_PRIVATE_TEXTS: readonly string[] = Object.freeze([...Object.values(ROTATION_LEGENDS), ROTATION_MATCH_USE,
+  EXTRACTION_ROTATION_USE, AI_EXTRACTION_ROTATION_USE, REOBSERVATION_ROTATION_USE, ...GENERATION_ROTATION_EDITS.map(([, to]) => to)]);

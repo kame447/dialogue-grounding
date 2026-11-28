@@ -2,8 +2,8 @@ import { isSupportedFigureCount } from '../stimuli/figure-bank.ts';
 import { ROTATION_MODES } from '../stimuli/scatter-v2.mjs';
 import { modelPartGeometry, hasPartGeometry, PART_INDEX_INSTRUCTIONS } from '../observation/part-consumers.ts';
 import { hasRotationMemory, figureRotation, rotationMemoryLayer, rotationLegendEntry, rotationNameCandidates, rotationFeatureCandidates, ROTATION_LAYER_OF_CALL,
-  COMMON_DIFFERENT_CONSTRUAL, COMMON_DIFFERENT_CONSTRUAL_ROTATION, ROTATION_ACTION_USE, ROTATION_MATCH_USE, ROTATION_ACCEPT_ANSWER, ROTATION_ACCEPT_BACKCHANNEL,
-  ROTATION_REQUEST_OBSERVATION } from "./rotation-memory-guidance.ts";
+  COMMON_DIFFERENT_CONSTRUAL, COMMON_DIFFERENT_CONSTRUAL_ROTATION, ROTATION_MATCH_USE, ROTATION_ACCEPT_ANSWER, ROTATION_ACCEPT_BACKCHANNEL,
+  ROTATION_REQUEST_OBSERVATION, ROTATION_CONFIRM, ROTATION_PROPOSE_NAME } from "./rotation-memory-guidance.ts";
 import type { OwnRotationMemory } from "./rotation-memory-guidance.ts";
 import { ISSUE_HANDLING_MOVE_ON_CRITERIA, ISSUE_HANDLING_MOVE_ON_INSTRUCTIONS, MOVE_ON_SOURCE_QUESTION } from "./human-led-move-on.ts";
 import { COMMITMENT_STATES, ISSUE_HANDLING_VERSION, JEV_ACTIONS_V21, NON_BYPASS_ALTERNATIVES, SWITCH_FUNCTIONS, issueAlternativeTarget, issueHandlingMatchesSource, projectExtraHandling } from "./issue-handling.ts";
@@ -135,6 +135,8 @@ const ISSUE_ACTION_CRITERIA: Readonly<Partial<Record<JevAction, string>>> = Obje
 function rotationCriterion(action: JevAction, { issueHandling, visualPurpose }: { issueHandling: boolean; visualPurpose: boolean }): string | undefined {
   if (action === "accept") return (issueHandling ? ISSUE_ACCEPT_BASE : JEV_ACTION_CRITERIA.accept + V3_ACCEPT_AFTER_RESOLUTION) + ROTATION_ACCEPT_ANSWER + ROTATION_ACCEPT_BACKCHANNEL;
   if (action === "request_observation") return visualPurpose ? ROTATION_REQUEST_OBSERVATION.replace("Lunaへ", "Terraへ") : ROTATION_REQUEST_OBSERVATION;
+  if (action === "propose_name") return ROTATION_PROPOSE_NAME;
+  if (action === "confirm" && visualPurpose) return ROTATION_CONFIRM;
   return undefined;
 }
 const ISSUE_HANDLING_GUIDANCE = "hold_open（判断の保留）とcarry_over（持ち越し）は、未確認の点をすべて埋めないための選択肢です。明らかな食い違いは基本的に修復し、材料が足りないか、修復が停滞しているかを公開対話・観察メモ・修復の履歴から判断してください。未解決の問題を残して自分から別の対象・論点へ移るときは、移った先での行動にかかわらずcarry_overを選んでください。この判断の後の扱いは考慮せず、同じ材料からふさわしい行動を選んでください。handlingsはこれまでに実際に公開した保留・持ち越し・相談・再訪の記録です。";
@@ -943,8 +945,7 @@ function prepare(input: JevDecisionInput, layout: JevQuestionLayout = "two_stage
   if (layout === "two_stage_v3") {
     // Only actions with at least one legal target and detail in the material that survived the budget; scores of all of them are saved.
     add("action", "次の行動を一つ選んでください。request_observationは公開発話を生成する前の追加観察要求です。" +
-      (repairQuality && (input.humanLedMoveOn || issueHandling) ? "人が命名と移行を同時に求めたときは、この問いで命名の扱いを選び、移行の出所は別の問いに残してください。" : "") +
-      (rotationPresent ? "\n" + ROTATION_ACTION_USE : ""), Object.fromEntries(
+      (repairQuality && (input.humanLedMoveOn || issueHandling) ? "人が命名と移行を同時に求めたときは、この問いで命名の扱いを選び、移行の出所は別の問いに残してください。" : ""), Object.fromEntries(
       legalActionsV3({ slots, catalog, reobservationAllowed, noAccept, visualPurpose, issueHandling }).map(a => {
         // A rotation memory answers what the older single-view memo sent to re-observation: accept and request_observation are stated once, as a whole (repair-quality paragraph included).
         const rotationText = rotationPresent ? rotationCriterion(a, { issueHandling, visualPurpose }) : undefined;
@@ -963,7 +964,7 @@ function prepare(input: JevDecisionInput, layout: JevQuestionLayout = "two_stage
     } else if (input.humanLedMoveOn) add(MOVE_ON_SOURCE_QUESTION, MOVE_ON_SOURCE_INSTRUCTIONS, { ...MOVE_ON_SOURCE_CRITERIA });
     if (publicationRecoveryContext) questions[PUBLICATION_CONTINUATION_QUESTION] = publicationContinuationQuestion(publicationRecoveryContext.respondToRequest);
   } else {
-  add("action", "次の行動を一つ選んでください。request_observationは公開発話を生成する前の追加観察要求です。" + (rotationPresent ? "\n" + ROTATION_ACTION_USE : ""), Object.fromEntries(
+  add("action", "次の行動を一つ選んでください。request_observationは公開発話を生成する前の追加観察要求です。", Object.fromEntries(
     JEV_ACTIONS.filter(a => (a !== "request_observation" || reobservationAllowed) &&
       (a !== "agree" || catalog.agreeNames === undefined || catalog.agreeNames.some(names => names.length > 0))).map(a => [a, JEV_ACTION_CRITERIA[a]])));
   add("target", "次の行動が扱う対象を選んでください。none=対象なし、multiple=一つに絞れない。", { none: "対象なし・未特定。", multiple: "複数の可能性があり一つには絞れない。", ...slotCriteria });

@@ -52,6 +52,7 @@ import { ISSUE_HANDLING_GENERATION, isGenerationV23, isGenerationV24, isIssueHan
   type DeferredClassificationExtraction } from "./deferred-ai-extraction.ts";
 import { isJevVisualPurpose, SEMANTIC_DRAFT_ACTS, visualPurposeMatchesSource } from "../decision/contract.ts";
 import { createMemoAiExtractor, memoAiExtractionPrompt, AiPublicError, aiHash, emptyAiEvidence } from "../local-grounding/extract-ai.ts";
+import { hasRotationMemory, withRotationLayer, rotationLegendEntry, applyGenerationRotationEdits, ROTATION_LAYER_OF_CALL, ROTATION_PRIVATE_TEXTS } from "../decision/rotation-memory-guidance.ts";
 import { isGenerationV18, SHAPE_TERMINOLOGY_GENERATION, withShapeTerminology } from "../shape-terminology.ts";
 import { generationTaskV23, GENERATION_INSTRUCTIONS_V23, GENERATION_INSTRUCTIONS_V24, CONCISE_GENERATION_V23, generationActionPromptV23, MULTIPLE_CANDIDATES_V23, PRIVATE_NAMING_STATE_V23 } from "./generation-prompt-v23.ts";
 import { readVisualFeatureDraft, readVisualFeatureEvidence, sameVisualFeatureSources,
@@ -1650,7 +1651,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
     ...(hasV22Rules ? [RETAINED_REFERENCE_EXTRACTION_INSTRUCTIONS, RETAINED_REFERENCE_GENERATION_INSTRUCTIONS,
       RECONFIRM_NAME_V22, AGREED_NAME_REFERENCE_V22, MULTI_ISSUE_STAY_V22, CONFIRM_SCOPE_V22] : []),
     ...(issueHandling ? [multiIssueInstructions, MULTI_ISSUE_INSTRUCTIONS, MULTI_ISSUE_REPAIR_SCOPE, MULTI_ISSUE_DRAFT] : []),
-    ...(p5Enabled ? [SHARED_CONSTRUAL_INSTRUCTIONS, SHARED_CONSTRUAL_CONFIRM_INSTRUCTIONS] : [])].map(content => ({ role: "system", content }));
+    ...(p5Enabled ? [SHARED_CONSTRUAL_INSTRUCTIONS, SHARED_CONSTRUAL_CONFIRM_INSTRUCTIONS] : []), ...ROTATION_PRIVATE_TEXTS].map(content => ({ role: "system", content }));
   function project<T>(value: T): T {
     let redacted = false;
     const safe = (item: unknown): unknown => {
@@ -2227,7 +2228,10 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
           ...(execution.detailFigureIds ? { detailFigureIds: execution.detailFigureIds } : {}) }) };
       const shared = execution.sharedClaimIds && baseInput.sharedConstruals?.find(candidate => stateSame(candidate.claimIds, execution.sharedClaimIds));
       const retainedReferenceHistory = history && buildRetainedReferenceHistory(graph, history, publicTurns, latest.seq);
-      const messages: Message[] = [{ role: "system", content: generationTask }, { role: "system", content: multipleItems ? multiIssueInstructions : generationInstructions },
+      // A memo that carries a rotation memory: the generation lines it contradicts or lacks are replaced (v23/v24 text only), and its legend sits next to the data once.
+      const rotationTurn = hasRotationMemory(memo);
+      const turnInstructions = (instructions: string) => rotationTurn && generationV23 ? applyGenerationRotationEdits(instructions) : instructions;
+      const messages: Message[] = [{ role: "system", content: generationTask }, { role: "system", content: turnInstructions(multipleItems ? multiIssueInstructions : generationInstructions) },
         ...(!generationV23 && generation.concise ? [{ role: "system" as const, content: generation.concise }] : []),
         actionMessage,
         ...(hasParts ? [{ role: "system" as const, content: PART_OBSERVATION_SOURCES_INSTRUCTIONS }] : []),
@@ -2240,7 +2244,8 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
           ...(ambiguousRevisit && !issueHandling ? [{ role: "system" as const, content: REVISIT_MULTIPLE_INSTRUCTIONS }] : []),
         ...(namingState ? [{ role: "system" as const, content: (generationV23 ? PRIVATE_NAMING_STATE_V23 + "\n"
           : PRIVATE_NAMING_STATE_V5 + "\n" + (hasV22Rules ? AGREED_NAME_REFERENCE_V22 + "\n" : "")) + JSON.stringify(namingState) }] : []),
-        ...observationContextMessages(JSON.stringify({ scope: "private_observations_not_ground_truth", memo: withPartDescriptions(memo) })),
+        ...observationContextMessages(JSON.stringify({ scope: "private_observations_not_ground_truth", ...rotationLegendEntry(memo, ROTATION_LAYER_OF_CALL.generation),
+          memo: withRotationLayer(withPartDescriptions(memo), ROTATION_LAYER_OF_CALL.generation) })),
         { role: "system", content: "局所問題（非公開）:\n" + summarizeLocalIssues(graph) },
         ...(retainedReferenceHistory?.length ? [{ role: "system" as const, content: RETAINED_REFERENCE_GENERATION_INSTRUCTIONS + "\n" +
           JSON.stringify({ retainedReferenceHistory }) }] : []),
@@ -2620,7 +2625,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
       research.stages = { ai_extraction: savedExtraction ? research.stages.ai_extraction : emptyAiEvidence(),
         ai_function: emptyAiEvidence(), ai_support: emptyAiEvidence() };
       if (!savedExtraction) research.prompts.extraction = { version: verifyFeatures ? 3 : 2,
-        sha256: await aiHash(memoAiExtractionPrompt(terminology, Boolean(verifyFeatures), hasParts)) };
+        sha256: await aiHash(memoAiExtractionPrompt(terminology, Boolean(verifyFeatures), hasParts, hasRotationMemory(snapshot.observations))) };
     }
     const timeoutMs = options.localGrounding.timeoutMs ?? 20000, deadline = performance.now() + timeoutMs;
     // Reobservation installs a new memo. Only the unchanged memo can reuse the referent digest.
@@ -2773,7 +2778,8 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
     const confirmed = Object.keys(agreed).length ? "\n次の確定済みの図形IDと名前の組を維持してください。\n" + JSON.stringify(agreed) : "";
     return client.complete([{ role: "system", content: generation.task },
       ...(hasParts ? [{ role: "system" as const, content: PART_OBSERVATION_SOURCES_INSTRUCTIONS }] : []),
-      ...observationContextMessages(JSON.stringify({ scope: "private_observations_not_ground_truth", memo: withPartDescriptions(memo), ownLedger: privateState.ledger })),
+      ...observationContextMessages(JSON.stringify({ scope: "private_observations_not_ground_truth", ...rotationLegendEntry(memo, ROTATION_LAYER_OF_CALL.generation),
+        memo: withRotationLayer(withPartDescriptions(memo), ROTATION_LAYER_OF_CALL.generation), ownLedger: privateState.ledger })),
       ...events.map(e => ({ role: e.speaker === "human" ? "user" as const : "assistant" as const, content: e.text })),
       { role: "user", content: generation.final + (retry ? "\n指定JSON形式で再提出してください。" + confirmed : "") }], { phase: "final_submission", timeoutMs: generation.timeoutMs });
   }
