@@ -1798,6 +1798,8 @@ function v12Transport(t: TestContext, h: ReturnType<typeof harness>) {
     return Response.json(chatResponse(options.wrongPhase === phase ? pin.lunaModelId : pin.terraModelId, response));
   });
   return { lookup, options, textPhases, prompts,
+    // A trial that reads its memo without an observation request never shows the mock the figure IDs of the final submission.
+    setSlots(ids: string[]) { slots = ids; },
     observationPolicy: (generation?: InitialObservationGeneration) => proxy.participantInitialObservationPolicy(generation) };
 }
 
@@ -3885,6 +3887,7 @@ test('a new three-figure reception approves, starts and cold-restores with no pr
   const memo = started.queueState.privateState.observationMemo;
   assert.equal(memo.figures.length, 3);
   assert.ok(memo.figures.every((figure: any) => figure.rotation && figure.holistic.length === 0));
+  transport.setSlots(memo.figures.map((figure: any) => figure.id));
   assert.equal(transport.textPhases.filter(phase => phase === 'initial_observation' || phase === 'reobservation').length, 0);
   const initial = started.jevLedger.phases.terra.initial_observation;
   assert.deepEqual([initial.posts, initial.cacheHits], [0, 0], 'no Terra post and no cache read for the first memo');
@@ -3905,7 +3908,16 @@ test('a new three-figure reception approves, starts and cold-restores with no pr
   h.evict();
   assert.equal((await jsonOk(await h.request('state'))).trial.sessionId, id);
   assert.deepEqual(rotationOf(await h.adminRecord(id)), rotationOf(started));
-  assert.equal(transport.textPhases.filter(phase => phase === 'initial_observation').length, 0);
+  // The second condition of the reception reads the same bundle at its own start and gets the same memory for the same board.
+  await h.complete(id, (await jsonOk(await h.request('state'))).trial);
+  await h.idle();
+  await h.settleBackground();
+  const second = await jsonOk(await h.start(id));
+  const secondRecord = await h.storage.get('record:' + second.trial.sessionId);
+  assert.notEqual(secondRecord.strategy, started.strategy);
+  assert.deepEqual(secondRecord.options.rotationMemory, { pin: bundlePin, used: bundlePin });
+  assert.deepEqual(rotationOf(secondRecord), rotationOf(started), 'both conditions see the same perception');
+  assert.equal(transport.textPhases.filter(phase => phase === 'initial_observation' || phase === 'reobservation').length, 0);
 });
 
 test('a deploy that changes the bundle after approval stops nothing: the start records the bundle it used and a restore reads only what was saved', async t => {
