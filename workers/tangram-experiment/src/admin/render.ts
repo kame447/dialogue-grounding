@@ -5,6 +5,7 @@ import type { AdminSummary } from "./summary.ts";
 import type { LatencySummary } from "./latency";
 import type { AuditEntry } from "./index-store";
 import type { ReceptionAdminRow, ReceptionProtocolStatus, SettingsView } from './reception-port.ts';
+import type { PreparedObservationPoolStatus } from './prepared-observation-port.ts';
 import { isParticipantRole } from './participant-role.ts';
 import type { AdminRecordSummary, ParticipantRole } from './participant-role.ts';
 import { RECORD_ID } from './summary.ts';
@@ -419,8 +420,29 @@ const FIGURE_SET_LABELS: Record<string, string> = { 'pilot-four-v1': '4図形（
   'bank-set-c': 'bank-set-c（F19–F24）', 'bank-set-d': 'bank-set-d（F25–F30）' };
 const MODE_LABELS: Record<string, string> = { on: '現在：使う', off: '現在：使わない', unset: '既定（使う）' };
 
+function renderPreparedObservations(view: SettingsView, status: PreparedObservationPoolStatus | null | undefined): string {
+  if (status === undefined) return '';
+  const heading = '<h2>初回観察メモ</h2>';
+  if (status === null || status.errorCode === 'unavailable' || status.errorCode === 'configuration_unavailable') {
+    return heading + '<p class="bad">準備状況を確認できませんでした。設定画面を開き直してください。</p>';
+  }
+  if (status.errorCode === 'configuration_changed' || status.protocolRevision !== (view.protocol?.revision ?? null)) {
+    return heading + '<p class="bad">設定が変わりました。設定画面を開き直してください。</p>';
+  }
+  if (!status.supported) return heading + '<p>現在の設定は事前準備の対象外です。</p>';
+  if (status.protocolRevision === null) return heading + '<p>先にプロトコルを保存してください。</p>';
+  const missing = !status.orders.length || status.orders.some(row => row.ready === 0);
+  const pending = status.orders.some(row => row.queued + row.preparing > 0);
+  const notice = status.errorCode === 'preparation_failed' ? '<p class="bad">一部の観察メモを準備できませんでした。もう一度準備してください。</p>'
+    : status.errorCode === 'preparation_interrupted' ? '<p class="bad">準備が中断されました。もう一度準備してください。</p>' : '';
+  return heading + table(['条件順序', '準備済み', '待機中', '準備中', '失敗'],
+    status.orders.map(row => [row.order.join(' → '), row.ready, row.queued, row.preparing, row.failed])) + notice +
+    (missing ? `<p>受付を許可する前に、${pending ? '観察メモの準備完了を待ってください。' : '観察メモを準備してください。'}</p>` : '') +
+    `<form method="post" action="/admin/reception-settings/observations"><input type="hidden" name="expectedProtocolRevision" value="${escapeHtml(status.protocolRevision)}"><button>観察メモを準備</button></form>`;
+}
+
 /** Researcher settings form. Unsaved settings preselect nothing; saved settings preselect the current values. */
-export function renderSettings(view: SettingsView): string {
+export function renderSettings(view: SettingsView, observations?: PreparedObservationPoolStatus | null): string {
   const p = view.protocol?.protocol;
   const current: Record<string, string> = p ? { figureSetPolicy: p.figureSetPolicy ?? '', seedPolicy: p.seedPolicy, referenceMemory: p.referenceMemory ? 'on' : 'off', betweenTrials: p.betweenTrials,
     rotationMode: p.rotationMode, receptionNumberFormat: p.receptionNumberFormat } : {};
@@ -453,6 +475,7 @@ ${SETTING_CHOICES.map(([name, legend, choices]) => fieldset(name, legend, choice
 ${figureSource}
 ${fieldset('figureSetPolicy', '図形セットの割付', [['shared', '全試行で同じ'], ['per_trial', '試行ごとに別（シード乱数のみ）']])}</div>
 <p>保存しても、許可済みの受付の計画は変わりません。</p><button class="primary">保存</button></form>
+${renderPreparedObservations(view, observations)}
 <h2>履歴</h2><div class="history"><h3>プロトコル</h3>${table(['revision', '保存日時', '内容', 'SHA-256'], view.protocolHistory.map(h => [h.revision, h.savedAt, h.protocol, h.sha256]))}
 <h3>受付モード</h3>${table(['revision', '保存日時', '受付モード', 'プロトコル revision'], view.modeHistory.map(h => [h.revision, h.savedAt, h.value, h.protocolRevision]))}</div>`);
 }

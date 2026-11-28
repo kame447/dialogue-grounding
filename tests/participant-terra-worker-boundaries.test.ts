@@ -5,7 +5,7 @@ import {
   requireExactParticipantModel, resolveWorkerParticipantModelPin, validateParticipantModelPin,
 } from '../dialogue-model/runtime/v2/participant-model-pin.ts';
 import {
-  createWorkerTerraObserver,
+  createWorkerTerraObserver, validateWorkerTerraCacheEntry,
 } from '../dialogue-model/runtime/observation/worker-terra-observer.ts';
 import type { WorkerTerraCache } from '../dialogue-model/runtime/observation/worker-terra-observer.ts';
 import type { ReobservationInput } from '../dialogue-model/runtime/observation/contract.ts';
@@ -345,4 +345,40 @@ test('the Worker observation port inherits the proxy redirect rejection in both 
     issue: { aspect: 'part', question: '三角はありますか？', partnerConstrual: null } }),
   { code: 'unavailable', message: 'unavailable' });
   assert.equal(sends, 3);
+});
+
+
+test('required prepared initial memos read exact entries without generation, and leave reobservation separate', async () => {
+  const { entries, cache } = memory();
+  const memo = await createWorkerTerraObserver({ own, modelPin: pin, cache, now, async visual() { return response(); } }).observeAll(own);
+  const [key, raw] = [...entries][0];
+  const entry = await validateWorkerTerraCacheEntry(raw, { key, modelPin: pin, own });
+  let sends = 0;
+  const observer = createWorkerTerraObserver({ own, modelPin: pin, cache, now,
+    requiredInitialMemo: { key, memoSha256: entry.memoSha256 }, async visual() { sends++; return response({ value: targeted }); } });
+  assert.deepEqual(await observer.observeAll(own), memo);
+  assert.equal(sends, 0);
+  await observer.reobserve({ ...own, memo, figureIds: [selected], issue: { aspect: 'part', question: '確認', partnerConstrual: null } });
+  assert.equal(sends, 1);
+});
+
+test('required prepared initial memo rejects missing, altered or mismatched entries without inference or writes', async () => {
+  const { entries, cache } = memory();
+  await createWorkerTerraObserver({ own, modelPin: pin, cache, now, async visual() { return response(); } }).observeAll(own);
+  const [key, raw] = [...entries][0];
+  const entry = await validateWorkerTerraCacheEntry(raw, { key, modelPin: pin, own });
+  for (const supplied of [undefined, { ...entry, memoSha256: '0'.repeat(64) }, { ...entry, modelId: other.terraModelId }]) {
+    const observer = createWorkerTerraObserver({ own, modelPin: pin, requiredInitialMemo: { key, memoSha256: entry.memoSha256 },
+      cache: { async read() { return supplied; }, async putIfAbsent() { assert.fail('prepared entries are read only'); } },
+      async visual() { assert.fail('missing or invalid prepared entries must never infer'); } });
+    await assert.rejects(observer.observeAll(own));
+  }
+  for (const required of [{ key: key.replace(/.$/u, key.endsWith('a') ? 'b' : 'a'), memoSha256: entry.memoSha256 },
+      { key, memoSha256: '0'.repeat(64) }]) {
+    await assert.rejects(createWorkerTerraObserver({ own, modelPin: pin, cache, requiredInitialMemo: required,
+      async visual() { assert.fail('a changed reference must never infer'); } }).observeAll(own), { code: 'invalid_response' });
+  }
+  await assert.rejects(createWorkerTerraObserver({ own, modelPin: pin, requiredInitialMemo: { key, memoSha256: entry.memoSha256 },
+    async visual() { assert.fail('a missing cache must never infer'); } }).observeAll(own), { code: 'unavailable' });
+  await assert.rejects(validateWorkerTerraCacheEntry(entry, { key, modelPin: other, own }), { code: 'invalid_response' });
 });

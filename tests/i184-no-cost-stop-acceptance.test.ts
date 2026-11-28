@@ -9,9 +9,16 @@ import { DEFAULT_COST_CAP_USD } from '../dialogue-model/runtime/diagnostics/jev-
 import { createJevDecisionClient } from '../dialogue-model/runtime/decision/jev-decision.ts';
 import { MEMO_LOCAL_EXTRACTION_INSTRUCTIONS } from '../dialogue-model/runtime/local-grounding/extract.ts';
 import { MEMO_AI_PUBLIC_EXTRACTION_INSTRUCTIONS } from '../dialogue-model/runtime/local-grounding/extract-ai.ts';
-import { canonicalReceptionProtocolV2, receptionProtocolSha256 } from '../dialogue-model/runtime/v2/reception.ts';
+import { canonicalReceptionProtocolV2, receptionProtocolSha256, validateReceptionProtocolV2 } from '../dialogue-model/runtime/v2/reception.ts';
 import { validateParticipantJevConfig } from '../dialogue-model/runtime/web/participant-jev-wiring.ts';
 import { validateParticipantModelPin } from '../dialogue-model/runtime/v2/participant-model-pin.ts';
+import { ParticipantUsageLedger } from '../dialogue-model/runtime/web/participant-usage.ts';
+import type { ParticipantUsageSnapshot } from '../dialogue-model/runtime/web/participant-usage.ts';
+import { resolveParticipantConfiguration } from '../workers/tangram-experiment/src/participant-configuration.ts';
+import { createPreparedObservationRecipe, prepareObservationBundle, preparedObservationPoolKey } from '../workers/tangram-experiment/src/prepared-observation-recipe.ts';
+import type { PreparedObservationBundle, PreparedObservationParticipant } from '../workers/tangram-experiment/src/prepared-observation-recipe.ts';
+import type { WorkerTerraCache } from '../dialogue-model/runtime/observation/worker-terra-observer.ts';
+
 
 registerHooks({ resolve(name, context, next) {
   if (name === 'cloudflare:workers') {
@@ -124,6 +131,8 @@ function harness(t: TestContext) {
   let storage = memory();
   const calls: WireCall[] = [];
   const background: Promise<unknown>[] = [];
+  let preparedBundle: PreparedObservationBundle | null = null;
+  let preparationUsage: ParticipantUsageSnapshot | undefined;
   let ownSlots: string[] = [];
   const controlled = {
     reply: undefined as Reply | undefined,
@@ -207,10 +216,40 @@ function harness(t: TestContext) {
     START_RATE_LIMIT: rate, IP_ACTION_RATE_LIMIT: rate, SESSION_ACTION_RATE_LIMIT: rate,
     GLOBAL_ACTION_RATE_LIMIT: rate, QUESTIONNAIRE_RATE_LIMIT: rate,
   };
+  async function prepare() {
+    const currentProtocol = validateReceptionProtocolV2(protocol);
+    const { participant, proxy: observationProxy } = await resolveParticipantConfiguration(env, currentProtocol);
+    if (participant.participantRuntimeProfile !== productionProfile) return;
+    assert.ok(observationProxy);
+    assert.ok(participant.participantModelPin);
+    const recipe = await createPreparedObservationRecipe({ protocol: currentProtocol, orderIndex: 0, participant, createdAt: new Date().toISOString() });
+    const entries = new Map<string, unknown>();
+    const cache: WorkerTerraCache = {
+      async read(key) { return entries.get(key); },
+      async putIfAbsent(key, entry) { if (!entries.has(key)) entries.set(key, entry); return entries.get(key); },
+    };
+    const usage = await ParticipantUsageLedger.open({
+      async read() { return preparationUsage; },
+      async update(write) { const next = write(preparationUsage); preparationUsage = next; return next; },
+    }, 'prepared-observation:' + recipe.bundleId, participant.participantModelPin);
+    preparedBundle = await prepareObservationBundle({ recipe, proxy: observationProxy, cache, usage });
+  }
+  const preparedIndex = {
+    async allocateReceptionNumber() { return null; },
+    async upsertReception() {},
+    async claimPreparedObservations(input: { order: number; protocolSha256: string; participant: PreparedObservationParticipant }) {
+      assert.ok(preparedBundle, 'prepare all initial observations before reception');
+      assert.equal(input.protocolSha256, sha256);
+      assert.equal(preparedBundle.poolKey, preparedObservationPoolKey({ protocol: validateReceptionProtocolV2(protocol),
+        orderIndex: input.order, participant: input.participant }));
+      return structuredClone(preparedBundle);
+    },
+  };
   function worker() {
     const instance = new participantModule.TangramSession({ storage, id: { toString: () => id },
       waitUntil(promise: Promise<unknown>) { background.push(promise); } }, env);
     instance.settings = async () => ({ mode: { value: 'on', revision: 1 }, protocol: { protocol, revision: 1, sha256 } });
+    instance.index = () => preparedIndex;
     return instance;
   }
   let session = worker();
@@ -222,9 +261,12 @@ function harness(t: TestContext) {
   const reception = () => storage.get('reception:v1');
   return {
     calls, controlled, env, request, reception,
+    preparationUsage: () => structuredClone(preparationUsage),
     async settleBackground() { await Promise.all(background.splice(0)); },
     async approvalUsage() { return session.adminFailedStartUsage((await reception()).receptionId); },
     async receive() {
+      await prepare();
+      const beforeReception = calls.length;
       assert.equal(await session.registerBaseOwner(), true);
       await ok(await request('reception', undefined, 'POST'));
       const result = await session.adminApproveReception({
@@ -232,6 +274,7 @@ function harness(t: TestContext) {
         participantModelPin: null,
       });
       assert.equal(result.status, 'approved');
+      assert.equal(calls.length, beforeReception, 'reception and approval only read prepared observations');
     },
     async removeHistoricalPlanLimits() {
       // The earliest pinned plan had a model pin and no reception-level budget.
@@ -295,18 +338,19 @@ test('both newly approved production conditions continue past all old Jev and Lu
     status: 200, cost: billing.terra }]);
   const approvalUsage = await h.approvalUsage();
   assert.deepEqual(approvalUsage.failedStarts, []);
-  assert.equal(approvalUsage.preobservations.length, 1);
-  const [warm] = approvalUsage.preobservations;
-  assert.deepEqual(warm.trialIndices, [0, 1]);
-  assert.equal(warm.status, 'ready');
+  assert.equal(approvalUsage.preobservations, undefined);
+  assert.deepEqual(initialPlan.preparedObservations.trials.map(({ index }: { index: number }) => index), [0, 1]);
+  assert.equal(new Set(initialPlan.preparedObservations.trials.map(({ cacheKey }: { cacheKey: string }) => cacheKey)).size, 1);
+  const warm = { usage: h.preparationUsage()! };
+  assert.ok(warm.usage.returnedModels);
   assert.deepEqual(warm.usage.returnedModels.terra.initial_observation, { model: pin.terraModelId, ok: 1 });
-  const warmMeter = warm.usage.phases.terra.initial_observation;
+  const warmMeter = warm.usage.phases.terra.initial_observation!;
   assert.deepEqual([warmMeter.calls, warmMeter.posts, warmMeter.inputTokens, warmMeter.outputTokens,
     warmMeter.knownUsd, warmMeter.missingCostPosts, warmMeter.unknownPosts],
     [1, 1, tokens.prompt_tokens, tokens.completion_tokens, billing.terra, 0, 0]);
-  assert.equal(total(warm.usage, 'terra', 'posts'), 1);
-  assert.equal(total(warm.usage, 'jev', 'posts'), 0);
-  assert.equal(total(warm.usage, 'luna', 'posts'), 0);
+  assert.equal(total(productionUsage({ jevLedger: warm.usage }), 'terra', 'posts'), 1);
+  assert.equal(total(productionUsage({ jevLedger: warm.usage }), 'jev', 'posts'), 0);
+  assert.equal(total(productionUsage({ jevLedger: warm.usage }), 'luna', 'posts'), 0);
   let previous: string | undefined;
   const archived = new Map<string, ProductionUsage>();
   for (const strategy of ['bypass-enabled', 'repair-first']) {
@@ -469,8 +513,9 @@ test('a normal response with missing cost is recorded independently from a 402 o
   h.controlled.missingCost.add('terra');
   await h.receive();
   await h.settleBackground();
-  const [warm] = (await h.approvalUsage()).preobservations;
-  const warmMeter = warm.usage.phases.terra.initial_observation;
+  assert.equal((await h.approvalUsage()).preobservations, undefined);
+  const warm = { usage: h.preparationUsage()! };
+  const warmMeter = warm.usage.phases.terra.initial_observation!;
   assert.deepEqual([warmMeter.posts, warmMeter.missingCostPosts, warmMeter.inputTokens, warmMeter.unknownPosts], [1, 1, 5, 0]);
   const fromStart = h.calls.length;
   const recordId = (await h.start()).trial.sessionId;

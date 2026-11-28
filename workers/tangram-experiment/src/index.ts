@@ -3,8 +3,8 @@ import { createChatClient } from "../../../dialogue-model/runtime/client.mjs";
 import { SCRIPTED_OPENING_MODE } from "../../../dialogue-model/runtime/v2/opening-mode.ts";
 import { createNamingTaskV2 } from "../../../dialogue-model/runtime/v2/naming-task-v2.mjs";
 import { createGroundingJudgeClient } from "../../../dialogue-model/runtime/grounding/client.ts";
-import { INITIAL_OBSERVATION_STRUCTURED_V2, isInitialObservationGeneration } from "../../../dialogue-model/runtime/observation/initial-observation-generation.ts";
-import { workerTerraInitialKey } from "../../../dialogue-model/runtime/observation/worker-terra-observer.ts";
+import { INITIAL_OBSERVATION_STRUCTURED_V2 } from "../../../dialogue-model/runtime/observation/initial-observation-generation.ts";
+import { workerTerraInitialKey, validateWorkerTerraCacheEntry } from "../../../dialogue-model/runtime/observation/worker-terra-observer.ts";
 import { NamingTaskError } from "../../../dialogue-model/runtime/naming-error.mjs";
 import { sessionCookie, sessionId } from "./session-cookie.ts";
 import { isExcessiveTraffic, type SoftLimitBindings } from "./soft-limits";
@@ -29,7 +29,7 @@ import { assignmentParticipantModelPin, data, readOwner, validateBoundBaseRecord
 import type { BaseOwnerState, BaseRecord, BaseSession, MakeBaseTask, OwnerRead, RawBaseRecord } from "../../../dialogue-model/runtime/v2/base-assignment.ts";
 import { participantContactHTML } from "../../../dialogue-model/runtime/v2/participant-contact.ts";
 import { PARTICIPANT_STOP_HTML } from "../../../dialogue-model/runtime/v2/participant-stop-page.ts";
-import { ReceptionError, validateReception, createReception, approveReception, cancelReception, terminateReception,
+import { ReceptionError, validateReception, createReception, approveReception, validateReceptionApprovalInput, validateReceptionPlan, cancelReception, terminateReception,
   participantReception, receptionSummary, effectiveBetweenTrials, effectiveFigureSelection, effectiveRotationMode,
   validateParticipantLimits, isParticipantDialogueProfile, isPilot012ParticipantDialogueProfile,
   participantMemoryPruneVersion, PILOT012_V20_PARTICIPANT_PROFILE, PILOT012_V21_PARTICIPANT_PROFILE,
@@ -51,6 +51,9 @@ import { PARTICIPANT_PRODUCTION_PROFILE } from '../../../dialogue-model/runtime/
 import { ParticipantUsageLedger, type ParticipantUsageStore } from '../../../dialogue-model/runtime/web/participant-usage.ts';
 import { createWorkerParticipantRuntime, workerParticipantPolicy, matchesWorkerDialogueProfile,
   type ParticipantService } from "./participant-runtime.ts";
+import { resolveParticipantConfiguration } from './participant-configuration.ts';
+import type { PreparedObservationBundle } from './prepared-observation-recipe.ts';
+import { preparedTrialObservation, validatePreparedObservations } from '../../../dialogue-model/runtime/v2/prepared-observations.ts';
 import { ParticipantPreobservations } from './participant-preobservation.ts';
 import { trialTerminationExpectation } from './admin/trial-termination.ts';
 import type { TrialTerminationExpectation, TrialTerminationResult } from './admin/trial-termination.ts';
@@ -290,52 +293,70 @@ export class TangramSession extends DurableObject<Env> {
       if (!receptionOpen(settings.mode)) throw new ReceptionError('reception_closed');
       if (!settings.protocol) throw new ReceptionError('protocol_unconfigured');
       const protocol = settings.protocol.protocol, expected = input?.protocol;
-      let participantPolicy: Awaited<ReturnType<typeof workerParticipantPolicy>> | undefined;
-      let participant: Pick<Parameters<typeof approveReception>[1],
-        'participantModelPin' | 'participantRuntimeProfile' | 'participantLimits' | 'initialObservationGeneration' | 'participantDialogueProfile'> = {};
-      const generationPin = this.env.PARTICIPANT_TERRA_GENERATION_ENABLED === 'on';
-      const allTerraPin = this.env.PARTICIPANT_TERRA_ALL_ROLES_ENABLED === 'on';
-      const dialogueProfile = this.env.PARTICIPANT_DIALOGUE_PROFILE;
-      if (dialogueProfile !== undefined && (!isParticipantDialogueProfile(dialogueProfile) || !protocol.referenceMemory || !allTerraPin ||
-          this.env.PARTICIPANT_TERRA_ENABLED !== 'on' || this.env.PARTICIPANT_TERRA_PROFILE !== PARTICIPANT_PRODUCTION_PROFILE)) {
-        throw new ReceptionError('reception_unavailable');
-      }
-      if ((generationPin || allTerraPin) && this.env.PARTICIPANT_TERRA_ENABLED !== 'on') throw new ReceptionError('reception_unavailable');
-      if (this.env.PARTICIPANT_TERRA_ENABLED === 'on') {
+      const existing = await this.readReception();
+      if (!existing) throw new ReceptionError('reception_unavailable');
+      const approval = { expectedRevision: input.expectedRevision, order: input.order, protocol, expected };
+      validateReceptionApprovalInput(existing, approval);
+      const { participant } = await resolveParticipantConfiguration(this.env, protocol);
+      const needsPrepared = participant.participantRuntimeProfile === PARTICIPANT_PRODUCTION_PROFILE &&
+        participant.participantModelPin !== undefined && protocol.referenceMemory;
+      let prepared: { reception: Reception; entries: PreparedObservationBundle['entries'] } | undefined;
+      if (needsPrepared) {
         try {
-          const configuredProfile = this.env.PARTICIPANT_TERRA_PROFILE;
-          const configuredObservation = this.env.PARTICIPANT_TERRA_INITIAL_OBSERVATION_GENERATION;
-          const pilot012Profile = isPilot012ParticipantDialogueProfile(dialogueProfile);
-          const initialObservationGeneration = pilot012Profile
-            ? configuredObservation ?? INITIAL_OBSERVATION_STRUCTURED_V2 : configuredObservation;
-          if (initialObservationGeneration !== undefined && !isInitialObservationGeneration(initialObservationGeneration)) {
-            throw new Error('unknown initial observation generation');
-          }
-          if (pilot012Profile && initialObservationGeneration !== INITIAL_OBSERVATION_STRUCTURED_V2) {
-            throw new Error('initial observation generation differs from dialogue profile');
-          }
-          const usageOnly = configuredProfile === PARTICIPANT_PRODUCTION_PROFILE;
-          if (configuredProfile !== undefined && !usageOnly) throw new Error('unknown participant profile');
-          const participantLimits = usageOnly ? undefined
-            : validateParticipantLimits(JSON.parse(this.env.PARTICIPANT_TERRA_LIMITS_JSON ?? 'null'));
-          participantPolicy = await workerParticipantPolicy(this.env.PARTICIPANT_AI_PROXY, usageOnly, initialObservationGeneration,
-            allTerraPin ? 'participant_model_pin_v3' : generationPin ? 'participant_model_pin_v2' : 'participant_model_pin_v1');
-          participant = { participantModelPin: participantPolicy.pin, ...(initialObservationGeneration ? { initialObservationGeneration } : {}),
-            ...(participantLimits ? { participantLimits } : { participantRuntimeProfile: PARTICIPANT_PRODUCTION_PROFILE }),
-            ...(dialogueProfile ? { participantDialogueProfile: dialogueProfile } : {}) };
-        } catch {
-          throw new ReceptionError('reception_unavailable');
-        }
+          const claimed = await this.index()?.claimPreparedObservations({ receptionId: existing.receptionId,
+            objectId: existing.objectId, expectedRevision: existing.revision, order: input.order,
+            protocolSha256: settings.protocol.sha256, participant });
+          if (!claimed) throw new Error();
+          const bundle: PreparedObservationBundle = structuredClone(claimed);
+          if (!Array.isArray(bundle.randomSeeds) || bundle.randomSeeds.length > 128 ||
+              bundle.randomSeeds.some(seed => !Number.isSafeInteger(seed)) || !Array.isArray(bundle.entries)) throw new Error();
+          let draw = 0;
+          const proposed = await approveReception(existing, { ...approval, ...participant, approvedAt: new Date().toISOString(),
+            randomSeed: () => {
+              if (draw >= bundle.randomSeeds.length) throw new Error();
+              return bundle.randomSeeds[draw++];
+            } });
+          if (draw !== bundle.randomSeeds.length || !proposed.plan || proposed.plan.schemaVersion === 'reception_plan_v1') throw new Error();
+          const template = validateReceptionPlan(bundle.plan);
+          if (template.schemaVersion === 'reception_plan_v1' || template.preparedObservations ||
+              JSON.stringify({ ...proposed.plan, approvedAt: null }) !== JSON.stringify({ ...template, approvedAt: null })) throw new Error();
+          const entries = new Map(bundle.entries.map(item => [item.key, item.entry]));
+          if (entries.size !== bundle.entries.length) throw new Error();
+          const checked = new Map<string, PreparedObservationBundle['entries'][number]['entry']>();
+          const trials = await Promise.all(proposed.plan.trials.map(async trial => {
+            const { own } = participantTrialMaterial(trial.seed, trial.rotationMode,
+              proposed.plan?.schemaVersion === 'reception_plan_v3' ? proposed.plan.trials[trial.index].figureSelection : undefined);
+            const key = await workerTerraInitialKey(participant.participantModelPin!, own, participant.initialObservationGeneration);
+            const entry = await validateWorkerTerraCacheEntry(entries.get(key), { key, own, modelPin: participant.participantModelPin!,
+              initialObservationGeneration: participant.initialObservationGeneration });
+            checked.set(key, entry);
+            return { index: trial.index, cacheKey: key, memoSha256: entry.memoSha256 };
+          }));
+          if (checked.size !== entries.size) throw new Error();
+          const preparedObservations = validatePreparedObservations({ schemaVersion: 'prepared_observations_v1',
+            bundleId: bundle.bundleId, preparedAt: bundle.preparedAt, trials }, proposed.plan.trials.length);
+          const reception = validateReception({ ...proposed, plan: { ...proposed.plan, preparedObservations } });
+          prepared = { reception, entries: [...checked].map(([key, entry]) => ({ key, entry })) };
+        } catch { throw new ReceptionError('prepared_observations_unavailable'); }
       }
       const r = await this.serialized(() => this.ctx.storage.transaction(async tx => {
         const raw = await tx.get('reception:v1'); if (!raw) throw new ReceptionError('reception_unavailable');
-        const next = await approveReception(raw, { expectedRevision:input.expectedRevision, order:input.order, protocol, expected, approvedAt:new Date().toISOString(),
-          randomSeed:() => crypto.getRandomValues(new Uint32Array(1))[0], ...participant,
-          ...(['reception_protocol_v2', 'reception_protocol_v3'].includes(protocol.schemaVersion) ? { openingMode: SCRIPTED_OPENING_MODE } : {}),
-          ...(protocol.referenceMemory ? { memoryPruneVersion: participantMemoryPruneVersion(participant.participantDialogueProfile) } : {}) });
-        await tx.put({ 'reception:v1':next }); return next;
+        if (prepared) {
+          validateReceptionApprovalInput(raw, approval);
+          if (JSON.stringify(validateReception(raw)) !== JSON.stringify(existing)) throw new ReceptionError('reception_conflict');
+          const saved: Record<string, unknown> = { 'reception:v1': prepared.reception };
+          for (const { key, entry } of prepared.entries) {
+            const previous = await tx.get(key);
+            if (previous !== undefined && JSON.stringify(previous) !== JSON.stringify(entry)) throw new ReceptionError('prepared_observations_unavailable');
+            saved[key] = entry;
+          }
+          await tx.put(saved);
+          return prepared.reception;
+        }
+        const next = await approveReception(raw, { ...approval, ...participant, approvedAt: new Date().toISOString(),
+          randomSeed: () => crypto.getRandomValues(new Uint32Array(1))[0] });
+        await tx.put({ 'reception:v1': next }); return next;
       }));
-      await this.schedulePreobservations(r.plan, participantPolicy?.proxy);
       await this.indexReception(r); return r;
     });
   }
@@ -550,6 +571,18 @@ export class TangramSession extends DurableObject<Env> {
         participantPolicy = await workerParticipantPolicy(this.env.PARTICIPANT_AI_PROXY,
           Boolean(plan.participantRuntimeProfile), plan.initialObservationGeneration, approvedPin.schemaVersion);
         resolveWorkerParticipantModelPin({ approvedPin, configuredPin: participantPolicy.pin });
+      } catch { throw new BaseSessionError('trial_unavailable'); }
+    }
+    if (plan?.preparedObservations) {
+      try {
+        const reference = preparedTrialObservation(plan.preparedObservations, index);
+        const selected = plan.trials[index];
+        const { own } = participantTrialMaterial(selected.seed, selected.rotationMode,
+          plan.schemaVersion === 'reception_plan_v3' ? plan.trials[index].figureSelection : undefined);
+        const entry = await validateWorkerTerraCacheEntry(await this.ctx.storage.get(reference.cacheKey), {
+          key: reference.cacheKey, own, modelPin: plan.participantModelPin!, initialObservationGeneration: plan.initialObservationGeneration,
+        });
+        if (entry.memoSha256 !== reference.memoSha256) throw new Error();
       } catch { throw new BaseSessionError('trial_unavailable'); }
     }
     this.admission = { kind:'reception', receptionId:r.receptionId, expectedRevision:r.revision, index, startRequestReceivedAt, participantPolicy };
@@ -1042,7 +1075,7 @@ export class TangramSession extends DurableObject<Env> {
   }
 
   private async createTrial(binding: Parameters<MakeBaseTask>[0]): Promise<NamingTask> {
-    const {seed,strategy,referenceMemory,restore,participantRuntime,initialObservationGeneration,memoryPruneVersion,participantDialogueProfile,openingMode} = binding;
+    const {seed,strategy,referenceMemory,restore,participantRuntime,initialObservationGeneration,memoryPruneVersion,participantDialogueProfile,openingMode,preparedObservation} = binding;
     if (restore && !matchesWorkerDialogueProfile(participantDialogueProfile, restore) ||
         participantDialogueProfile !== undefined &&
           (memoryPruneVersion !== participantMemoryPruneVersion(participantDialogueProfile) ||
@@ -1070,6 +1103,7 @@ export class TangramSession extends DurableObject<Env> {
     const onPersist = async (snapshot: StoredTrial) => {
       const record = pin ? { ...snapshot, options: { ...snapshot.options, participantModelPin: pin,
         ...(initialObservationGeneration ? { initialObservationGeneration } : {}),
+        ...(preparedObservation ? { preparedObservation } : {}),
         ...(participantRuntime ? { participantRuntimeProfile: participantRuntime.profile } : {}),
         ...(participantDialogueProfile ? { participantDialogueProfile } : {}) },
         ...(typeof startRequestReceivedAt === 'string' ? { startRequestReceivedAt } : {}),
@@ -1093,8 +1127,11 @@ export class TangramSession extends DurableObject<Env> {
       const figureSelection = restore ? restore.options.figureSelection : binding.figureSelection;
       const { trial, figures, own } = participantTrialMaterial(seed, rotationMode, figureSelection);
       const runtime = createWorkerParticipantRuntime({
-        proxy: policy.proxy, pin, ...runtimeMode, initialObservationGeneration, participantDialogueProfile,
-        own, cache: this.preobservations.startCache,
+        proxy: policy.proxy, pin, ...runtimeMode, initialObservationGeneration, participantDialogueProfile, preparedObservation,
+        own, cache: preparedObservation ? {
+          read: key => this.ctx.storage.get(key),
+          async putIfAbsent() { throw new NamingTaskError('invalid_options'); },
+        } : this.preobservations.startCache,
       });
       let jevResearch = runtime.jevResearch;
       if (initialObservationGeneration === INITIAL_OBSERVATION_STRUCTURED_V2 && !restore) {
@@ -1335,6 +1372,10 @@ export default {
           owner,
         }) : undefined,
         receptionSettings: index ? createReceptionSettingsPort(index) : undefined,
+        preparedObservations: index ? {
+          status: () => index.preparedObservationStatus(),
+          prepare: input => index.prepareObservations(input),
+        } : undefined,
         canResumeParticipant: async (request, recordId) => {
           // Admin credentials never grant participant ownership or a participant cookie.
           const cookie = sessionId(request.headers.get('Cookie'));

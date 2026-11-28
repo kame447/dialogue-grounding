@@ -1,5 +1,6 @@
 /** Participant assignment API. Researcher values only; never an allocation method. */
 import type { OpeningMode } from './opening-mode.ts';
+import type { PreparedTrialObservationReference } from './prepared-observations.ts';
 import type { ParticipantProductionProfile } from '../web/participant-usage-policy.ts';
 import type { BudgetLimits } from '../diagnostics/parity-live/audit.ts';
 import type { ParticipantModelPin } from './participant-model-pin.ts';
@@ -58,6 +59,7 @@ export type MakeBaseTask = (options: { strategy: Strategy; seed: number; referen
   restore: BaseRecord | null; now: () => number; onPersist: (record: RawBaseRecord) => Promise<void>; rotationMode?: RotationMode;
   figureSelection?: ResolvedFigureSelection; participantModelPin?: ParticipantModelPin; participantLimits?: Readonly<BudgetLimits>;
   initialObservationGeneration?: InitialObservationGeneration;
+  preparedObservation?: PreparedTrialObservationReference;
   openingMode?: OpeningMode;
   participantDialogueProfile?: ParticipantDialogueProfile;
   participantRuntime?: { profile: ParticipantProductionProfile; assignmentId: string } }) => Promise<BaseTask>;

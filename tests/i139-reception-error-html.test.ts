@@ -187,3 +187,12 @@ test('real edge: a stale approval form posted by a browser gets the 409 page and
   await page(r, 409, '許可していません', MESSAGES.protocol_changed);
   assert.deepEqual(store.snapshot(), before); await Promise.all(pending);
 });
+
+test('unprepared observation memos block approval with a settings link and a specific closed code', async () => {
+  const f = fixture(); f.setResult({ ok: false, error: 'prepared_observations_unavailable' });
+  const response = await handleAdmin(post('approve'), f.deps), html = await response.text();
+  assert.equal(response.status, 409); assert.match(html, /初回観察メモの準備が完了していません/u);
+  assert.match(html, /href="\/admin\/reception-settings"/u); assert.doesNotMatch(html, /PRIVATE|SECRET/u); assert.equal(f.mutations(), 1);
+  const g = fixture(); g.setResult({ ok: false, error: 'prepared_observations_unavailable' });
+  await json(await handleAdmin(post('approve', {}, 'application/json'), g.deps), 409, 'prepared_observations_unavailable');
+});
