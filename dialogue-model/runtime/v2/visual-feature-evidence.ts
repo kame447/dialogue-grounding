@@ -1,5 +1,6 @@
 import { literalSpan } from "../judgment/public-evidence.mjs";
 import type { ObservationMemo } from "../observation/contract.ts";
+import { describePart } from "../observation/part-consumers.ts";
 
 export type VisualFeatureSource = { figureId: string; path: (string | number)[] };
 export type ExtractedVisualFeature = { source: VisualFeatureSource; quote: string };
@@ -16,6 +17,10 @@ function sourceValue(memo: ObservationMemo, source: VisualFeatureSource): string
   if (!figure) return;
   const { path } = source;
   const [section, entry, field, item] = path;
+  if (section === "parts" && entry === "descriptions" && path.length === 3 && index(field)) {
+    try { return describePart((figure as typeof figure & { parts?: unknown }).parts, field); }
+    catch { return; }
+  }
   if (section === "analytic") {
     if (entry === "composition" && path.length === 2) return figure.analytic.composition;
     if ((entry === "shapes" || entry === "relations") && path.length === 3 && index(field)) {
