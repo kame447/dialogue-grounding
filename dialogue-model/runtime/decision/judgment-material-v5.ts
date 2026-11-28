@@ -31,7 +31,7 @@ export const JUDGMENT_V5_LEGEND = "stateの記法: publicTurnsは全公開発話
 
 export function judgmentV5Legend(figureCount: number = 6): string {
   if (!isSupportedFigureCount(figureCount)) throw new TypeError("Unsupported figure count");
-  return figureCount === 4 ? JUDGMENT_V5_LEGEND.replace("f0〜f5", "f0〜f3") : JUDGMENT_V5_LEGEND;
+  return figureCount === 6 ? JUDGMENT_V5_LEGEND : JUDGMENT_V5_LEGEND.replace("f0〜f5", `f0〜f${figureCount - 1}`);
 }
 
 /** jev_generation_retry_v11: appended after the legend when a figure's history points at an answer the request's claims do not carry. */

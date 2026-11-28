@@ -28,11 +28,24 @@ test('four-figure selections round-trip without adding fields to recorded select
   const six = resolveFigureSelection({ mode: 'seeded_random', selectionSeed: 12 });
   assert.deepEqual(resolveFigureSelection({ mode: 'seeded_random', selectionSeed: 12, figureCount: 6 }), six);
   assert.throws(() => validateResolvedFigureSelection({ ...six, figureIds: six.figureIds.slice(0, 4) }), TypeError);
-  for (const figureCount of [undefined, null, 0, 3, 5, 7, '4']) {
+  for (const figureCount of [undefined, null, 0, 2, 5, 7, '4']) {
     assert.throws(() => resolveFigureSelection({ ...random, figureCount }), TypeError);
   }
-  for (const figureIds of [['F1', 'F2', 'F3'], ['F1', 'F2', 'F3', 'F3'], ['F1', 'F2', 'F3', 'F31']]) {
+  for (const figureIds of [['F1', 'F2'], ['F1', 'F2', 'F2'], ['F1', 'F2', 'F31'], ['F1', 'F2', 'F3', 'F3'], ['F1', 'F2', 'F3', 'F31']]) {
     assert.throws(() => resolveFigureSelection({ mode: 'custom', figureIds }), TypeError);
+  }
+});
+
+test('three-figure custom and seeded selections round-trip with exactly three private slots per side', () => {
+  for (const spec of [{ mode: 'custom', figureIds: ['F2', 'F17', 'F30'] }, { mode: 'seeded_random', selectionSeed: 12, figureCount: 3 }]) {
+    const selection = resolveFigureSelection(spec);
+    assert.equal(new Set(selection.figureIds).size, 3);
+    assert.deepEqual(validateResolvedFigureSelection(JSON.parse(JSON.stringify(selection))), selection);
+    assert.deepEqual(resolveFigureSelection(spec), selection);
+    const trial = createTrialV2({ seed: 73, figureSelection: selection });
+    assert.equal(participantView(trial).shapes.length, 3);
+    assert.equal(modelView(trial).anchors.length, 3);
+    assert.deepEqual(trialStimulusV2(trial)!.figureIds, selection.figureIds);
   }
 });
 

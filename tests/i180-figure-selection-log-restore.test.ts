@@ -209,11 +209,11 @@ test('participant review replays the recorded selection without exposing figure 
 });
 
 
-test('four-figure seeded approval freezes the selected count for both strategies and keeps legacy omissions at six', async () => {
+for (const count of [3, 4]) test(`${count}-figure seeded approval freezes the selected count for both strategies and keeps legacy omissions at six`, async () => {
   for (const policy of ['shared', 'per_trial']) {
-    const p = protocol({ figureSetPolicy: policy, figureSelection: { mode: 'seeded_random', selectionSeed: 41, figureCount: 4 } });
+    const p = protocol({ figureSetPolicy: policy, figureSelection: { mode: 'seeded_random', selectionSeed: 41, figureCount: count } });
     const { plan } = await approve(p, [77]);
-    assert.deepEqual(plan.trials.map((t: any) => t.figureSelection.figureIds.length), [4, 4]);
+    assert.deepEqual(plan.trials.map((t: any) => t.figureSelection.figureIds.length), [count, count]);
     assert.deepEqual(validateReceptionPlan(structuredClone(plan)), plan);
     assert.deepEqual(plan.trials.map((t: any) => t.strategy), ['repair-first', 'bypass-enabled']);
     if (policy === 'shared') assert.deepEqual(plan.trials[0].figureSelection, plan.trials[1].figureSelection);
@@ -221,7 +221,7 @@ test('four-figure seeded approval freezes the selected count for both strategies
   }
   const old = await approve(protocol({ figureSelection: { mode: 'seeded_random', selectionSeed: 41 } }), [77]);
   assert.deepEqual(old.plan.trials.map((t: any) => t.figureSelection.figureIds.length), [6, 6]);
-  for (const figureCount of [0, 3, 5, 7, '4', null, undefined]) {
+  for (const figureCount of [0, 2, 5, 7, '4', null, undefined]) {
     assert.throws(() => validateReceptionProtocolV3(protocol({ figureSelection: { mode: 'seeded_random', selectionSeed: 41, figureCount } })));
   }
 });

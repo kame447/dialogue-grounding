@@ -138,6 +138,26 @@ test('pool identity ignores property order but isolates protocol and participant
   ]) assert.notEqual(preparedObservationPoolKey(changed), key);
 });
 
+test('three-figure stock follows frozen figure values, while historical pool keys stay byte-identical', () => {
+  const input = recipeInput();
+  const keyFor = (options: Partial<ReceptionProtocolV3>) => preparedObservationPoolKey({ ...input, protocol: protocol(options) });
+  assert.equal(keyFor({}), 'prepared_observation_pool_v1:b572de5b6b1d24055bde27ef38cdf24c2d3358f629fc5a421a2807fc86b08dd3');
+  assert.equal(keyFor({ figureSelection: { mode: 'preset', setId: 'legacy-v1' } }),
+    'prepared_observation_pool_v1:a84a79636d8d16ebca1fa70794b9562a89689b3e6786e68fd8c2ac40b620c6a7');
+  assert.equal(keyFor({ figureSelection: { mode: 'seeded_random', selectionSeed: null } }),
+    'prepared_observation_pool_v1:6de1d521d2a4aac69c2a88ad68b08b07db786c20738e0e634f01f7a12b8dcdcc');
+  const selection = { mode: 'custom', figureIds: ['F2', 'F17', 'F30'] } as const;
+  const key = keyFor({ figureSelection: selection });
+  assert.equal(keyFor({ protocolId: bundleId, revision: 2,
+    figureSelection: { ...selection, figureIds: ['F30', 'F2', 'F17'] } }), key);
+  assert.notEqual(keyFor({ figureSelection: { ...selection, figureIds: ['F2', 'F17', 'F29'] } }), key);
+  const earlierProfile = { participantModelPin: pin, participantRuntimeProfile: participant.participantRuntimeProfile };
+  const observationKey = (generation: PreparedObservationParticipant['initialObservationGeneration']) =>
+    preparedObservationPoolKey({ ...input, protocol: protocol({ figureSelection: selection }),
+      participant: { ...earlierProfile, initialObservationGeneration: generation } });
+  assert.notEqual(observationKey('structured_outputs_v1'), observationKey(INITIAL_OBSERVATION_STRUCTURED_V2));
+});
+
 test('recipes detach caller data and reject unrecognized or inconsistent settings before any model work', async () => {
   const input = structuredClone({ ...recipeInput(), randomSeed: undefined });
   const recipe = await createPreparedObservationRecipe({ ...input, randomSeed: () => 42 });

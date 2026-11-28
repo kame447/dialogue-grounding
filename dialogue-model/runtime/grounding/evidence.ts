@@ -153,9 +153,11 @@ export function buildGroundingEvidence(input: GroundingEvidenceInput): { state: 
   if (!events.some((event) => event.speaker === "ai")) gaps.push("no_ai_turn_yet");
 
   // Keep the newest turns that fit; cross-turn references need as much history as the bound allows.
+  const noteCount = notes ? Object.keys(notes).length : 0;
+  const figureCount = noteCount === 3 || noteCount === 4 ? noteCount : 6;
   let window = events.slice(-GROUNDING_PUBLIC_TURNS);
   const serialize = (turns: GroundingPublicEvent[]) => JSON.stringify({
-    task: `二者が配置・向きの異なる同じ${notes && Object.keys(notes).length === 4 ? 4 : 6}図形を見て、同じ図形に同じ名前を付ける共同命名。見立ての類似、対象の同定、名称の合意は別のもの。`,
+    task: `二者が配置・向きの異なる同じ${figureCount}図形を見て、同じ図形に同じ名前を付ける共同命名。見立ての類似、対象の同定、名称の合意は別のもの。`,
     judgedPoint: `公開発話 turn ${input.asOfSeq} までを見た時点。次のAI発話の直前。`,
     publicDialogue: turns.map(({ seq, speaker, text }) => ({ turn: seq, speaker: SPEAKER[speaker], text })),
     omittedEarlierTurns: events.length - turns.length,

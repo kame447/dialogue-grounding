@@ -61,7 +61,7 @@ test('four observations match exactly their own anchors; both cross-count restor
   assert.throws(() => parseInitialObservation(JSON.stringify(initial()), own(6), { observedAt }));
   assert.throws(() => buildJevDecisionPayload({ ...input(), observations: six }));
   assert.throws(() => buildJevDecisionPayload({ ...input(6), observations: four }));
-  for (const count of [3, 5, 7]) assert.throws(() => buildObservationMessages(own(count)));
+  for (const count of [2, 5, 7]) assert.throws(() => buildObservationMessages(own(count)));
 });
 
 test('four candidate questions offer exactly 11 subsets and 16 general targets without nonexistent figures', () => {
@@ -152,7 +152,7 @@ test('proxy derives exact structured count from the matching trusted instruction
   assert.equal(initialObservationFormatForMessages([four[0], { role: 'user', content: JSON.stringify({ ownAnchors: duplicate.ownAnchors }) }]), null);
 });
 
-test('structured four-figure Terra observes through the proxy, caches separately and reobserves', async () => {
+test('structured Terra observes through the proxy, caches each figure count separately and reobserves', async () => {
   const pin = validateParticipantModelPin({ schemaVersion: 'participant_model_pin_v1',
     terraModelId: 'gpt-6.1-terra-2026-11-01', lunaModelId: 'gpt-6-luna-2026-10-01', jevModelId: 'typesafe/jev-1.14-20261001' });
   const env = { RESEARCH_PROXY_TOKEN: 'synthetic-only-proxy-token-for-tests-184',
@@ -186,14 +186,21 @@ test('structured four-figure Terra observes through the proxy, caches separately
   const four = observer(4), six = observer(6);
   const memo = await four.observeAll(own());
   await six.observeAll(own(6));
+  const three = await observer(3).observeAll(own(3));
+  assert.equal(three.figures.length, 3);
+  assert.match(calls[2].messages[0].content, /全3図形/);
+  assert.match(calls[2].messages[0].content, /ownAnchorsの3つ/);
   assert.deepEqual(await observer(4).observeAll(own()), memo);
-  assert.equal(entries.size, 2);
-  assert.equal(calls.length, 2);
-  assert.deepEqual(calls.map(call => call.response_format.json_schema.schema.properties.figures.maxItems), [4, 6]);
+  assert.equal(entries.size, 3);
+  assert.equal(calls.length, 3);
+  assert.deepEqual(calls.map(call => {
+    const { minItems, maxItems } = call.response_format.json_schema.schema.properties.figures;
+    return [minItems, maxItems];
+  }), [[4, 4], [6, 6], [3, 3]]);
   const result = await four.reobserve({ ...own(), memo, figureIds: ['s-0000'],
     issue: { aspect: 'part', question: '確認', partnerConstrual: null } });
   assert.equal(result.figures[0].figureId, 's-0000');
-  assert.equal(Object.hasOwn(calls[2], 'response_format'), false);
+  assert.equal(Object.hasOwn(calls[3], 'response_format'), false);
 });
 
 test('both strategies teach four figures for generation and final submission while six constants stay unchanged', async () => {
@@ -219,13 +226,13 @@ test('compact judgment legend teaches only f0 through f3 for four figures and pr
   assert.equal(judgmentV5Legend(6), JUDGMENT_V5_LEGEND);
   assert.match(judgmentV5Legend(4), /f0〜f3はownSlots/);
   assert.doesNotMatch(judgmentV5Legend(4), /f0〜f5/);
-  for (const count of [4, 6]) {
+  for (const count of [3, 4, 6]) {
     const payload = buildJevDecisionPayload({ ...input(count), judgmentLedger: [] });
     const state = JSON.parse(payload.state);
     assert.deepEqual(Object.keys(state.figures), Array.from({ length: count }, (_, i) => `f${i}`));
     for (const question of Object.values(payload.questions)) {
       assert.ok(question.instructions.includes(judgmentV5Legend(count)));
-      if (count === 4) assert.doesNotMatch(question.instructions, /f0〜f5/);
+      if (count < 6) assert.doesNotMatch(question.instructions, /f0〜f5/);
     }
   }
 });
