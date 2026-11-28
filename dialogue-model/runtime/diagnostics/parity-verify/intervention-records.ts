@@ -2180,10 +2180,14 @@ const legendForInput=(input:any)=>{
 };
 const LEGEND_V11='answerClaimsは、figuresの返答のclaim idがclaimsにない行動のためだけに添える行で、各行は [claim id, 出典の発話番号, act, 対象, 命題] です。グラフから外れた回答の出典の発話番号はnullになります。';
 const ROTATION_V5='課題の条件として、相手の盤面は自分の盤面と同じ図形を±90度ほど回転して提示しています（relative_pm90）。向きや方位を表す語（上・下・左・右・縦・横など）は、相手と自分で一致しない前提で扱い、向きに依存しない特徴で照合してください。';
+// relative_90_180_270 (#269): the sentence of the task contract, written here and not read from decision/jev-decision.ts, so a missing or different sentence in a recorded request is a mismatch.
+const ROTATION_V5_90_180_270='課題の条件として、相手の盤面は自分の盤面と同じ図形をそれぞれ90度・180度・270度のいずれかの角度で回転して提示しています（relative_90_180_270）。向きや方位を表す語（上・下・左・右・縦・横など）は、相手と自分で一致しない前提で扱い、向きに依存しない特徴で照合してください。';
+// The rotation premise a request must carry for the stimulus mode its own state records. relative_0 states none; a mode this table does not know states none either, so no other mode's sentence can pass for it.
+const rotationPremise=(mode:unknown):string=>mode==='relative_pm90'?'\n'+ROTATION_V5:mode==='relative_90_180_270'?'\n'+ROTATION_V5_90_180_270:'';
 const parseMaterial=(text:string):any=>{const x=JSON.parse(text);return x?.view==='judgment_v5'?decodeMaterialV5(x):x;};
 const usesPositionPrompt=(v:PromptVersion):boolean=>v.i172&&!(v.styleMode==='research_split'&&CTX.v3);
 const activeNative=():PromptVersion['native']=>CTX.prompt?(usesPositionPrompt(CTX.prompt)?CTX.prompt.native:NATIVE):CTX.v3?NATIVE:NATIVE_I172;
-const nativeInstructions=(s:any,layout='two_stage_v1',prospect=false)=>{const nat=activeNative();return(layout==='two_stage_v3'?nat.common.replace(NATIVE_V2.v1Stages,NATIVE_V3.stages):layout==='two_stage_v2'?nat.common.replace(NATIVE_V2.v1Stages,NATIVE_V2.stages):nat.common)+(Object.hasOwn(s,'humanReferent')?'\n'+nat.referent:'')+(prospect&&Object.hasOwn(s,'repairProspect')?'\n'+ADAPT.prospect:'')+(CTX.facts?'\n'+ADAPT.facts:'')+(s?.view==='judgment_v5'?'\n'+legendForInput(s)+(s.notationV11===true?'\n'+LEGEND_V11:'')+(s.rotationMode==='relative_pm90'?'\n'+ROTATION_V5:''):'')+(CTX.jevNaming?'\n'+NAMING_GUIDANCE:'')+
+const nativeInstructions=(s:any,layout='two_stage_v1',prospect=false)=>{const nat=activeNative();return(layout==='two_stage_v3'?nat.common.replace(NATIVE_V2.v1Stages,NATIVE_V3.stages):layout==='two_stage_v2'?nat.common.replace(NATIVE_V2.v1Stages,NATIVE_V2.stages):nat.common)+(Object.hasOwn(s,'humanReferent')?'\n'+nat.referent:'')+(prospect&&Object.hasOwn(s,'repairProspect')?'\n'+ADAPT.prospect:'')+(CTX.facts?'\n'+ADAPT.facts:'')+(s?.view==='judgment_v5'?'\n'+legendForInput(s)+(s.notationV11===true?'\n'+LEGEND_V11:'')+rotationPremise(s.rotationMode):'')+(CTX.jevNaming?'\n'+NAMING_GUIDANCE:'')+
  (s?.judgmentMaterialVersion===JEV_REPAIR_QUALITY_VERSION?'\n'+REPAIR_QUALITY_GUIDANCE:'');};
 const HUMAN_MOVE_ON_ACTION_NOTE = '\n今回の人間が話題の移行を明示的に主導したときは、命名や同定の解決を前提とせずmove_onで受け止めてください。';
 const MOVE_ON_SOURCE_INSTRUCTIONS = '今回の人間の公開発話と直前までの公開文脈から、話題の移行を誰が主導したか判定してください。図形の同定や名称の合意は問っていません。';
@@ -2629,7 +2633,7 @@ const PROSPECT_TEXT={base:"公開履歴・観察メモ・修復履歴だけを�
 const PROSPECT_CRITERIA={prospect:{progressing:"修復が進む見込みがある。",stalled:"修復が停滞する見込みがある。",uncertain:"見込みは不確か。",no_open_issue:"修復する対象がない。"},
  basis:{new_information:"新しい情報が得られた。",candidate_narrowed:"候補が狭まった。",candidate_widened:"候補が広がった。",repetition:"同じやり取りの反復。",partner_uncertain:"相手の不確かさ。",other_figure_benefit:"別の図形を扱う利点がある。",none:"該当する根拠なし（修復対象がない場合を含む）。"}};
 function prospectQuestions(input:any,facts:boolean,layout='two_stage_v1'){
- const issues=(input.repairHistory??[]).filter((r:any)=>r.turn<input.turn).slice().sort((a:any,b:any)=>a.turn-b.turn).slice(-8),ins=PROSPECT_TEXT.base+(facts?'\n'+ADAPT.facts:'')+(input.notationV6===true?'\n'+legendForInput(input)+(input.notationV11===true?'\n'+LEGEND_V11:'')+(input.rotationMode==='relative_pm90'?'\n'+ROTATION_V5:''):'');
+ const issues=(input.repairHistory??[]).filter((r:any)=>r.turn<input.turn).slice().sort((a:any,b:any)=>a.turn-b.turn).slice(-8),ins=PROSPECT_TEXT.base+(facts?'\n'+ADAPT.facts:'')+(input.notationV6===true?'\n'+legendForInput(input)+(input.notationV11===true?'\n'+LEGEND_V11:'')+rotationPremise(input.rotationMode):'');
  const q=(suffix:string,criteria:any)=>({type:'choice',instructions:ins+suffix,criteria});
  const quality=input.judgmentMaterialVersion===JEV_REPAIR_QUALITY_VERSION;
  const qualityInstructions=quality?'\n'+REPAIR_QUALITY_GUIDANCE+REPAIR_QUALITY_PROSPECT:'';
