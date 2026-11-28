@@ -19,6 +19,7 @@ import { FIGURE_SETS, PILOT_FIGURE_SET_ID } from '../dialogue-model/runtime/stim
 import { CLAIM_PRUNE_V2, CLAIM_PRUNE_V3, REFERENCE_LIMITS } from '../dialogue-model/runtime/memory/reference-graph.mjs';
 import { validateBoundBaseRecord } from '../dialogue-model/runtime/v2/base-assignment-data.ts';
 import { validateParticipantModelPin } from '../dialogue-model/runtime/v2/participant-model-pin.ts';
+import { checkDecisionFailureEvidence } from '../dialogue-model/runtime/decision/jev-decision.ts';
 import { researchHash } from '../dialogue-model/runtime/v2/research-profile.ts';
 import { handleRequest } from '../workers/research-ai-proxy/src/index.mjs';
 import { PARTICIPANT_PRODUCTION_PROFILE } from '../dialogue-model/runtime/web/participant-usage-policy.ts';
@@ -1275,6 +1276,52 @@ test('production starts and restores an old pin-only plan with no limits variabl
   assert.deepEqual(record.jevLedger.thresholdsReached, []);
   assert.equal(record.options.participantRuntimeProfile, undefined);
   assert.deepEqual(record.options.participantModelPin, pin);
+});
+
+test('production cold-restores an old decision failure with an unreported stage cost', async () => {
+  const h = harness();
+  h.env.PARTICIPANT_TERRA_PROFILE = undefined;
+  await h.receive();
+  await h.approve();
+  h.env.PARTICIPANT_TERRA_PROFILE = PARTICIPANT_PRODUCTION_PROFILE;
+  const { trial } = await jsonOk(await h.start());
+  const id = trial.sessionId, key = 'record:' + id;
+  h.controlled.selectedAction = 'confirm';
+  h.controlled.choose = name => name === 'feature_target' ? 'figure_0' : undefined;
+  const proxy = h.env.PARTICIPANT_AI_PROXY;
+  const choices = proxy.participantUsageChoices.bind(proxy);
+  proxy.participantUsageChoices = async (payload, expected) => {
+    const { questions } = payload as { questions: Choices };
+    if (questions.feature) return { status: 502, data: { error: 'upstream_error' } };
+    const reply = await choices(payload, expected);
+    if (reply.status === 200 && questions.action && 'usage' in reply.data) reply.data.usage.cost = null;
+    return reply;
+  };
+  const { eventId } = await jsonOk(await h.request('message', {
+    expectedRecordId: id, text: '三角のある形を確かめたいです。', clientId: 'unreported-stage-cost',
+  }));
+  await h.idle();
+  const failed = await h.storage.get(key);
+  const evidence = failed.jevTraces.at(-1).decisionFailure.evidence;
+  assert.deepEqual(evidence.stages.map(({ stage, status, costUsd }: any) => [stage, status, costUsd]), [
+    ['action_target', 'ok', null], ['detail', 'error', null],
+  ]);
+  assert.deepEqual(failed.queueState.pendingHumanEventIds, [eventId]);
+  assert.equal(checkDecisionFailureEvidence(evidence), null, 'the default research policy requires a reported cost');
+
+  proxy.participantUsageChoices = choices;
+  h.controlled.selectedAction = 'accept';
+  h.evict();
+  const { trial: waiting } = await jsonOk(await h.request('state'));
+  assert.equal(waiting.sessionId, id);
+  assert.equal(waiting.recovering, true);
+  assert.equal(waiting.events.at(-1).id, eventId);
+  await h.recover();
+  const recovered = await h.storage.get(key);
+  assert.deepEqual(recovered.events.slice(0, -1), failed.events);
+  assert.equal(recovered.events.at(-1).speaker, 'ai');
+  assert.deepEqual(recovered.queueState.pendingHumanEventIds, []);
+  assert.deepEqual(recovered.jevTraces.at(-2).decisionFailure.evidence, evidence);
 });
 
 for (const strategy of ['repair-first', 'bypass-enabled'] as const) {

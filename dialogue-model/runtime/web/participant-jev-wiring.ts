@@ -251,7 +251,9 @@ export function selectParticipantJev(restore: any, provided: unknown, context: {
       if (savedLayout !== profile.questionLayout || Object.hasOwn(restore.options,'questionLayout') && savedLayout !== 'two_stage_v2' && savedLayout !== 'two_stage_v3') return invalid();
       const humanLedMoveOn = profile.interventionPolicy.version === 'bypass_acceptance_v2';
       const humanMoveReason = issueHandling ? 'human_led' : 'human_led_move_on';
-      if (restore.jevTraces?.some?.((trace:any)=>!checkedDecisionFailure(trace,profile.questionLayout,p5Enabled,v.ledger instanceof ParticipantUsageLedger ? PARTICIPANT_USAGE_ONLY : undefined,humanLedMoveOn, restore.queueState?.privateState?.observationMemo?.figures?.length))) return invalid();
+      const usagePolicy = v.ledger instanceof ParticipantUsageLedger || v.ledger instanceof LegacyParticipantUsageLedger
+        ? PARTICIPANT_USAGE_ONLY : undefined;
+      if (restore.jevTraces?.some?.((trace:any)=>!checkedDecisionFailure(trace,profile.questionLayout,p5Enabled,usagePolicy,humanLedMoveOn, restore.queueState?.privateState?.observationMemo?.figures?.length))) return invalid();
       if (restore.options.profileSha256 !== researchHash(profile) ||
           researchHash(jsonData(restore.options.interventionPolicy)) !== researchHash(profile.interventionPolicy) ||
           restore.queueState?.privateState?.schemaVersion !== 'jev_private_state_v2' ||
