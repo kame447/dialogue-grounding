@@ -163,6 +163,30 @@ test('receptions shown on first load are never new; an unchanged version fetches
   assert.equal(c.row(1)!.getAttribute('data-status'), 'approved'); assert.equal(c.notice(), ''); assert.equal(c.document.title, '受付一覧');
 });
 
+test('an incomplete page is refreshed until every row is readable even without a version change', async () => {
+  const f = fixture();
+  const original = f.deps.receptions!.listPage;
+  let unavailable = true;
+  f.deps.receptions!.listPage = async after => {
+    const result = await original(after);
+    return unavailable ? { ...result, items: result.items.slice(1), unavailableCount: 1 } : result;
+  };
+  unavailable = false;
+  const full = await client(f);
+  unavailable = true;
+  f.change();
+  await full.tick();
+  assert.equal(full.row(1), null);
+  assert.ok(full.row(2));
+  assert.match(full.document.root.textContent, /情報を取得できませんでした/);
+  const count = full.requests.length;
+  unavailable = false;
+  await full.tick();
+  assert.equal(full.requests.length, count + 2, 'incomplete state forces refresh at unchanged version');
+  assert.ok(full.row(1) && full.row(2));
+  assert.doesNotMatch(full.document.root.textContent, /情報を取得できませんでした/);
+});
+
 test('a new pending reception is shown and counted once; untouched rows keep their nodes; approval clears it', async () => {
   const f = fixture(); const c = await client(f); const first = c.row(1)!, input = first.querySelector('input[name="confirm"]') as FakeElement;
   input.value = 'synthetic-0';

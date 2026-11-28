@@ -29,7 +29,7 @@ type Index = {
 };
 type Options = { index: Index; owner(objectId: string): Owner | null; readSettings(): Promise<unknown> };
 const PAGE_SIZE = 100;
-const OWNER_READ_CONCURRENCY = 6;
+const OWNER_READ_CONCURRENCY = 4;
 
 /** Bound concurrent cross-object reads and preserve index order, without waiting
  * for the slowest member of a batch before starting another independent read. */
@@ -43,6 +43,17 @@ async function mapOwnerReads<T, R>(items: readonly T[], read: (item: T) => Promi
     }
   }));
   return results;
+}
+
+/** Detach plain RPC data and promptly release the response capability. */
+function snapshotRpc<T>(value: T): T {
+  try { return structuredClone(value); }
+  finally {
+    if (value !== null && typeof value === 'object') {
+      const dispose = (value as { [Symbol.dispose]?: () => void })[Symbol.dispose];
+      if (typeof dispose === 'function') dispose.call(value);
+    }
+  }
 }
 
 /** Management values always come from the owning DO, never from index extras. */
@@ -76,12 +87,12 @@ export function createReceptionAdminPort(options: Options): ReceptionAdminPort {
     const owner = options.owner(summary.objectId);
     if (!owner) return null;
     const listState = forList && owner.adminReceptionListState
-      ? structuredClone(await owner.adminReceptionListState()) : undefined;
+      ? snapshotRpc(await owner.adminReceptionListState()) : undefined;
     if (listState === null) return null;
     const raw = listState === undefined ? await owner.adminReception() : listState.reception;
     if (raw === null) return null;
     // workerd adds a non-enumerable Symbol.dispose to RPC results; keep only the structured data, then validate it as before.
-    const reception = validateReception(structuredClone(raw));
+    const reception = validateReception(listState === undefined ? snapshotRpc(raw) : raw);
     if (reception.receptionId !== requestedId || reception.objectId !== summary.objectId) return null;
     if (listState && (!Array.isArray(listState.deletedRecordIds) ||
         listState.deletedRecordIds.some(id => !reception.trials.some(trial => trial.recordId === id)) ||
@@ -102,7 +113,7 @@ export function createReceptionAdminPort(options: Options): ReceptionAdminPort {
   return {
     async protocol() {
       // Transport attributes (workerd's Symbol.dispose) are dropped before strict validation; damage throws.
-      const s = validateReceptionSettings(structuredClone(await options.readSettings()));
+      const s = validateReceptionSettings(snapshotRpc(await options.readSettings()));
       if (!s.protocol) return { configured:false, mode:s.mode.value };
       const p = s.protocol.protocol;
       return { configured:true, mode:s.mode.value, protocolId:p.protocolId, revision:s.protocol.revision, sha256:s.protocol.sha256,
@@ -111,24 +122,34 @@ export function createReceptionAdminPort(options: Options): ReceptionAdminPort {
         ...(usesThreeFigures(p) ? {} : { legacyFigures:true as const }) };
     },
     async listPage(after) {
-      const summaries = await options.index.listReceptions();
+      const summaries = snapshotRpc(await options.index.listReceptions());
       const position = after ? summaries.findIndex(r => r.receptionId === after) : -1;
       const start = position + 1, page = summaries.slice(start,start+PAGE_SIZE), items: ReceptionAdminRow[] = [];
       const seen = new Set<string>(), liveRecords: string[] = [];
       const sources = new Map<string, { owner: Owner; listState?: ReceptionListState }>();
-      const resolvedRows = await mapOwnerReads(page, async summary => {
-        const resolved = await resolve(summary, summary.receptionId, true);
+      async function readRow(summary: ReceptionSummary, fast: boolean) {
+        const resolved = await resolve(summary, summary.receptionId, fast);
         if (!resolved) return null;
         const item = project(resolved.reception);
         if (options.index.recordRoles) {
           const ids = item.trials.flatMap(trial => trial.recordId === null ? [] : [trial.recordId]);
           const deleted = new Set(resolved.listState?.deletedRecordIds ??
-            (ids.length ? await resolved.owner.adminDeletedRecordIds?.(ids) : []));
+            (ids.length ? snapshotRpc(await resolved.owner.adminDeletedRecordIds?.(ids)) : []));
           for (const trial of item.trials) {
             if (trial.recordId !== null && deleted.has(trial.recordId)) trial.recordDeleted = true;
           }
         }
         return { item, resolved };
+      }
+      let unavailableCount = 0;
+      const resolvedRows = await mapOwnerReads(page, async summary => {
+        try { return await readRow(summary, true); }
+        catch {
+          // A failed RPC stub is not reusable. resolve() obtains a fresh stub
+          // and the original narrow read path, with the same identity checks.
+          try { return await readRow(summary, false); }
+          catch { unavailableCount++; return null; }
+        }
       });
       for (const result of resolvedRows) {
         if (!result || seen.has(result.item.receptionId)) continue;
@@ -141,7 +162,7 @@ export function createReceptionAdminPort(options: Options): ReceptionAdminPort {
         items.push(item);
       }
       if (liveRecords.length && options.index.recordRoles) {
-        const roles = await options.index.recordRoles(liveRecords, true);
+        const roles = snapshotRpc(await options.index.recordRoles(liveRecords, true));
         for (const item of items) for (const trial of item.trials) {
           if (trial.recordId === null || trial.recordDeleted) continue;
           const role = roles[trial.recordId];
@@ -167,14 +188,15 @@ export function createReceptionAdminPort(options: Options): ReceptionAdminPort {
           if (recoverable !== false) visible.push(item);
         }
       }
-      return { items: visible, next:start+PAGE_SIZE < summaries.length ? page.at(-1)!.receptionId : null };
+      return { items: visible, next:start+PAGE_SIZE < summaries.length ? page.at(-1)!.receptionId : null,
+        ...(unavailableCount ? { unavailableCount } : {}) };
     },
     async version(since) {
       // Change detection only: index rows and settings are hashed, never shown; management values still come from the owner.
       const [rows, settings, participantRoleRevision] = await Promise.all([
         options.index.listReceptions(), options.readSettings(), options.index.participantRoleRevision?.(),
       ]);
-      const s = validateReceptionSettings(structuredClone(settings)), list = structuredClone(rows);
+      const s = validateReceptionSettings(snapshotRpc(settings)), list = snapshotRpc(rows);
       if (!Array.isArray(list)) throw new Error('reception_unavailable');
       const material = JSON.stringify({ receptions: list.map(r => [r?.receptionId, r?.number, r?.status, r?.revision,
         Array.isArray(r?.trials) ? r.trials.map(t => t?.recordId ?? null) : null]),

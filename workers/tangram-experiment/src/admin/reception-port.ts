@@ -61,7 +61,7 @@ export type ReceptionAdminPort = {
   /** No default research values: unsaved is configured:false; unreadable or damaged settings throw. */
   protocol(): Promise<ReceptionProtocolStatus>;
   /** The index supplies pending-first pagination; rendering also groups pending rows within a page. */
-  listPage(after: string | null): Promise<{ items: ReceptionAdminRow[]; next: string | null }>;
+  listPage(after: string | null): Promise<{ items: ReceptionAdminRow[]; next: string | null; unavailableCount?: number }>;
   /** Read authoritative participant state, rather than trusting an index snapshot for a mutation. */
   get(receptionId: string): Promise<ReceptionAdminRow | null>;
   setParticipantRole?(receptionId: string, role: ParticipantRole, expectedRecordIds: string[] | null): Promise<ParticipantRoleResult>;
