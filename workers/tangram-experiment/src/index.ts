@@ -949,13 +949,19 @@ export class TangramSession extends DurableObject<Env> {
     const run = this.browserQueue.then(async () => {
       const now = Date.now(), retained: BrowserSession[] = [];
       let empty = 0;
-      for (const saved of await this.browserSessions()) {
-        const reclaim = now - Date.parse(saved.createdAt) >= EMPTY_TAB_SESSION_MAX_AGE_MS;
-        if (await this.tabObject(saved.doName).inspectEmptyTabSession(reclaim)) {
-          if (reclaim) continue;
-          empty++;
+      const savedSessions = await this.browserSessions();
+      // Independent children can be inspected concurrently. Keep the catalog
+      // mutation serialized and bound fan-out to avoid overloading the Worker.
+      for (let offset = 0; offset < savedSessions.length; offset += 4) {
+        const batch = await Promise.all(savedSessions.slice(offset, offset + 4).map(async saved => {
+          const reclaim = now - Date.parse(saved.createdAt) >= EMPTY_TAB_SESSION_MAX_AGE_MS;
+          return { saved, reclaim, empty: await this.tabObject(saved.doName).inspectEmptyTabSession(reclaim) };
+        }));
+        for (const item of batch) {
+          if (item.empty && item.reclaim) continue;
+          if (item.empty) empty++;
+          retained.push(item.saved);
         }
-        retained.push(saved);
       }
       if (empty >= MAX_EMPTY_TAB_SESSIONS) {
         await this.storage.put({ [BROWSER_SESSIONS_KEY]: retained });
@@ -988,22 +994,25 @@ export class TangramSession extends DurableObject<Env> {
       if (!(error instanceof ReceptionError)) throw error;
       receptionUnreadable = true;
     }
-    const active = await this.storage.get<StoredTrial>(ACTIVE_KEY);
+    const [active, ids] = await Promise.all([this.storage.get<StoredTrial>(ACTIVE_KEY), ledgerIds(this.storage)]);
     const records = [];
-    for (const id of await ledgerIds(this.storage)) {
-      const record = await this.readOwnedArchive(id);
-      if (!record) continue;
-      const questionnaire = await readQuestionnaire<Questionnaire>(this.storage, id);
-      records.push({ entry: recordListEntry(record, id === active?.recordId, questionnaire), questionnaireUpdatedAt: questionnaire?.updatedAt });
+    // Project each record immediately; do not retain large dialogue snapshots.
+    for (let offset = 0; offset < ids.length; offset += 4) {
+      const batch = await Promise.all(ids.slice(offset, offset + 4).map(async id => {
+        const [record, questionnaire] = await Promise.all([
+          this.readOwnedArchive(id), readQuestionnaire<Questionnaire>(this.storage, id),
+        ]);
+        return record ? { entry: recordListEntry(record, id === active?.recordId, questionnaire), questionnaireUpdatedAt: questionnaire?.updatedAt } : null;
+      }));
+      for (const record of batch) if (record) records.push(record);
     }
     return summarizeBrowserSession({ sessionId, createdAt, reception, receptionUnreadable, protocolAvailable,
       activeRecordId: active?.recordId ?? null, records });
   }
 
   async browserHistory(): Promise<{ receptionMode: ReceptionMode; sessions: BrowserSessionSummary[] }> {
-    const settings = await this.settings().catch(() => null);
+    const [settings, entries] = await Promise.all([this.settings().catch(() => null), this.browserSessions()]);
     const protocolAvailable = Boolean(settings?.protocol);
-    const entries = await this.browserSessions();
     const results = await Promise.all([
       this.tabHistorySummary('legacy', null, protocolAvailable),
       ...entries.map(({ sessionId, doName, createdAt }) =>

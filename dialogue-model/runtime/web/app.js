@@ -709,6 +709,7 @@ function renderResults() {
 }
 function setControls() {
   renderLeave();
+  $("new-session").disabled = working || sessionsReceptionMode === "unavailable";
   $("start-trial").disabled = !canStart();
   renderProgress();
   $("utterance").disabled = !canEditComposer();
@@ -1582,7 +1583,7 @@ function renderEntry(sessions) {
   const sorted = [...sessions].sort((a, b) => String(b.updatedAt ?? b.createdAt ?? "").localeCompare(String(a.updatedAt ?? a.createdAt ?? "")));
   $("session-history").hidden = !sorted.length;
   $("session-list").replaceChildren(...sorted.map(sessionRow));
-  $("new-session").disabled = sessionsReceptionMode === "unavailable";
+  $("new-session").disabled = working || sessionsReceptionMode === "unavailable";
   if (sessionsReceptionMode === "unavailable") $("notice").textContent = errors.reception_unavailable;
   $("entry-stage").hidden = false;
 }
@@ -1600,9 +1601,12 @@ function leaveSession() {
   setControls();
 }
 async function loadSessions() {
+  const epoch = stateEpoch;
   const value = await api("/api/sessions", undefined, undefined, null);
-  sessionsReceptionMode = ["on", "off", "unavailable"].includes(value?.receptionMode) ? value.receptionMode : "off";
   const list = Array.isArray(value?.sessions) ? value.sessions.filter((item) => item && typeof item.sessionId === "string") : [];
+  // An earlier request must not prune a newly created session's local draft.
+  if (epoch !== stateEpoch) return list;
+  sessionsReceptionMode = ["on", "off", "unavailable"].includes(value?.receptionMode) ? value.receptionMode : "off";
   const browserRecordIds = list.flatMap((item) => [
     ...(typeof item.activeRecordId === "string" ? [item.activeRecordId] : []),
     ...(Array.isArray(item.records) ? item.records.map((r) => r?.recordId).filter((id) => typeof id === "string") : []),
@@ -1611,10 +1615,26 @@ async function loadSessions() {
   pruneLocalSurveys(browserRecordIds);
   return list;
 }
+function showLoadingEntry() {
+  renderEntry([]);
+  // The history is optional for starting a new reception. The current server
+  // state returned by the create request remains authoritative.
+  $("session-history").hidden = false;
+  $("session-list").textContent = "読み込み中…";
+}
 async function showEntry() {
   leaveSession();
-  try { renderEntry(await loadSessions()); }
-  catch (error) { $("notice").textContent = participantMessage(error.code); }
+  sessionsReceptionMode = null;
+  const epoch = stateEpoch;
+  showLoadingEntry();
+  try {
+    const sessions = await loadSessions();
+    if (epoch === stateEpoch && entryMode()) renderEntry(sessions);
+  } catch (error) {
+    if (epoch === stateEpoch && entryMode()) {
+      $("session-list").textContent = "履歴を取得できませんでした。";
+    }
+  }
 }
 function bindSession(sessionId) {
   try { tabSession()?.bind(sessionId); } catch { /* The binding is only a reload convenience. */ }
@@ -1622,7 +1642,7 @@ function bindSession(sessionId) {
 }
 // An explicit choice: a new session and, when receptions are on, a new reception.
 async function newSession() {
-  if (working) return;
+  if (working || sessionsReceptionMode === "unavailable") return;
   stateEpoch++; working = true; $("new-session").disabled = true; setControls();
   let reusedId = pendingEmptySessionId;
   const createdNow = !reusedId;
@@ -1636,14 +1656,18 @@ async function newSession() {
       state = created.state ?? { trial: null };
     }
     bindSession(reusedId);
-    $("entry-stage").hidden = true; $("notice").textContent = "";
-    if (sessionsReceptionMode === "on" || (sessionsReceptionMode === null && state.reception)) {
+    if (!createdNow) state = await api("/api/state");
+    if (state.reception?.status === "unavailable") throw Object.assign(new Error("reception_unavailable"), { code: "reception_unavailable" });
+    // Do not depend on a possibly stale history response or global mode.
+    if (state.reception?.status === "waiting" && !state.reception.number) {
       try { state = await api("/api/reception", {}); }
-      catch (error) { if (error.status !== 404) throw error; }
-    } else if (!createdNow) {
-      state = await api("/api/state");
+      catch (error) {
+        if (error.status !== 404) throw error;
+        state = await api("/api/state");
+      }
     }
     pendingEmptySessionId = null;
+    $("entry-stage").hidden = true; $("notice").textContent = "";
     render(state);
   } catch (error) {
     // Keep the already-created empty child for retry without stranding the user on a blank page.
@@ -1652,6 +1676,23 @@ async function newSession() {
     $("entry-stage").hidden = false;
     $("new-session").disabled = false;
     $("notice").textContent = participantMessage(error?.code);
+    // Compatibility for an older server when the explicit click won the race
+    // against the initial history request.
+    if (createdNow && !reusedId && [404, 405].includes(error.status) && sessionsReceptionMode === null) {
+      cookieMode = true;
+      $("entry-stage").hidden = true;
+      working = false;
+      await operate(startupAdmission);
+      return;
+    }
+    if ($("session-list").textContent === "読み込み中…") {
+      const epoch = stateEpoch;
+      loadSessions().then(sessions => {
+        if (epoch === stateEpoch && entryMode()) renderEntry(sessions);
+      }).catch(() => {
+        if (epoch === stateEpoch && entryMode()) $("session-list").textContent = "履歴を取得できませんでした。";
+      });
+    }
   } finally { working = false; setControls(); }
 }
 // An explicit resume binds this tab to that session and shows its server state.
@@ -1741,13 +1782,20 @@ async function startup() {
     }
   }
   clearDraft();
+  const epoch = stateEpoch;
+  showLoadingEntry();
   let sessions;
   try { sessions = await loadSessions(); }
   catch (error) {
+    if (epoch !== stateEpoch || !entryMode()) return;
     // An older server has no session list: the single cookie session as before.
-    if ([404, 405].includes(error.status)) { cookieMode = true; operate(startupAdmission); return; }
-    $("notice").textContent = participantMessage(error.code); return;
+    if ([404, 405].includes(error.status)) {
+      cookieMode = true; $("entry-stage").hidden = true; operate(startupAdmission); return;
+    }
+    $("session-list").textContent = "履歴を取得できませんでした。";
+    return;
   }
+  if (epoch !== stateEpoch || !entryMode()) return;
   // The first visit of a browser keeps the QR experience: a number right away.
   if (!sessions.length && sessionsReceptionMode !== "unavailable") { await newSession(); return; }
   renderEntry(sessions);
@@ -1758,7 +1806,7 @@ $("leave-session").addEventListener("click", async () => {
   const action = leaveAction;
   if (action === "back") { showEntry(); return; }
   leaveSession(); sessionsReceptionMode = null;
-  try { await loadSessions(); } catch { /* Falls back to the new state's reception. */ }
+  showLoadingEntry();
   await newSession();
 });
 startup();

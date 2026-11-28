@@ -50,7 +50,7 @@ const completedTrial = (id = 'r1') => ({ version: 2, sessionId: id, status: 'com
   events: [{ id: 0, speaker: 'human', text: 'hello' }], humanSubmission: { s1: 'a' }, result: { provisional: true, success: true, matchedCount: 1, total: 1, figures: [{ human: { slot: 's1', rawName: 'a' }, ai: { rawName: 'a' }, matched: true }] } });
 const FORM = { version: 'v', notice: '', items: [{ id: 'q1', text: 'Q1', min: 1, max: 7, minLabel: 'a', maxLabel: 'b' }] };
 
-type Server = { mode?: string; sessions?: any[]; states?: Record<string, any>; reviews?: Record<string, any>; questionnaire?: any; saveStatus?: number; legacySessions404?: boolean; receptionStatus?: number; stateStatus?: Record<string, number>; local?: Map<string, string> };
+type Server = { historyGate?: Promise<void>; historyStatus?: number; mode?: string; sessions?: any[]; states?: Record<string, any>; reviews?: Record<string, any>; questionnaire?: any; saveStatus?: number; legacySessions404?: boolean; receptionStatus?: number; stateStatus?: Record<string, number>; local?: Map<string, string> };
 async function ui(resolved: any, server: Server = {}, hash = '') {
   const { root, e } = makeDOM();
   const calls: { path: string; method: string; body: any; session: string | null }[] = [], timers = new Map<number, { callback: Function; delay: number }>();
@@ -73,7 +73,12 @@ async function ui(resolved: any, server: Server = {}, hash = '') {
     fetch: async (path: string, opts: any) => {
       const body = opts?.body ? JSON.parse(opts.body) : undefined, session = opts?.headers?.['X-Tab-Session'] ?? null, method = opts?.method ?? 'GET';
       calls.push({ path, method, body, session });
-      if (path === '/api/sessions' && method === 'GET') return srv.legacySessions404 ? reply(404, { error: 'not_found' }) : reply(200, { receptionMode: srv.mode, sessions: srv.sessions });
+      if (path === '/api/sessions' && method === 'GET') {
+        const snapshot = { receptionMode: srv.mode, sessions: srv.sessions };
+        if (srv.historyGate) await srv.historyGate;
+        if (srv.historyStatus) return reply(srv.historyStatus, { error: 'trial_unavailable' });
+        return srv.legacySessions404 ? reply(404, { error: 'not_found' }) : reply(200, snapshot);
+      }
       if (path === '/api/sessions') { const sessionId = '00000000-0000-4000-8000-00000000000' + ++counter; srv.states[sessionId] = { trial: null, ...(srv.mode === 'on' ? { reception: { number: null, status: 'waiting', revision: 0 } } : {}) }; return reply(200, { sessionId, state: srv.states[sessionId] }); }
       if (path === '/api/reception') {
         if (srv.receptionStatus) return reply(srv.receptionStatus, { error: 'reception_unavailable' });
@@ -117,6 +122,31 @@ test('a new tab with earlier sessions shows the entry screen, not a conversation
   assert.equal(x.text(x.e['entry-stage']).includes(SECRET), false, 'no conversation text from the session summaries');
   assert.equal(x.text().includes('sess-'), false, 'no internal ids on the page');
   assert.equal(x.tabCalls.length, 0);
+});
+
+test('entry is usable while history is pending; late empty history cannot create a second reception', async () => {
+  let release!: () => void;
+  const historyGate = new Promise<void>(resolve => { release = resolve; });
+  const x = await ui(fresh, { historyGate, sessions: [] });
+  assert.equal(x.e['entry-stage'].hidden, false);
+  assert.equal(x.e['new-session'].disabled, false);
+  assert.equal(x.e['session-list'].textContent, '読み込み中…');
+  x.e['new-session'].fire('click'); await tick();
+  assert.match(x.text(x.e['start-stage']), /受付番号 042/u);
+  release(); await tick();
+  assert.equal(x.e['entry-stage'].hidden, true);
+  assert.equal(x.e['start-stage'].hidden, false);
+  assert.equal(x.calls.filter(c => c.path === '/api/sessions' && c.method === 'POST').length, 1);
+  assert.equal(x.calls.filter(c => c.path === '/api/reception').length, 1);
+});
+
+test('failure of optional history does not block a new reception', async () => {
+  const x = await ui(fresh, { historyStatus: 503 });
+  assert.equal(x.e['entry-stage'].hidden, false);
+  assert.equal(x.e['new-session'].disabled, false);
+  assert.equal(x.e['notice'].textContent, '');
+  x.e['new-session'].fire('click'); await tick();
+  assert.match(x.text(x.e['start-stage']), /受付番号 042/u);
 });
 
 test('each server state has its own badge and actions; a finished session only offers viewing', async () => {
