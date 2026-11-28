@@ -392,7 +392,7 @@ export type JevTurnOptions = {
   dialoguePolicy?: DialoguePolicy;
   participantPrompts?: boolean;
   /** The stimulus rotation of the trial (holistic_v5 reads it); omitted means relative_pm90, the original mode. */
-  rotationMode?: "relative_pm90" | "relative_0";
+  rotationMode?: JevDecisionInput["rotationMode"];
   /** Offline replay can request the original retry wire text for a historical tape. */
   generationRetryVersion?: GenerationRetryVersion;
   postGenerationCheck?: PostGenerationCheck;
