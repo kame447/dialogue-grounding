@@ -223,7 +223,11 @@ const chatOpen = () => dialogueOpen() && participantStage() === "chat";
 const canEditComposer = () => chatOpen() && !reviewing;
 const canSendMessage = () => canEditComposer() && !working && !dialogueStopped() && !openingPending() && !awaitingOpening();
 const aiThinking = () => current?.recovering === true || current?.aiStatus === "thinking" || serverBusy;
-const awaitingOpening = () => dialogueOpen() && events().length === 0 && (aiThinking() || current?.aiStatus === "error");
+// The current naming task identifies its trial by sessionId and withholds
+// all events while its generated greeting is pending. A legacy trialId can
+// have an empty history while it is already processing dialogue.
+const awaitingOpening = () => dialogueOpen() && typeof current.sessionId === "string" &&
+  events().length === 0 && (aiThinking() || current.aiStatus === "error");
 const unconfirmedMessage = () => pending.some((item) => item.status !== "rejected");
 const dialogueSettled = () => dialogueOpen() && !aiThinking() && current?.aiStatus !== "error" &&
   !dialogueStopped() && !openingPending() && !sending && !unconfirmedMessage();
@@ -1412,6 +1416,7 @@ async function postNames(attempt) {
       pendingSubmission = null; storeDraft();
       $("notice").textContent = participantMessage(error.code);
       operationStop = $("notice").textContent === STOPPED ? progressSignature() : null;
+      if (error.code === "trial_changed" || error.code === "trial_interrupted") void refreshState();
     }
   } finally {
     attempt.posting = false;

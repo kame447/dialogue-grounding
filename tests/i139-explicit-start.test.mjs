@@ -71,10 +71,12 @@ function trial(completed = false) {
 }
 async function ui(initial = null, handler) {
   const { root, e } = makeDOM();
-  let state = { trial: initial }, timerId = 0;
+  let state = { trial: initial }, timerId = 0, now = 10000;
   const calls = [], timers = new Map(), delays = new Map(), frames = new Map();
   const storage = new Map();
   runInNewContext(script, {
+    Date: class extends Date { static now() { return now; } },
+    crypto: { randomUUID: () => START_INTENT },
     sessionStorage: { getItem: (key) => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value), removeItem: (key) => storage.delete(key) },
     document: { getElementById: (id) => e[id], createElement: (tag) => new Element(tag), createElementNS: (_, tag) => new Element(tag) },
     setTimeout: (callback, delay = 0) => { timers.set(++timerId, callback); delays.set(timerId, delay); return timerId; },
@@ -98,13 +100,22 @@ async function ui(initial = null, handler) {
     timersAt: (delay) => [...timers].filter(([id]) => delays.get(id) === delay).map(([, callback]) => callback),
     frame: async () => { const callbacks = [...frames.values()]; frames.clear(); await run(callbacks); },
     runTimers: async (delay) => {
+      now += delay;
       const callbacks = [];
       for (const [id, callback] of timers) if (delays.get(id) === delay) { callbacks.push(callback); timers.delete(id); delays.delete(id); }
       await run(callbacks);
     },
-    poll: async () => { const callbacks = [...timers.values()]; timers.clear(); delays.clear(); await run(callbacks); },
+    poll: async () => {
+      const delay = [...delays.values()].find((value) => [700, 2000, 5000].includes(value));
+      if (delay === undefined) return;
+      now += delay;
+      const callbacks = [];
+      for (const [id, callback] of timers) if (delays.get(id) === delay) { callbacks.push(callback); timers.delete(id); delays.delete(id); }
+      await run(callbacks);
+    },
   };
 }
+const START_INTENT = "00000000-0000-4000-8000-000000000001";
 const starts = (calls) => calls.filter((call) => call.path === "/api/start");
 const visibleText = (node) => node.hidden || (["dialog", "head"].includes(node.tagName) && !node.open) ? "" :
   node._text + node.children.map(visibleText).join("");
@@ -144,7 +155,7 @@ test("only the start button posts version 2 once, including a double click in fl
   e["start-trial"].fire("click"); e["start-trial"].fire("click");
   await tick();
   assert.equal(e["start-trial"].disabled, true);
-  assert.deepEqual(starts(calls), [{ path: "/api/start", method: "POST", body: { version: 2 } }]);
+  assert.deepEqual(starts(calls), [{ path: "/api/start", method: "POST", body: { version: 2, startIntentId: START_INTENT } }]);
   held.release(); await tick();
   assert.equal(e["start-stage"].hidden, true);
   assert.equal(e.trial.hidden, false);
@@ -179,7 +190,7 @@ test("waiting does not render conditions, strategy, seed or internal identifiers
   assert.equal(starts(calls).length, 0);
 });
 
-test("a failed start stays on waiting and never retries without another click", async () => {
+test("an unaccepted start waits, then resends the same intent after a fresh state read", async () => {
   let reject = true;
   const { e, calls, poll } = await ui(null, ({ path, setState }) => {
     if (path !== "/api/start") return;
@@ -189,27 +200,34 @@ test("a failed start stays on waiting and never retries without another click", 
   assert.ok(e["start-trial"]);
   e["start-trial"].fire("click"); await tick();
   assert.equal(e["start-stage"].hidden, false);
-  assert.equal(e["start-trial"].disabled, false);
-  assert.match(e.notice.textContent, /試行を開始できませんでした/u);
+  assert.equal(e["start-trial"].disabled, true);
+  assert.match(e["start-message"].textContent, /試行を準備しています/u);
+  const initial = starts(calls)[0];
+  reject = false;
   await poll(); await poll();
   assert.equal(starts(calls).length, 1);
-  reject = false; e["start-trial"].fire("click"); await tick();
+  await poll();
   assert.equal(starts(calls).length, 2);
+  assert.deepEqual(starts(calls)[1], initial);
+  assert.equal(calls[calls.lastIndexOf(starts(calls)[1]) - 1].path, "/api/state");
   assert.equal(e["start-stage"].hidden, true);
   assert.equal(e.trial.hidden, false);
 });
 
 const actions = [
   ["/api/message", (e) => { e.utterance.value = "送ろうとした下書き"; e.chat.fire("submit"); }],
-  ["/api/names", (e) => e["confirm-submit"].fire("click")],
-  ["/api/retry", (e) => e["retry-chat"].fire("click")],
-  ["/api/ai-submit", (e) => e.submission.children.find((node) => node.tagName === "button" && node.handlers.click)?.fire("click")],
+  ["/api/names", (e) => {
+    e["finish-conversation"].fire("click");
+    e.board.querySelectorAll("path")[0].fire("click");
+    e["name-unknown"].fire("click");
+    e.submission.fire("submit");
+    assert.equal(e["confirm-dialog"].open, true);
+    e["confirm-submit"].fire("click");
+  }],
 ];
 for (const [path, fire] of actions) {
-  const initial = () => ({ ...trial(), ...(path === "/api/retry" ? { aiStatus: "error" } : {}),
-    ...(path === "/api/ai-submit" ? { submitted: true, status: "scoring_error" } : {}) });
   test(`i139 UI ${path} includes the displayed trial's sessionId`, async () => {
-    const { e, calls } = await ui(initial());
+    const { e, calls } = await ui(trial());
     fire(e); await tick();
     const sent = calls.find((call) => call.path === path);
     assert.ok(sent, "actual shipped action dispatched its POST");
@@ -218,7 +236,7 @@ for (const [path, fire] of actions) {
   test(`i139 UI ${path} trial_changed refreshes the trial and preserves unsent text`, async () => {
     const next = { ...trial(), sessionId: "next-private-trial", events: [{ id: "next-public", speaker: "ai", text: "次の試行の会話" }] };
     const held = gate();
-    const { e, calls, poll } = await ui(initial(), async ({ path: requested, setState }) => {
+    const { e, calls, poll } = await ui(trial(), async ({ path: requested, setState }) => {
       if (requested !== path) return;
       await held.wait; setState({ trial: next });
       return { status: 409, body: { error: "trial_changed" } };
@@ -234,6 +252,41 @@ for (const [path, fire] of actions) {
     await poll(); await poll();
     assert.equal(calls.filter((call) => call.path === path).length, 1, "an old-trial action is never replayed into the new trial");
     assert.doesNotMatch(e.history.textContent, /送ろうとした下書き/u, "the draft is not a message in the new trial");
+  });
+}
+
+for (const [label, initial, complete] of [
+  ["dialogue", { aiStatus: "error", dialogueRecovery: "retry" }, (value) => ({
+    ...value, aiStatus: "idle", dialogueRecovery: "active",
+    events: [...value.events, { id: "recovered", speaker: "ai", text: "自動で届いた返答" }],
+  })],
+  ["submission", { submitted: true, status: "submitting", finalError: "scoring_error" }, (value) => ({
+    ...value, status: "completed", aiSubmitted: true, resultLocked: true,
+  })],
+]) {
+  test(`i139 UI tracks automatic ${label} recovery with GET and keeps the same trial`, async () => {
+    let current = { ...trial(), ...initial };
+    const { e, calls, poll } = await ui(current, ({ path }) => path === "/api/state" ? { body: { trial: current } } : undefined);
+    const before = calls.length;
+    current = complete(current);
+    await poll();
+    assert.ok(calls.slice(before).some(({ path, method }) => path === "/api/state" && method === "GET"));
+    assert.equal(current.sessionId, "private-session-id");
+    if (label === "dialogue") assert.match(e.history.textContent, /自動で届いた返答/u);
+    else assert.equal(e["submission-status"].textContent, "双方の提出が完了しました。");
+    assert.equal(calls.some(({ path }) => ["/api/retry", "/api/interrupt", "/api/ai-submit"].includes(path)), false);
+  });
+
+  test(`i139 UI replaces the old ${label} recovery display when the active trial changes`, async () => {
+    let current = { ...trial(), ...initial };
+    const { e, calls, poll } = await ui(current, ({ path }) => path === "/api/state" ? { body: { trial: current } } : undefined);
+    e.utterance.value = "別の試行へ送らない下書き";
+    current = { ...trial(), sessionId: "next-private-trial", events: [{ id: "next-public", speaker: "ai", text: "次の試行の会話" }] };
+    await poll();
+    assert.match(e.history.textContent, /次の試行の会話/u);
+    assert.doesNotMatch(e.history.textContent, /別の試行へ送らない下書き/u);
+    assert.equal(e["chat-recovery"].hidden, true);
+    assert.equal(calls.filter(({ method }) => method === "POST").length, 0);
   });
 }
 
@@ -308,22 +361,26 @@ test("a trial switch cancels the opening timer and ignores an already dispatched
   assert.equal(x.e["send-message"].disabled, false);
 });
 
-test("a failed start creates no presentation timer; an explicit retry presents the opening once", async () => {
+test("a failed start creates no presentation timer; automatic recovery presents the opening once", async () => {
   let fail = true;
   const x = await ui(null, ({ path, setState }) => {
     if (path !== "/api/start") return;
     if (fail) return { status: 409, body: { error: "trial_unavailable" } };
-    setState({ trial: scriptedTrial() });
+    setState({ trial: scriptedTrial(), startIntentId: START_INTENT });
   });
   x.e["start-trial"].fire("click"); await tick();
   assert.equal(x.frames.size, 0);
   assert.equal(x.timersAt(1000).length, 0);
-  fail = false; x.e["start-trial"].fire("click"); await tick();
+  fail = false;
+  await x.poll(); await x.poll();
+  assert.equal(starts(x.calls).length, 1);
+  await x.poll();
   assert.ok(typingShown(x.e));
   await x.frame(); await x.frame(); await x.runTimers(1000);
   assert.equal(x.e.history.children.length, 1);
   assert.equal(typingShown(x.e), false);
   assert.equal(starts(x.calls).length, 2);
+  assert.deepEqual(starts(x.calls)[0].body, starts(x.calls)[1].body);
 });
 
 
@@ -344,14 +401,14 @@ test("a state poll can reveal a newly started trial before its POST returns with
   let state = { trial: null, reception: { status: "ready", revision: 1 } };
   const x = await ui(null, async ({ path }) => {
     if (path === "/api/start") {
-      state = { trial: scriptedTrial(), reception: { status: "in_progress", revision: 2 } };
+      state = { trial: scriptedTrial(), startIntentId: START_INTENT, reception: { status: "in_progress", revision: 2 } };
       await held.wait;
       return { body: state };
     }
     if (["/api/state", "/api/reception"].includes(path)) return { body: state };
   });
   x.e["start-trial"].fire("click"); await tick();
-  await x.runTimers(5000);
+  await x.runTimers(700);
   assert.equal(x.e.trial.hidden, false);
   assert.ok(typingShown(x.e));
   assert.doesNotMatch(x.e.history.textContent, /どれから話しましょうか/u);
@@ -362,4 +419,21 @@ test("a state poll can reveal a newly started trial before its POST returns with
   assert.equal(typingShown(x.e), false);
   assert.equal(x.timersAt(1000).length, 0);
   assert.equal(x.e["send-message"].disabled, false);
+  assert.equal(starts(x.calls).length, 1);
+});
+
+test("an explicitly started trial with its generated opening pending waits for that opening", async () => {
+  let current = { ...trial(), events: [], aiStatus: "thinking", recovering: true };
+  const { e, calls, poll } = await ui(current, ({ path }) => path === "/api/state"
+    ? { body: { trial: current, busy: current.aiStatus === "thinking" } } : undefined);
+  assert.equal(e["send-message"].disabled, true);
+  assert.equal(e.utterance.disabled, false);
+  e.utterance.value = "挨拶を待つ間の下書き";
+  e.chat.fire("submit");
+  assert.equal(calls.some(({ path }) => path === "/api/message"), false);
+  current = trial();
+  await poll();
+  assert.equal(e["send-message"].disabled, false);
+  assert.equal(e.utterance.value, "挨拶を待つ間の下書き");
+  assert.match(e.history.textContent, /公開された会話/u);
 });

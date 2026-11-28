@@ -589,6 +589,7 @@ requirement('v2 UI: human may compose and submit another message while AI genera
   const e = app.elements;
   assert.equal(e.utterance.disabled, false, 'AI thinking must not disable human input');
   assert.equal(e['send-message'].disabled, false);
+  assert.equal(e['finish-conversation'].disabled, true, 'finishing still waits for the current reply');
   e.utterance.value = PUBLIC[0]; e.chat.fire('submit'); await held.entered;
   e.utterance.value = PUBLIC[1]; e.chat.fire('submit');
   try {

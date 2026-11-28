@@ -64,15 +64,16 @@ function trial(id = "trial-private") {
 const tick = async () => { for (let i = 0; i < 40; i++) await Promise.resolve(); };
 async function ui(initial = trial(), handler) {
   const { root, ids: e } = makeDOM();
-  let state = { trial: initial }, timerId = 0;
+  let state = { trial: initial }, timerId = 0, now = 10000;
   const timers = new Map(), calls = [];
   runInNewContext(script, {
+    Date: class extends Date { static now() { return now; } },
     document: { getElementById: (id) => e[id], createElement: (tag) => new Element(tag), createElementNS: (_, tag) => new Element(tag) },
     FormData: class {
       constructor(form) { this.values = Object.entries(form.elements).map(([name, node]) => [name, node.value]); }
       get(name) { return this.values.find(([key]) => key === name)?.[1] ?? null; }
     },
-    setTimeout: (callback) => { timers.set(++timerId, callback); return timerId; },
+    setTimeout: (callback, delay = 0) => { timers.set(++timerId, { callback, at: now + delay }); return timerId; },
     clearTimeout: (id) => timers.delete(id),
     fetch: async (path, options) => {
       const body = options?.body ? JSON.parse(options.body) : undefined;
@@ -90,8 +91,16 @@ async function ui(initial = trial(), handler) {
     },
   });
   await tick();
-  return { e, root, calls, getState: () => state, setState: (value) => { state = value; },
-    poll: async () => { const callbacks = [...timers.values()]; timers.clear(); for (const cb of callbacks) cb(); await tick(); } };
+  const advance = async (millis) => {
+    const target = now + millis;
+    while (true) {
+      const next = [...timers].filter(([, timer]) => timer.at <= target).sort((a, b) => a[1].at - b[1].at)[0];
+      if (!next) { now = target; return; }
+      timers.delete(next[0]); now = next[1].at; next[1].callback(); await tick();
+    }
+  };
+  return { e, root, calls, getState: () => state, setState: (value) => { state = value; }, advance,
+    poll: async () => { if (timers.size) await advance(Math.min(...[...timers.values()].map(timer => timer.at)) - now); } };
 }
 const paths = (e) => e.board.querySelectorAll("path");
 const save = (e, path, text) => { path.fire("click"); e["figure-name"].value = text; e["name-form"].fire("submit"); };
@@ -165,12 +174,24 @@ test("AI thinking keeps composer active; consecutive sends are optimistic and po
   assert.doesNotMatch(JSON.stringify(calls), /秘密のローカルメモ/u);
 });
 
-test("uncertain send failure is never retried or sent through legacy fallback", async () => {
-  const { e, calls, poll } = await ui(trial(), ({ path }) => path === "/api/message" ? { status: 502, body: { error: "ai_unavailable" } } : undefined);
-  e.utterance.value = "送信の確認が必要"; e.chat.fire("submit"); await tick(); await poll();
+test("an uncertain send retries with its original clientId and never falls through to the legacy endpoint", async () => {
+  let sent = false;
+  const { e, calls, advance } = await ui(trial(), ({ path }) => {
+    if (path !== "/api/message" || sent) return;
+    sent = true;
+    return { status: 502, body: { error: "ai_unavailable" } };
+  });
+  e.utterance.value = "送信の確認が必要"; e.chat.fire("submit"); await tick();
+  await advance(1999);
   assert.equal(calls.filter((call) => call.path === "/api/message").length, 1);
+  assert.match(e["chat-status"].textContent, /入力を保持して送り直しています/u);
+  assert.equal(e.history.querySelectorAll("button").length, 0);
+  await advance(1);
+  const messages = calls.filter((call) => call.path === "/api/message");
+  assert.equal(messages.length, 2);
+  assert.deepEqual(messages[0].body, messages[1].body);
   assert.equal(calls.some((call) => call.path === "/api/turn"), false);
-  assert.match(e.history.textContent, /自動では再送されないため、「再送」を押してください/u);
+  assert.equal(e.history.querySelectorAll("p").filter(p => p.textContent === "送信の確認が必要").length, 1);
   assert.equal(e.utterance.disabled, false);
 });
 
