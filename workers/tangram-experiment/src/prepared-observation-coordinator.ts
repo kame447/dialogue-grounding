@@ -100,7 +100,9 @@ export class PreparedObservationCoordinator {
       await this.enqueue(context);
       await this.schedule(context.specs);
       return { ok: true };
-    } catch { return { ok: false, error: 'unavailable' }; }
+    } catch (error) {
+      return { ok: false, error: error instanceof PreparedObservationPoolError && error.code === 'conflict' ? 'conflict' : 'unavailable' };
+    }
   }
 
   async claim(input: PreparedClaimRequest) {
