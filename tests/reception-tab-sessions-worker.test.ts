@@ -110,6 +110,7 @@ async function harness(receptionMode: 'on' | 'off' = 'off') {
         record.strategy = input.strategy;
         record.options.referenceMemory = input.referenceMemory;
         record.options.rotationMode = input.rotationMode;
+        if (input.openingMode) record.options.openingMode = input.openingMode;
         if (input.figureSelection) record.options.figureSelection = input.figureSelection; // frozen by a v3 plan
         record.stimulus = { version: 'synthetic-stimulus-v1', rotationMode: input.rotationMode, angles: { human: { h1: 0 }, ai: { a1: 0 } } };
       }

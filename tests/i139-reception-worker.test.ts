@@ -85,6 +85,7 @@ function harness(overrides: Record<string, unknown> = {}, settings: 'on' | 'unse
         if (!input.restore) { record.recordId = crypto.randomUUID(); record.seed = input.seed; record.strategy = input.strategy; record.options.referenceMemory = input.referenceMemory;
           // Stands in for implementer A's task: new records carry the mode and generated stimulus.
           record.options.rotationMode = input.rotationMode;
+          if (input.openingMode) record.options.openingMode = input.openingMode;
           if (input.figureSelection) record.options.figureSelection = input.figureSelection; // frozen by a v3 plan; legacy-v1 needs no stimulus metadata
           record.stimulus = { version: 'synthetic-stimulus-v1', rotationMode: input.rotationMode, angles: { human: { h1: 0 }, ai: { a1: 0 } } }; }
         const task = { getState: () => ({ version: 2, sessionId: record.recordId, status: record.status, events: [], submitted: record.status === 'completed', aiSubmitted: record.status === 'completed' }),

@@ -146,6 +146,30 @@ for (const strategy of ['repair-first', 'bypass-enabled']) test(`${strategy}: fi
   assert.equal(privateState.graph.records.length, 0);
 });
 
+for (const strategy of ['repair-first', 'bypass-enabled']) test(`${strategy}: scripted_v1 is recorded, restored without generation, and rejects changed opening metadata`, async () => {
+  const client = clientFixture();
+  let saved;
+  const options = { strategy, referenceMemory: true, openingMode: 'scripted_v1',
+    onPersist(record) { saved = structuredClone(record); } };
+  const task = await makeTask(client, options);
+  const first = task.getState();
+  assert.equal(first.openingMode, 'scripted_v1');
+  assert.equal(first.events[0].text, 'どれから話しましょうか？');
+  assert.equal(saved.options.openingMode, 'scripted_v1');
+  assert.equal(saved.events[0].origin, 'scripted_opening');
+  assert.equal(client.calls.length, 0);
+  const record = structuredClone(saved);
+  const restored = await makeTask(client, { ...options, restore: record });
+  assert.deepEqual(restored.getState(), first);
+  assert.equal(client.calls.length, 0);
+  for (const mutate of [value => { value.options.openingMode = 'unknown'; },
+    value => { value.events[0].origin = 'generated_opening'; },
+    value => { value.queueState.events[0].text = 'changed'; }]) {
+    const invalid = structuredClone(record); mutate(invalid);
+    await assert.rejects(makeTask(client, { ...options, restore: invalid }), { code: 'invalid_options' });
+  }
+});
+
 test('leading AI event becomes assistant history; memory cites the first human at turn 2', async () => {
   const reference = { slots: [slot], epistemic: 'grounded', intent: 'feature_assertion',
     feature: { slot, feature: '細長い', polarity: 'confirmed' }, nameAcceptance: null, deferSlot: null, revisitSlot: null };
@@ -291,7 +315,8 @@ test('HTTP reload/polling keeps one opening and duplicate clientId POST returns 
   assert.equal(start.status, 200);
   const startedTrial = (await start.json()).trial;
   const first = startedTrial.events;
-  assert.equal(first.length, 1); assert.equal(first[0].text, OPENING);
+  assert.equal(first.length, 1); assert.equal(first[0].text, 'どれから話しましょうか？');
+  assert.equal(startedTrial.openingMode, 'scripted_v1');
   await (await request('/')).text();
   for (let i = 0; i < 3; i++) assert.deepEqual((await (await request('/api/state')).json()).trial.events, first);
   assert.equal(client.calls.length, 0);
