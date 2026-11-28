@@ -356,10 +356,8 @@ export function renderReceptions(items: ReceptionAdminRow[], next: string | null
       ? `<a href="/admin/record/${escapeHtml(lastRecord)}/experiment" target="_blank" rel="noopener noreferrer">実験画面を開く</a>` : '';
     const usage = entry.hasUnrecordedProductionAdmission && RECORD_ID.test(entry.receptionId)
       ? `<a href="/admin/reception/${escapeHtml(entry.receptionId)}/usage.json">開始失敗の使用量 JSON</a>` : '';
-    const trialLinks = trials.map(({ recordId, deleted, role }) => {
-      if (deleted) return '<div class="muted">削除済み</div>';
-      return recordId ? `<div><a href="/admin/record/${escapeHtml(recordId)}">${escapeHtml(recordId)}</a> <span>${PARTICIPANT_ROLE_LABELS[role]}</span></div>` : '';
-    }).join('');
+    const trialLinks = trials.map(({ recordId, role }) =>
+      recordId ? `<div><a href="/admin/record/${escapeHtml(recordId)}">${escapeHtml(recordId)}</a> <span>${PARTICIPANT_ROLE_LABELS[role]}</span></div>` : '').join('');
     const recordIds = trials.flatMap(trial => trial.recordId === null ? [] : [trial.recordId]);
     const bulk = recordIds.length && RECORD_ID.test(entry.receptionId) ? `<details class="row-action"><summary>担当者種別を一括変更（${recordIds.length}件）</summary>
 ${participantRoleForm(`/admin/reception/${entry.receptionId}/participant-role`, recordIds)}</details>` : '';

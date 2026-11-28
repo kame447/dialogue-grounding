@@ -689,3 +689,64 @@ test('I209 classifies reception-OFF and old archive-only records', async () => {
   assert.equal(await h.index.upsert(indexed), false);
   assert.equal(await adminRole(h, oldId), 'ai');
 });
+
+test('deleting trial logs removes their reception links and hides the row once all trials are deleted', async () => {
+  const h = harness(roleEnv), cookie = await h.browser(), r = await approved(h, cookie);
+  const first = (await (await start(h, cookie)).json()).trial.sessionId;
+  await h.tasks.get(first).complete();
+  const second = (await (await start(h, cookie, { expectedRecordId: first })).json()).trial.sessionId;
+  await h.tasks.get(second).complete();
+  await h.done();
+  await indexSyntheticTrial(h, cookie, first);
+  await indexSyntheticTrial(h, cookie, second);
+  const other = await h.browser();
+  await h.edge(req('/api/reception', {}, other));
+  await h.done();
+  const pending = reception(h, other);
+  const path = '/admin/receptions';
+  const list = async () => {
+    const response = await h.edge(adminRequest(path));
+    assert.equal(response.status, 200);
+    return response.text();
+  };
+  const version = async () => (await h.edge(adminRequest(path + '/version'))).json();
+  const deleteLog = (id: string) => h.edge(endRequest('/admin/record/' + id + '/delete', { confirm: id }));
+  const before = await list(), beforeVersion = await version();
+  assert.ok(before.includes(r.receptionId) && before.includes(first) && before.includes(second));
+  assert.ok(before.includes(pending.receptionId));
+  assert.equal((await deleteLog(first)).status, 303);
+  const partial = await list(), partialVersion = await version();
+  assert.ok(partial.includes(r.receptionId) && partial.includes(second));
+  assert.ok(!partial.includes(first) && !partial.includes('削除済み'));
+  assert.notDeepEqual(partialVersion, beforeVersion);
+  assert.ok(partial.includes(pending.receptionId));
+  assert.equal((await deleteLog(second)).status, 303);
+  const after = await list();
+  assert.ok(!after.includes(r.receptionId) && !after.includes(first) && !after.includes(second));
+  assert.ok(after.includes(pending.receptionId));
+  assert.notDeepEqual(await version(), partialVersion);
+  // Persisted admission identity and deletion audit remain; no other trial is deleted.
+  assert.deepEqual(reception(h, cookie).trials.map((t: any) => t.recordId), [first, second]);
+  assert.equal(await h.object(cookie).adminRecord(first), null);
+  assert.equal(await h.object(cookie).adminRecord(second), null);
+  assert.equal((await h.index.audit()).length, 2);
+  h.evict(); h.evictIndex();
+  assert.ok(!(await list()).includes(r.receptionId));
+  await h.done();
+});
+
+test('already deleted trial hides its reception even when the global index removal has not succeeded', async () => {
+  const h = harness(roleEnv), cookie = await h.browser(), r = await approved(h, cookie);
+  const id = (await (await start(h, cookie)).json()).trial.sessionId;
+  await h.done();
+  await indexSyntheticTrial(h, cookie, id);
+  const list = async () => (await h.edge(adminRequest('/admin/receptions'))).text();
+  assert.ok((await list()).includes(r.receptionId));
+  assert.equal(await h.object(cookie).adminDelete(id), true);
+  assert.ok(await h.index.get(id), 'index removal has not happened');
+  assert.ok(!(await list()).includes(r.receptionId));
+  const retry = await start(h, cookie);
+  assert.equal(retry.status, 401, 'deleted admission has expired and cannot start again');
+  assert.deepEqual(await retry.json(), { error: 'session_required' });
+  await h.done();
+});
