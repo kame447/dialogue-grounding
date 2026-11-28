@@ -45,30 +45,69 @@ test('モデルに見せる層（roles・nouns）の文字列の path は、出�
   assert.ok(accepted > 1500, '検査した path の数 ' + accepted);
 });
 
-test('生成の宣言（roles）と独立の抽出（nouns）が同じ向きの単位を指せば一致し、別の単位なら一致しない（実際の読み取りの経路: 宣言＝readVisualFeatureSources、抽出＝readVisualFeatureEvidence）', { skip }, async () => {
-  const memory = await load(files[0]), guide = await load(files[1]), evidence = await load(files[2]);
-  let compared = 0;
+/** 向きの中の候補（全体の候補 whole[k]、領域ごとの部分の候補 parts[Pn][j]）。 */
+type Candidate = { kind: 'whole' | 'parts'; noun: string; stored: Path; region?: string; index: number };
+function candidatesOf(view: any, head: Path): Candidate[] {
+  return [...view.whole.map((w: any, k: number): Candidate => ({ kind: 'whole', noun: w.noun, stored: [...head, 'whole', k], index: k })),
+    ...Object.entries<any[]>(view.parts).flatMap(([region, list]) => list.map((c, j): Candidate => ({ kind: 'parts', noun: c.noun, stored: [...head, 'parts', region, j], region, index: j })))];
+}
+/** 向きの行（抽出が引用できる最も粗い単位）。current は文字列の葉 ['current']、回した向きは ['turned', i, 'view']。 */
+const viewLine = (head: Path): Path => head[1] === 'current' ? ['rotation', 'current'] : ['rotation', 'turned', head[2] as number, 'view'];
+
+test('同じ向きの別の候補は一致せず、同じ候補は一致する（宣言＝readVisualFeatureSources、抽出＝readVisualFeatureEvidence。120の現在方向 × 全ての候補の組）', { skip }, async () => {
+  const memory = await load(files[0]), evidence = await load(files[2]);
+  let sameChecked = 0, differentChecked = 0, otherViewChecked = 0, unnamedChecked = 0;
   for (const figureKey of FIGURES) for (const rotation of [0, 90, 180, 270]) {
     const projection = memory.projectOwnRotationMemory({ figureKey, rotation }), figureId = 's-0000';
     const memo = { observedAt: '2026-01-01T00:00:00.000Z', figures: [{ id: figureId, region: { x: 0, y: 0, w: 1, h: 1 }, holistic: [],
       analytic: { shapes: [], composition: 'x', relations: [] }, unknowns: [], reobservations: [], rotation: projection }] };
-    const byUnit = (layer: 'roles' | 'nouns') => {
-      const units = new Map<string, Path[]>();
-      for (const { path } of stringLeaves(guide.rotationMemoryLayer(projection, layer))) units.set(unitOf(path), [...(units.get(unitOf(path)) ?? []), path]);
-      return units;
-    };
-    const generated = byUnit('roles'), extracted = byUnit('nouns');
-    for (const [unit, paths] of generated) for (const pathG of paths) {
-      const declared = evidence.readVisualFeatureSources([{ figureId, path: ['rotation', ...pathG] }], memo, [figureId]);
-      assert.ok(declared, `${figureKey}@${rotation}: 生成の path ${JSON.stringify(pathG)} が読めない`);
-      for (const [otherUnit, others] of extracted) for (const pathE of others) {
-        const verified = evidence.readVisualFeatureEvidence({ sources: [{ source: { figureId, path: ['rotation', ...pathE] }, quote: 'q' }] }, memo, [figureId], 'q');
-        assert.ok(verified, `${figureKey}@${rotation}: 抽出の path ${JSON.stringify(pathE)} が読めない`);
-        const same = evidence.sameVisualFeatureSources(declared, verified);
-        assert.equal(same, unit === otherUnit, `${figureKey}@${rotation}: 生成 ${JSON.stringify(pathG)} と抽出 ${JSON.stringify(pathE)} は${unit === otherUnit ? '同じ' : '別の'}単位（${unit} / ${otherUnit}）なのに ${same ? '一致' : '不一致'}`);
-        compared++;
+    const views: { view: any; head: Path }[] = [{ view: projection.current, head: ['rotation', 'current'] }, ...projection.turned.map((v: any, i: number) => ({ view: v, head: ['rotation', 'turned', i] }))];
+    const declare = (path: Path) => evidence.readVisualFeatureSources([{ figureId, path }], memo, [figureId]);
+    const extract = (path: Path, text: string, quote: string) => evidence.readVisualFeatureEvidence({ sources: [{ source: { figureId, path }, quote }] }, memo, [figureId], text);
+    for (const { view, head } of views) {
+      const all = candidatesOf(view, head);
+      // 名詞で候補を特定できるのは、同じ種類の中で名詞が一意で、他の候補の名詞に含まれない（部分文字列でない）ものだけ。
+      const identifiable = all.filter(c => all.filter(o => o.kind === c.kind && o.noun === c.noun).length === 1 && !all.some(o => o !== c && (o.noun.includes(c.noun) || c.noun.includes(o.noun))));
+      for (const declared of identifiable) {
+        const label = `${figureKey}@${rotation} ${head.slice(1).join('/')} 宣言 ${declared.kind}[${declared.region ?? ''}${declared.index}]「${declared.noun}」`;
+        // 宣言は、保存形の名詞の path でも、生成の層（roles）が見せる全体の行の path でも、同じ候補として読まれる。
+        const forms: Path[] = [[...declared.stored, 'noun']];
+        if (declared.kind === 'whole') forms.push(declared.stored);
+        for (const form of forms) {
+          const sources = declare(form);
+          assert.ok(sources, `${label}: 宣言の path ${JSON.stringify(form)} が読めない`);
+          // 抽出が向きの行までしか指せず、引用した名詞で候補を特定する（nouns の層）。
+          const sameText = `${declared.noun}に見えます`;
+          const same = extract(viewLine(head), sameText, declared.noun);
+          assert.ok(same, `${label}: 抽出の読み取りが失敗`);
+          assert.equal(evidence.sameVisualFeatureSources(sources, same), true, `${label}: 同じ候補（向きの行＋名詞の引用）が一致しない`);
+          sameChecked++;
+          // 抽出が保存形の path で同じ候補を明示しても一致する。
+          const explicit = extract([...declared.stored, 'noun'], sameText, declared.noun);
+          assert.ok(explicit && evidence.sameVisualFeatureSources(sources, explicit), `${label}: 同じ候補（保存形）が一致しない`);
+          // 同じ向きの別の候補（名詞の引用 or 保存形の path）は一致しない。
+          for (const other of identifiable.filter(o => o !== declared)) {
+            const text = `${other.noun}に見えます`;
+            const viaLine = extract(viewLine(head), text, other.noun), viaStored = extract([...other.stored, 'noun'], text, other.noun);
+            assert.ok(!viaLine || !evidence.sameVisualFeatureSources(sources, viaLine), `${label}: 別の候補「${other.noun}」（向きの行＋引用）が一致扱い`);
+            assert.ok(!viaStored || !evidence.sameVisualFeatureSources(sources, viaStored), `${label}: 別の候補「${other.noun}」（保存形）が一致扱い`);
+            differentChecked++;
+          }
+          // 引用に候補の名詞が無い（向きの行のまま）なら、候補を特定できず一致しない（既存の ON の規則: 出所が確かめられない）。
+          const unnamed = extract(viewLine(head), 'ぼんやり見えます', 'ぼんやり');
+          assert.ok(!unnamed || !evidence.sameVisualFeatureSources(sources, unnamed), `${label}: 候補を名指さない引用が一致扱い`);
+          unnamedChecked++;
+          // 別の向きの候補は一致しない。
+          for (const { view: otherView, head: otherHead } of views.filter(v => v.head.join('/') !== head.join('/'))) {
+            for (const other of candidatesOf(otherView, otherHead)) {
+              const viaStored = extract([...other.stored, 'noun'], `${other.noun}に見えます`, other.noun);
+              assert.ok(!viaStored || !evidence.sameVisualFeatureSources(sources, viaStored), `${label}: 別の向きの候補「${other.noun}」が一致扱い`);
+              otherViewChecked++;
+            }
+          }
+        }
       }
     }
   }
-  assert.ok(compared > 5000, '比べた組の数 ' + compared);
+  assert.ok(sameChecked > 500 && differentChecked > 500 && otherViewChecked > 5000 && unnamedChecked > 500, JSON.stringify({ sameChecked, differentChecked, otherViewChecked, unnamedChecked }));
 });
