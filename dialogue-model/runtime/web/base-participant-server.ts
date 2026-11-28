@@ -10,10 +10,11 @@ import { join } from 'node:path';
 import { createNamingTaskV2 } from '../v2/naming-task-v2.mjs';
 import { NamingTaskError } from '../naming-error.mjs';
 import { validateBaseStart, BaseAssignmentError } from '../v2/base-assignment.ts';
+import { readStartIntent } from '../v2/base-assignment-data.ts';
 import { createBaseAssignmentSession, BaseSessionError } from '../v2/base-assignment-session.ts';
 import { openBaseFileStore, privateDirectory, registerBaseOwner, readPrivateAssignment, listBaseOwners } from './base-assignment-store.ts';
 import type { LocalStore } from './base-assignment-store.ts';
-import type { BaseSession, BaseTask } from '../v2/base-assignment.ts';
+import type { BaseSession, BaseTask, StartIntent } from '../v2/base-assignment.ts';
 import { lockResult, participantReview, recordListEntry, sortRecordList, QUESTIONNAIRE_FORM } from '../v2/participant-records.ts';
 import type { Questionnaire } from '../v2/participant-records.ts';
 import { handleAdmin, isAdminPath, ADMIN_HEADERS } from '../../../workers/tangram-experiment/src/admin/routes.ts';
@@ -312,7 +313,16 @@ export function createBaseParticipantServer(options: Record<string, any> = {}) {
         await root.store.touch();
       }
       let input:any;
-      if(action||req.method==='POST'){input=await body();if(path==='/api/start')validateBaseStart(input);}
+      let intent: StartIntent | undefined;
+      if(action||req.method==='POST'){
+        input=await body();
+        if(path==='/api/start'){
+          if(input && Object.hasOwn(input,'startIntentId')){
+            intent=readStartIntent({id:input.startIntentId});delete input.startIntentId;
+          }
+          validateBaseStart(input);
+        }
+      }
       e??=await known(cookie);if(!e)return json(401,{error:'session_required'});
       await e.store.touch();
       if(recordPath||path==='/api/records'){
@@ -331,16 +341,24 @@ export function createBaseParticipantServer(options: Record<string, any> = {}) {
         });
         return json(200,{recordId:id,form:QUESTIONNAIRE_FORM,questionnaire});
       }
-      let task: BaseTask|null;
+      let task: BaseTask|null, starting=false, startIntentId: string|undefined;
       if(path==='/api/start'){
-        const result=await e.coordinator.start(input);
-        if(tab!=='legacy'&&result.kind==='completed')throw new NamingTaskError('trial_changed');
-        task=result.task;
+        const sameIntent=async()=>{
+          if(!intent)return false;
+          const {owner}=await e.store.inspect();
+          return owner.activeKey!==null&&owner.admissions[owner.activeKey]?.startIntent?.id===intent.id;
+        };
+        if(!await sameIntent())try{
+          const result=await e.coordinator.start(input,intent);
+          if(tab!=='legacy'&&result.kind==='completed')throw new NamingTaskError('trial_changed');
+        }catch(error){if(!await sameIntent())throw error;}
       }
-      else task=(await e.coordinator.restore()).task;
+      const restored=await e.coordinator.restore();
+      task=restored.task;starting=restored.kind==='preparing';startIntentId=restored.startIntentId;
       const store=e.store;
       const state=async()=>{const v=task?{...task.getState()}:null;if(v){delete v.strategy;delete v.seed;delete v.visualAid;delete v.referenceMemory;}
-        const q=v?await store.questionnaire(v.sessionId as string):null;return {trial:v?lockResult(v,q):null,hideStrategy:true,busy:Boolean(v?.busy)};};
+        const q=v?await store.questionnaire(v.sessionId as string):null;return {trial:v?lockResult(v,q):null,hideStrategy:true,busy:starting||Boolean(v?.busy),
+          ...(starting?{starting:true}:{}),...(startIntentId?{startIntentId}:{})};};
       if(path==='/api/state'||path==='/api/start')return json(200,await state());
       if(!task)throw new NamingTaskError('trial_required');
       const live=task.getState();
@@ -359,11 +377,12 @@ export function createBaseParticipantServer(options: Record<string, any> = {}) {
         if(input.confirm!==true)throw new NamingTaskError('invalid_submission');
         validateEventCount(input,live.events);
         if(live.status==='completed')throw new NamingTaskError('already_submitted');
-        await task.submitHuman({names:input.names});if(!task.getState().aiSubmitted)await task.submitAI();
+        await task.submitHuman({names:input.names});
       }
       if(path==='/api/ai-submit'){
         if(tab!=='legacy'&&live.status==='completed')throw new NamingTaskError('trial_changed');
-        await task.submitAI();
+        if(live.recovering===true&&!live.closed)throw new NamingTaskError('ai_busy');
+        if(live.recovering!==true)await task.submitAI();
       }
       return json(200,await state());
     } catch(error){

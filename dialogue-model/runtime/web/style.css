@@ -66,11 +66,6 @@ button:disabled{opacity:.45;cursor:default}
 @keyframes typing-bounce{0%,60%,100%{transform:translateY(0);opacity:.55}30%{transform:translateY(-4px);opacity:1}}
 .chat-recovery{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:-8px 0 6px;font-size:.75rem;color:var(--muted)}
 .chat-recovery p{margin:0}
-.chat-recovery button{flex-shrink:0}
-#history .message-failure{display:flex;align-items:center;gap:6px}
-.message-failure>span:first-child{display:inline-flex;justify-content:center;align-items:center;width:15px;height:15px;border:1px solid #999c91;border-radius:50%;font-size:.65rem}
-.retry-message{background:transparent;border:0;color:#61675a;font-size:.72rem;padding:3px 5px;text-decoration:underline;text-underline-offset:3px}
-.retry-message:disabled{opacity:.45}
 #chat{flex-shrink:0;border-top:1px solid var(--line);padding:16px;background:#fff}
 #chat textarea{max-height:140px;min-height:76px;overflow-y:auto;margin:0;font-size:.88rem;line-height:1.7}
 .chat-actions{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:10px}

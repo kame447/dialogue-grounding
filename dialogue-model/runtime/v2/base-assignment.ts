@@ -37,8 +37,10 @@ export type BaseRecord = { assignment: BaseAssignment } & (RawBaseRecord |
 export type FailureCode = 'start_interrupted' | 'initialization_failed' | 'record_write_failed' | 'assignment_record_invalid' | 'record_deleted';
 /** Closed diagnostic cause of an initialization_failed start. Never carries a message, response body, key or prompt. */
 export type FailureCause = typeof import('./base-assignment-data.ts').FAILURE_CAUSES[number];
+export type StartIntent = { id: string; expectedReceptionRevision?: number; expectedRecordId?: string };
 export type BaseAssignedEnvelope = { schemaVersion: 'base_assigned_session_v1'; assignment: BaseAssignment;
   status: 'preparing' | 'active' | 'failed'; record: BaseRecord | null; errorCode: FailureCode | null;
+  startIntent?: StartIntent;
   /** Only on a failed start with errorCode initialization_failed; absent on every other entry and on older records. */
   failureCause?: FailureCause };
 export type AdmissionKey = 'initial' | `after:${string}`;
@@ -49,8 +51,9 @@ export type BaseArchiveWrite = { assignmentId: string; record: BaseRecord };
 export type BaseStore = { read(): Promise<OwnerRead>;
   compareAndSwap(expectedRevision: number, next: BaseOwnerState, archives: readonly BaseArchiveWrite[]): Promise<boolean>;
   readRecord(recordId: string): Promise<BaseRecord | null> };
-export type BaseTask = { getState(): Record<string, unknown>; persistNow(): Promise<void>; whenIdle(): Promise<void>;
+export type BaseTask = { getState(): Record<string, unknown>; persistNow(): Promise<void>; whenIdle(options?: { signal?: AbortSignal }): Promise<void>;
   message(text: string, clientId?: string): { eventId: string; duplicate: boolean }; retry(): Promise<void>;
+  stopForAdmin?(): void;
   interruptDialogue?(): Promise<void>;
   submitHuman(options: { names: unknown }): Promise<unknown>; submitAI(): Promise<unknown> };
 /** rotationMode is present for new tasks only; a restored task takes its mode from the record.
@@ -64,17 +67,19 @@ export type MakeBaseTask = (options: { strategy: Strategy; seed: number; referen
   openingMode?: OpeningMode;
   participantDialogueProfile?: ParticipantDialogueProfile;
   postGenerationCheck?: PostGenerationCheck;
+  recoveringAdmission?: true;
   participantRuntime?: { profile: ParticipantProductionProfile; assignmentId: string } }) => Promise<BaseTask>;
 export type BaseSessionOptions = { openingMode?: OpeningMode; ownerId: string; store: BaseStore; readConfig: () => Promise<BaseAssignmentConfig | null>;
   /** null explicitly declines a plan, so the configured (non-reception) assignment is used. */
   readPlan?: () => Promise<{ receptionId: string; plan: ReceptionPlan; trialIndex: number } | null>;
   memoryPruneVersion?: import('../memory/reference-graph.mjs').MemoryPruneVersion;
-  makeTask: MakeBaseTask; newId: () => string; now: () => number; adapter: SourceAdapter };
+  makeTask: MakeBaseTask; newId: () => string; now: () => number; adapter: SourceAdapter;
+  onPreparing?: (work: Promise<void>) => void };
 export type StartResult = { kind: 'started' | 'completed'; task: BaseTask };
-export type RestoreResult = { kind: 'empty'; task: null } | { kind: 'restored'; task: BaseTask };
+export type RestoreResult = ({ kind: 'empty' | 'preparing'; task: null } | { kind: 'restored'; task: BaseTask }) & { startIntentId?: string };
 export type NextResult = { kind: 'created' | 'existing'; recordId: string; participantPath: '/' };
-export type BaseSession = { start(body: unknown): Promise<StartResult>; restore(): Promise<RestoreResult>;
-  prepareNext(completedRecordId: string): Promise<NextResult> };
+export type BaseSession = { start(body: unknown, intent?: StartIntent): Promise<StartResult>; restore(): Promise<RestoreResult>;
+  prepareNext(completedRecordId: string, intent?: StartIntent): Promise<NextResult> };
 export type BaseSessionErrorCode = 'invalid_request' | 'busy' | 'not_found' | 'trial_unavailable' | 'owner_expired';
 export type BaseLocalContainer = { schemaVersion: 'base_local_owner_v1'; owner: BaseOwnerState;
   archives: Record<string, BaseRecord>; questionnaires: Record<string, unknown>; ledger: Record<string, number>;

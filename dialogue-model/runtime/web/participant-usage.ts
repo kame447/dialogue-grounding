@@ -42,6 +42,7 @@ type Receipt = Usage & {
 export type ParticipantUsageSnapshot = {
   schemaVersion: typeof PARTICIPANT_PRODUCTION_PROFILE; assignmentId: string; pin: ParticipantModelPin;
   revision: number; lastHumanSeq: number; halted: boolean;
+  modelMismatchPosts?: number;
   phases: Record<Provider, Record<string, Meter>>;
   latest: Record<Provider, Receipt | null>;
   /** Exact returned IDs from identity-checked successful POSTs, by phase. */
@@ -67,13 +68,16 @@ function initial(assignmentId: string, pin: ParticipantModelPin): ParticipantUsa
 function read(value: unknown, assignmentId: string, pin: ParticipantModelPin): ParticipantUsageSnapshot {
   const template = initial(assignmentId, pin);
   const hasReturnedModels = value !== null && typeof value === 'object' && Object.hasOwn(value, 'returnedModels');
-  const saved = data(value, Object.keys(template).filter(key => hasReturnedModels || key !== 'returnedModels'));
+  const keys = Object.keys(template).filter(key => hasReturnedModels || key !== 'returnedModels');
+  const hasMismatchCount = value !== null && typeof value === 'object' && Object.hasOwn(value, 'modelMismatchPosts');
+  const saved = data(value, hasMismatchCount ? [...keys, 'modelMismatchPosts'] : keys);
   const savedPin = data(saved.pin, Object.keys(pin));
   if (saved.schemaVersion !== template.schemaVersion || saved.assignmentId !== assignmentId ||
       Object.entries(pin).some(([key, model]) => savedPin[key] !== model) ||
       !count(saved.revision) || !count(saved.lastHumanSeq) || typeof saved.halted !== 'boolean') return fail();
   const savedPhases = data(saved.phases, providers), latest = data(saved.latest, providers);
   const returnedModels = hasReturnedModels ? data(saved.returnedModels, providers) : null;
+  let maximumMismatches = 0;
   for (const provider of providers) {
     const names = phaseNames(pin, provider);
     const group = data(savedPhases[provider], names);
@@ -84,6 +88,7 @@ function read(value: unknown, assignmentId: string, pin: ParticipantModelPin): P
       const meter = data(group[phase], Object.keys(empty()));
       if (Object.entries(meter).some(([key, n]) => key === 'knownUsd' ? !amount(n) : !count(n))) return fail();
       const m = meter as Meter;
+      maximumMismatches += m.unknownPosts;
       if (m.cancelledBeforeSend + m.unknownPosts > m.posts || m.missingCostPosts > m.posts - m.cancelledBeforeSend ||
           m.missingInputTokenPosts > m.posts - m.cancelledBeforeSend || m.missingOutputTokenPosts > m.posts - m.cancelledBeforeSend) return fail();
       if (returned && Object.hasOwn(returned, phase)) {
@@ -104,6 +109,7 @@ function read(value: unknown, assignmentId: string, pin: ParticipantModelPin): P
         !(r.costUsd === null || amount(r.costUsd)) || !(r.inputTokens === null || count(r.inputTokens)) ||
         !(r.outputTokens === null || count(r.outputTokens))) return fail();
   }
+  if (hasMismatchCount && (!count(saved.modelMismatchPosts) || saved.modelMismatchPosts === 0 || saved.modelMismatchPosts > maximumMismatches)) return fail();
   return structuredClone(saved) as ParticipantUsageSnapshot;
 }
 const sequence = (id: string | undefined) => Number(id?.match(/^event-(\d+)$/u)?.[1] ?? 0);
@@ -124,14 +130,18 @@ export class ParticipantUsageLedger {
     return read(value, assignmentId, pin);
   }
 
-  static async open(store: ParticipantUsageStore, assignmentId: string, pin: ParticipantModelPin, restored?: unknown) {
+  static async open(store: ParticipantUsageStore, assignmentId: string, pin: ParticipantModelPin, restored?: unknown,
+    resumeAdmission = false) {
     const saved = await store.read();
     if (saved === undefined) {
       if (restored !== undefined) return fail();
       const created = await store.update(current => current === undefined ? initial(assignmentId, pin) : fail());
       return new ParticipantUsageLedger(store, created);
     }
-    if (restored === undefined) return fail();
+    if (restored === undefined) {
+      if (!resumeAdmission) return fail();
+      return new ParticipantUsageLedger(store, read(saved, assignmentId, pin));
+    }
     const durable = read(saved, assignmentId, pin), archived = read(restored, assignmentId, pin);
     if (Boolean(durable.returnedModels) !== Boolean(archived.returnedModels) ||
         durable.revision < archived.revision || (durable.revision === archived.revision &&
@@ -141,9 +151,15 @@ export class ParticipantUsageLedger {
 
   get halted() { return this.current.halted; }
   snapshot() { return structuredClone(this.current); }
-  needsExplicitRetry(id: string | undefined) {
-    const seq = sequence(id);
-    return seq > 0 && this.current.lastHumanSeq >= seq;
+  async resumeAfterModelMismatch() {
+    // A late response can settle through an older ledger after this one opened.
+    // Read the durable halt inside the same update that clears it.
+    await this.change(state => {
+      if (!state.halted) return;
+      // Older snapshots had only the halt flag and the latest provider receipts.
+      state.modelMismatchPosts ??= Math.max(1, Object.values(state.latest).filter(receipt => receipt?.status === 'model_mismatch').length);
+      state.halted = false;
+    });
   }
   runTurn<T>(eventId: string, signal: AbortSignal, operation: () => Promise<T>) {
     return this.scope.run({ humanSeq: sequence(eventId), signal }, operation);
@@ -213,7 +229,10 @@ export class ParticipantUsageLedger {
       if (receipt.costUsd !== null || status === 'cancelled') { m.missingCostPosts--; m.knownUsd += receipt.costUsd ?? 0; }
       if (receipt.inputTokens !== null || status === 'cancelled') { m.missingInputTokenPosts--; m.inputTokens += receipt.inputTokens ?? 0; }
       if (receipt.outputTokens !== null || status === 'cancelled') { m.missingOutputTokenPosts--; m.outputTokens += receipt.outputTokens ?? 0; }
-      if (status === 'model_mismatch') state.halted = true;
+      if (status === 'model_mismatch') {
+        state.modelMismatchPosts = (state.modelMismatchPosts ?? Number(state.halted)) + 1;
+        state.halted = true;
+      }
       if (returnedModel !== undefined && state.returnedModels) {
         const returned = state.returnedModels[provider];
         returned[phase] = { model: returnedModel, ok: (returned[phase]?.ok ?? 0) + 1 };

@@ -98,7 +98,7 @@ function answers(questions: Choices, observe = false, selectedAction?: string,
 function memory() {
   let items = new Map<string, any>();
   let pending: Promise<unknown> = Promise.resolve();
-  const hooks: { beforePut?: (key: string, item: any) => Promise<void> } = {};
+  const hooks: { beforePut?: (key: string, item: any) => Promise<void>; beforeGet?: (key: string) => Promise<void> } = {};
   const view = (m: Map<string, any>) => ({
     async get(key: string) { return structuredClone(m.get(key)); },
     async put(entries: Record<string, unknown> | string, value?: unknown) {
@@ -111,13 +111,18 @@ function memory() {
       return new Map([...m].filter(([key]) => key.startsWith(prefix)).map(([key, value]) => [key, structuredClone(value)]));
     },
     async delete(key: string) { return m.delete(key); },
+    async getAlarm() { return m.get('$testAlarm') as number | undefined ?? null; },
+    async setAlarm(at: number) { m.set('$testAlarm', at); },
+    async deleteAlarm() { m.delete('$testAlarm'); },
   });
   return {
     hooks,
-    async get(key: string) { return view(items).get(key); },
+    async get(key: string) { await hooks.beforeGet?.(key); return view(items).get(key); },
     async put(entries: Record<string, unknown>) { await view(items).put(entries); },
     async list(prefix: string) { return view(items).list({ prefix }); },
-    async deleteAlarm() {},
+    async getAlarm() { return view(items).getAlarm(); },
+    async setAlarm(at: number) { await view(items).setAlarm(at); },
+    async deleteAlarm() { await view(items).deleteAlarm(); },
     transaction<T>(fn: (tx: ReturnType<typeof view>) => Promise<T>) {
       const update = pending.then(async () => {
         const staged = structuredClone(items), result = await fn(view(staged));
@@ -289,7 +294,8 @@ function harness(enabled = true, selectedProtocol: typeof protocol & {
       return session.adminForceEndReception(reception.receptionId, reception.revision);
     },
     async settleBackground() { await Promise.all(background.splice(0)); },
-    evict(warmup = preobserve) { session = makeSession(warmup); },
+    async alarm() { await storage.deleteAlarm(); await session.alarm(); },
+    evict(warmup = preobserve) { session.trial?.stopForAdmin?.(); session = makeSession(warmup); },
     adminRecord(recordId: string) { return session.adminRecord(recordId); },
     browserRequest(request: Request) {
       return participantWorker.fetch(request, { ...env,
@@ -333,6 +339,11 @@ function harness(enabled = true, selectedProtocol: typeof protocol & {
       return request('start', { version: 2, expectedReceptionRevision: reception.revision, ...(expectedRecordId ? { expectedRecordId } : {}) });
     },
     async idle() { await session.trial?.whenIdle(); },
+    async recover() {
+      const keepAlive = setTimeout(() => {}, 9_000);
+      try { await session.trial?.whenIdle({ signal: AbortSignal.timeout(8_000) }); }
+      finally { clearTimeout(keepAlive); }
+    },
     async complete(recordId: string, trial: { scene: { shapes: Array<{ id: string }> }; events: unknown[] }) {
       const submitted = await request('names', { expectedRecordId: recordId, confirm: true, expectedEventCount: trial.events.length,
         names: Object.fromEntries(trial.scene.shapes.map(({ id }) => [id, '人間側の合成名'])) });
@@ -884,7 +895,7 @@ test('P5 dialogue profile keeps management reads available and blocks incomplete
   marked.plan.participantDialogueProfile = 'participant_dialogue_v13_p5';
   const sent = h.calls.length;
   await put({ 'reception:v1': marked });
-  await error(await h.request('retry', { expectedRecordId: trial.sessionId }), 409, 'trial_unavailable');
+  await error(await h.request('state'), 409, 'trial_unavailable');
   assert.deepEqual(await h.storage.get('base:owner:v1'), originalOwner);
   assert.equal(h.calls.length, sent);
 
@@ -904,9 +915,9 @@ test('P5 dialogue profile keeps management reads available and blocks incomplete
   admission.record = record;
   await put({ 'reception:v1': marked, 'base:owner:v1': owner, active: record, [recordKey]: record });
 
-  await error(await h.request('retry', { expectedRecordId: trial.sessionId }), 409, 'trial_unavailable');
+  await error(await h.request('state'), 409, 'trial_unavailable');
   h.evict();
-  await error(await h.request('retry', { expectedRecordId: trial.sessionId }), 409, 'trial_unavailable');
+  await error(await h.request('state'), 409, 'trial_unavailable');
   await error(await h.start(trial.sessionId), 409, 'trial_unavailable');
   assert.deepEqual(await h.storage.get('reception:v1'), marked);
   assert.deepEqual(await h.storage.get('base:owner:v1'), owner);
@@ -962,7 +973,8 @@ test('a reserved initial observation can settle after its assignment is marked i
   const pending = h.start();
   await started;
   h.evict();
-  assert.equal((await h.request('state')).status, 409);
+  await h.forceEnd();
+  assert.equal((await jsonOk(await h.request('state'))).interrupted, true);
   const path = '/admin/reception/' + receptionId + '/usage.json';
   const before = (await jsonOk(await h.admin(path))).failedStarts[0];
   assert.equal(before.errorCode, 'start_interrupted');
@@ -1283,8 +1295,7 @@ test('a v2 pinned reception saves constrained decisions and retries the same pen
   assert.equal(h.calls.length, calls);
   h.controlled.rejectJev = false;
   h.controlled.selectedAction = 'defer';
-  await jsonOk(await h.request('retry', { expectedRecordId: recordId }));
-  await h.idle();
+  await h.recover();
   const after = await h.storage.get(key);
   assert.equal(after.queueState.errorCode, null);
   assert.deepEqual(after.queueState.pendingHumanEventIds, []);
@@ -1299,7 +1310,7 @@ test('a v2 pinned reception saves constrained decisions and retries the same pen
   assert.equal((await jsonOk(await h.request('state'))).trial.sessionId, recordId);
 });
 
-test('a restored reserved turn waits for the existing explicit retry and preserves its client ID', async () => {
+test('cold GET recovers a reserved turn and preserves its client ID', async () => {
   const h = harness();
   await h.receive();
   await h.approve();
@@ -1324,27 +1335,21 @@ test('a restored reserved turn waits for the existing explicit retry and preserv
 
   // Drop the interrupted instance. Preserve the pre-response storage snapshot,
   // including the independently committed provider reservation.
+  h.liveTrial().stopForAdmin();
   reject(new Error('synthetic interruption'));
   await h.idle();
   delete h.controlled.holdChoice;
   await h.storage.transaction(tx => tx.put({ [key]: interrupted, 'base:owner:v1': owner, [journalKey]: journal }));
-  const sends = h.calls.length;
-  for (let i = 0; i < 3; ++i) {
-    h.evict();
-    const state = await jsonOk(await h.request('state'));
-    assert.equal(state.trial.aiStatus, 'error');
-    assert.equal(state.trial.events.at(-1).id, accepted.eventId);
-    assert.deepEqual((await h.storage.get(key)).queueState.pendingHumanEventIds, [accepted.eventId]);
-    assert.equal(h.calls.length, sends);
-  }
-  assert.equal((await jsonOk(await h.request('message', body))).eventId, accepted.eventId);
-  await h.idle();
-  assert.equal(h.calls.length, sends);
-  await jsonOk(await h.request('retry', { expectedRecordId: trial.sessionId }));
+  h.evict();
+  const state = await jsonOk(await h.request('state'));
+  assert.equal(state.trial.sessionId, trial.sessionId);
+  assert.equal(state.trial.events.find((event: any) => event.id === accepted.eventId)?.clientId, body.clientId);
+  await h.settleBackground();
   const completed = await h.storage.get(key);
   assert.equal(completed.queueState.errorCode, null);
   assert.equal(completed.events.filter((event: any) => event.speaker === 'human').length, 1);
   assert.equal(completed.events.filter((event: any) => event.speaker === 'ai').length, 2);
+  assert.equal(completed.queueState.requestSeq, interrupted.queueState.requestSeq + 1);
   assert.ok(completed.jevLedger.phases.jev.human_referent.unknownPosts > 0);
 });
 
@@ -2086,9 +2091,10 @@ for (const control of ['non-answer', 'acknowledge', 'actual-answer'] as const) {
 async function deferredHarness(t: TestContext,
   profile: typeof PILOT012_V20_PARTICIPANT_PROFILE | typeof PILOT012_V21_PARTICIPANT_PROFILE |
     typeof PILOT012_V22_PARTICIPANT_PROFILE | typeof PILOT012_V23_PARTICIPANT_PROFILE = PILOT012_V20_PARTICIPANT_PROFILE,
-  visual = false, figureCount: 4 | 6 = 6) {
-  const h = harness(true, figureCount === 4 ? { ...figureBankProtocol,
-    figureSelection: { mode: 'preset', setId: PILOT_FIGURE_SET_ID } } : figureBankProtocol);
+  visual = false, figureCount: 4 | 6 = 6, strategy: 'repair-first' | 'bypass-enabled' = 'bypass-enabled') {
+  const other = strategy === 'repair-first' ? 'bypass-enabled' : 'repair-first';
+  const h = harness(true, { ...figureBankProtocol, allowedOrders: [[strategy, other]],
+    ...(figureCount === 4 ? { figureSelection: { mode: 'preset', setId: PILOT_FIGURE_SET_ID } } : {}) });
   const transport = v12Transport(t, h);
   transport.options.sharedReading = !visual;
   transport.options.visualSegments = visual;
@@ -2115,6 +2121,66 @@ const issueHandlingProfiles = [
   ['v22', PILOT012_V22_PARTICIPANT_PROFILE],
   ['v23', PILOT012_V23_PARTICIPANT_PROFILE],
 ] as const;
+
+for (const [trigger, strategy] of [
+  ['GET', 'bypass-enabled'], ['alarm', 'bypass-enabled'], ['GET', 'repair-first'], ['alarm', 'repair-first'],
+  ['alarm after initialization failure', 'bypass-enabled'],
+] as const) test(`v23 cold ${trigger} recovers a reserved Terra generation exactly once (${strategy})`, { timeout: 20_000 }, async t => {
+  const { h, transport, id, key } = await deferredHarness(t, PILOT012_V23_PARTICIPANT_PROFILE, false, 6, strategy);
+  const entered = gate(), release = gate();
+  t.after(release.resolve);
+  let first = true;
+  transport.options.beforeTextResponse = async phase => {
+    if (phase === 'generation' && first) {
+      first = false;
+      entered.resolve();
+      await release.promise;
+    }
+  };
+  const clientId = 'lost-terra-response';
+  const { eventId } = await jsonOk(await h.request('message', { expectedRecordId: id, text: p5Question, clientId }));
+  await entered.promise;
+  const saved = await h.storage.get(key);
+  assert.equal(saved.strategy, strategy);
+  const ledgerKey = 'participant-usage:' + saved.assignment.assignmentId;
+  const reserved = await h.storage.get(ledgerKey);
+  assert.equal(reserved.latest.terra.status, 'reserved');
+  assert.equal(reserved.latest.terra.phase, 'generation');
+  assert.deepEqual(saved.queueState.pendingHumanEventIds, [eventId]);
+  assert.ok(await h.storage.getAlarm());
+
+  // The abandoned task cannot publish even if its transport later resolves.
+  h.liveTrial().stopForAdmin();
+  h.evict();
+  if (trigger === 'alarm after initialization failure') {
+    h.storage.hooks.beforeGet = async name => {
+      if (name === 'active') {
+        h.storage.hooks.beforeGet = undefined;
+        throw new Error('synthetic one-time initialization read failure');
+      }
+    };
+    await assert.rejects(h.alarm(), /synthetic one-time initialization read failure/u);
+    assert.ok(await h.storage.getAlarm(), 'the same instance re-arms even when initialize fails');
+    assert.equal(transport.textPhases.filter(phase => phase === 'generation').length, 1);
+  }
+  if (trigger === 'GET') {
+    const { trial } = await jsonOk(await h.request('state'));
+    assert.equal(trial.sessionId, id);
+    await h.idle();
+  } else await h.alarm();
+  const recovered = await h.storage.get(key);
+  assert.deepEqual(recovered.queueState.pendingHumanEventIds, []);
+  assert.equal(recovered.queueState.requestSeq, saved.queueState.requestSeq + 1);
+  assert.deepEqual(recovered.events.slice(0, -1), saved.events);
+  assert.equal(recovered.events.at(-1)?.speaker, 'ai');
+  assert.equal(recovered.events.filter((event: any) => event.clientId === clientId).length, 1);
+  assert.equal(recovered.jevLedger.phases.terra.generation.unknownPosts,
+    reserved.phases.terra.generation.unknownPosts);
+  release.resolve();
+  await h.settleBackground();
+  assert.deepEqual((await h.storage.get(key)).events, recovered.events);
+  assert.equal(transport.textPhases.filter(phase => phase === 'generation').length, 2);
+});
 
 test('v21 durably publishes verified visual evidence and a classification-only job before any classification', { timeout: 20_000 }, async t => {
   const { h, transport, id, key } = await deferredHarness(t, PILOT012_V21_PARTICIPANT_PROFILE, true);
@@ -2205,14 +2271,13 @@ for (const savedState of ['queued', 'running'] as const) {
     await replace(record);
     const restored = (await jsonOk(await h.request('state'))).trial;
     assert.equal(restored.events.at(-1).text, v12Check);
-    await h.settleBackground();
     if (savedState === 'running') {
-      assert.equal(restored.dialogueRecovery, 'retry');
+      assert.equal(restored.dialogueRecovery, 'active');
+      assert.equal(restored.recovering, true);
       assert.equal((await h.storage.get(key)).queueState.privateState.deferredAiExtraction.error, 'delivery_unknown');
       assert.equal(h.calls.length, posted);
-      await jsonOk(await h.request('retry', { expectedRecordId: id }));
     }
-    await h.idle();
+    await h.recover();
     const done = await h.storage.get(key);
     assert.equal(done.queueState.privateState.deferredAiExtraction, undefined);
     assert.equal(done.queueState.privateState.aiPublic.pending.candidates.length, 2);
@@ -2222,7 +2287,7 @@ for (const savedState of ['queued', 'running'] as const) {
   });
 }
 
-test('v21 a model mismatch during classification preserves publication and blocks further dialogue and submission', async t => {
+test('v21 a model mismatch during classification preserves publication and automatically resumes with the pinned model', async t => {
   const { h, transport, id, key } = await deferredHarness(t, PILOT012_V21_PARTICIPANT_PROFILE, true);
   h.controlled.wrongChoiceModel = questions => aiSupportRequest({ questions });
   await jsonOk(await h.request('message', { expectedRecordId: id, text: p5Question }));
@@ -2238,6 +2303,12 @@ test('v21 a model mismatch during classification preserves publication and block
   await h.idle();
   assert.equal((await h.storage.get(key)).queueState.privateState.judgments.length, 1);
   assert.deepEqual(transport.textPhases, phases);
+  h.controlled.wrongChoiceModel = undefined;
+  await h.recover();
+  const recovered = await h.storage.get(key);
+  assert.equal(recovered.queueState.privateState.judgments.length, 2);
+  assert.equal(recovered.jevLedger.halted, false);
+  assert.equal(recovered.jevLedger.modelMismatchPosts, 1);
 });
 
 test('v21 force end keeps verified publication and discards a late classification', { timeout: 20_000 }, async t => {
@@ -2357,12 +2428,12 @@ test('v20 retries a failed result write with the retained job and makes no addit
   await assert.rejects(h.idle());
   const before = await h.storage.get(key);
   assert.equal(before.queueState.privateState.deferredAiExtraction.state, 'running');
-  assert.equal(h.liveTrial().getState().dialogueRecovery, 'retry');
+  assert.equal(h.liveTrial().getState().dialogueRecovery, 'active');
+  assert.equal(h.liveTrial().getState().recovering, true);
   assert.equal(h.liveTrial().getState().events.at(-1).text, p5Reading);
   const phases = [...transport.textPhases];
   h.storage.hooks.beforePut = undefined;
-  await jsonOk(await h.request('retry', { expectedRecordId: id }));
-  await h.idle();
+  await h.recover();
   const stored = await h.storage.get(key);
   assert.equal(stored.queueState.privateState.deferredAiExtraction, undefined);
   assert.equal(stored.queueState.privateState.aiPublic.pending.aiSeq, 3);
@@ -2378,7 +2449,7 @@ async function restoreSavedDeferredJob({ h, transport, id, key }: Awaited<Return
   assert.equal(job.state, 'failed');
   assert.equal(job.error, 'extraction_failed');
   assert.equal(failed.events.at(-1).text, p5Reading);
-  assert.equal((await jsonOk(await h.request('state'))).trial.dialogueRecovery, 'retry');
+  assert.equal((await jsonOk(await h.request('state'))).trial.recovering, true);
   assert.equal((await h.request('ai-submit', { expectedRecordId: id })).status, 409);
 
   // The restarted owner only sees the saved job and the published event.
@@ -2390,17 +2461,17 @@ async function restoreSavedDeferredJob({ h, transport, id, key }: Awaited<Return
   });
   const sent = [...transport.textPhases];
   transport.options.beforeTextResponse = undefined;
+  h.liveTrial().stopForAdmin();
   h.evict();
   const cold = (await jsonOk(await h.request('state'))).trial;
   assert.equal(cold.events.at(-1).text, p5Reading);
-  await h.settleBackground();
   if (savedState === 'running') {
-    assert.equal(cold.dialogueRecovery, 'retry');
+    assert.equal(cold.dialogueRecovery, 'active');
+    assert.equal(cold.recovering, true);
     assert.deepEqual(transport.textPhases, sent);
     assert.equal((await h.storage.get(key)).queueState.privateState.deferredAiExtraction.error, 'delivery_unknown');
-    await jsonOk(await h.request('retry', { expectedRecordId: id }));
-    await h.idle();
   }
+  await h.recover();
   const recovered = await h.storage.get(key);
   assert.deepEqual(recovered.events, failed.events);
   assert.equal(recovered.queueState.privateState.deferredAiExtraction, undefined);
@@ -2436,14 +2507,14 @@ for (const count of [4, 6] as const) test(`${version} restores a queued extracti
   }
 });
 
-test('v22 restores a running extraction only after explicit retry', async t => {
+test('v22 restores a running extraction through automatic recovery', async t => {
   await restoreSavedDeferredJob(await deferredHarness(t, PILOT012_V22_PARTICIPANT_PROFILE), 'running');
 });
-test('v23 restores a running extraction only after explicit retry', async t => {
+test('v23 restores a running extraction through automatic recovery', async t => {
   await restoreSavedDeferredJob(await deferredHarness(t, PILOT012_V23_PARTICIPANT_PROFILE), 'running');
 });
 
-test('v20 model mismatch preserves the published reply and blocks later decisions and submission', async t => {
+test('v20 model mismatch preserves the published reply and resumes after the blocked boundary', async t => {
   const { h, transport, id, key } = await deferredHarness(t);
   transport.options.wrongPhase = 'ai_extraction';
   await jsonOk(await h.request('message', { expectedRecordId: id, text: p5Question }));
@@ -2453,12 +2524,19 @@ test('v20 model mismatch preserves the published reply and blocks later decision
   assert.equal(failed.queueState.privateState.deferredAiExtraction.error, 'model_mismatch');
   assert.equal(failed.queueState.privateState.aiPublic.pending, null);
   const viewer = (await jsonOk(await h.request('state'))).trial;
-  assert.equal(viewer.dialogueRecovery, 'unavailable');
+  assert.equal(viewer.dialogueRecovery, 'active');
+  assert.equal(viewer.recovering, true);
   assert.equal((await h.request('ai-submit', { expectedRecordId: id })).status, 409);
   const phases = [...transport.textPhases];
   await jsonOk(await h.request('message', { expectedRecordId: id, text: p5Support, clientId: 'v20-after-mismatch' }));
   await h.idle();
   assert.deepEqual(transport.textPhases, phases);
+  transport.options.wrongPhase = '';
+  await h.recover();
+  const recovered = await h.storage.get(key);
+  assert.deepEqual(recovered.events.slice(0, failed.events.length), failed.events);
+  assert.equal(recovered.queueState.pendingHumanEventIds.length, 0);
+  assert.equal(recovered.jevLedger.modelMismatchPosts, 1);
 });
 
 for (const [version, profile] of [['v20', PILOT012_V20_PARTICIPANT_PROFILE], ['v21', PILOT012_V21_PARTICIPANT_PROFILE]] as const)
@@ -2655,80 +2733,46 @@ test('human-led move-on keeps the v15 pin and requires its committed trace on co
 });
 
 for (const strategy of ['repair-first', 'bypass-enabled']) {
-  test('#206 Worker interrupt pauses a failed ' + strategy + ' turn across cold restore', async t => {
+  test('#206 Worker preserves an explicitly paused ' + strategy + ' turn across cold restore', async t => {
     const order = strategy === 'repair-first' ? ['repair-first', 'bypass-enabled'] : ['bypass-enabled', 'repair-first'];
     const h = harness(true, { ...figureBankProtocol, allowedOrders: [order] });
     const transport = v12Transport(t, h);
     h.env.PARTICIPANT_DIALOGUE_PROFILE = 'participant_dialogue_v12_naming_v4';
-    const interrupt = (expectedRecordId: string, authenticated = true) => h.browserRequest(
-      new Request('https://session.invalid/api/interrupt', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json',
-          ...(authenticated ? { Cookie: 'tangram_session=' + 'c'.repeat(64) } : {}) },
-        body: JSON.stringify({ expectedRecordId }),
-      }),
-    );
-    const assertError = async (response: Response, status: number, error: string) => {
-      assert.equal(response.status, status);
-      assert.deepEqual(await response.json(), { error });
-    };
-
     await h.receive();
     await h.approve();
     const { trial } = await jsonOk(await h.start());
     const id = trial.sessionId;
     const key = 'record:' + id;
-    await assertError(await interrupt(id), 409, 'ai_busy');
 
     h.controlled.rejectJev = true;
     const { eventId } = await jsonOk(await h.request('message', {
       expectedRecordId: id, clientId: 'pause-synthetic', text: 'この形を確認したいです。',
     }));
     await h.idle();
-    assert.equal((await jsonOk(await h.request('state'))).trial.dialogueRecovery, 'retry');
-    const failedRetry = await jsonOk(await h.request('retry', { expectedRecordId: id }));
-    assert.equal(failedRetry.trial.dialogueRecovery, 'retry');
+    assert.equal((await jsonOk(await h.request('state'))).trial.recovering, true);
     const failed = await h.storage.get(key);
     assert.equal(failed.assignment.strategy, strategy);
     assert.equal(failed.jevLedger.halted, false);
     assert.deepEqual(failed.queueState.pendingHumanEventIds, [eventId]);
     const sends = { choices: h.calls.length, text: transport.textPhases.length };
-    await assertError(await interrupt(id, false), 401, 'session_required');
-    await assertError(await interrupt('stale-record-id'), 409, 'trial_changed');
-    assert.deepEqual(await h.storage.get(key), failed);
-
-    h.evict();
-    const paused = (await jsonOk(await interrupt(id))).trial;
-    assert.equal(paused.dialogueRecovery, 'paused');
-    assert.equal(paused.aiStatus, 'error');
-    assert.equal(paused.events.at(-1).id, eventId);
-    const saved = await h.storage.get(key);
-    assert.equal(saved.dialogueInterruption, 'participant_paused');
-    assert.deepEqual(saved.events, failed.events);
-    assert.deepEqual(saved.queueState, failed.queueState);
-    assert.deepEqual(saved.jevTraces, failed.jevTraces);
-
+    const saved = { ...failed, dialogueInterruption: 'participant_paused' };
+    await h.storage.transaction(async tx => {
+      const owner = await tx.get('base:owner:v1');
+      owner.admissions[owner.activeKey].record = saved;
+      await tx.put({ [key]: saved, 'base:owner:v1': owner, active: saved });
+    });
     h.evict();
     const restored = (await jsonOk(await h.request('state'))).trial;
     assert.equal(restored.sessionId, id);
     assert.equal(restored.dialogueRecovery, 'paused');
-    assert.deepEqual(restored.events, paused.events);
-    assert.equal((await jsonOk(await interrupt(id))).trial.dialogueRecovery, 'paused');
+    assert.equal(restored.aiStatus, 'error');
+    assert.equal(restored.recovering, undefined);
+    assert.equal(restored.events.at(-1).id, eventId);
+    await h.alarm();
     const repeatedPause = await h.storage.get(key);
     assert.deepEqual({ ...repeatedPause, updatedAt: saved.updatedAt }, saved);
     assert.equal(h.calls.length, sends.choices);
     assert.equal(transport.textPhases.length, sends.text);
-
-    h.controlled.rejectJev = false;
-    const resumed = (await jsonOk(await h.request('retry', { expectedRecordId: id }))).trial;
-    assert.equal(resumed.dialogueRecovery, 'active');
-    const completedTurn = await h.storage.get(key);
-    assert.equal(Object.hasOwn(completedTurn, 'dialogueInterruption'), false);
-    assert.deepEqual(completedTurn.queueState.pendingHumanEventIds, []);
-    assert.deepEqual(completedTurn.events.slice(0, failed.events.length), failed.events);
-    assert.equal(completedTurn.events.length, failed.events.length + 1);
-    assert.equal(completedTurn.events.at(-1).speaker, 'ai');
-    assert.equal(completedTurn.jevTraces.at(-1).lastEventId, eventId);
   });
 }
 
@@ -2880,8 +2924,7 @@ for (const { order, dialogueProfile, scope } of [
       assert.equal(h.calls.length, count);
       h.controlled.rejectJev = false;
       const retryPromptStart = v12.prompts.length;
-      await jsonOk(await h.request('retry', { expectedRecordId: id }));
-      await h.idle();
+      await h.recover();
       const retried = await h.storage.get(key);
       assert.deepEqual(retried.queueState.pendingHumanEventIds, []);
       assert.equal(retried.jevTraces.at(-1).lastEventId, pendingId);
@@ -2968,7 +3011,7 @@ for (const phase of ['initial_observation', 'dialogue', 'reobservation', 'genera
     if (phase === 'final_submission') {
       const submitted = await h.request('names', { expectedRecordId: id, confirm: true, expectedEventCount: trial.events.length,
         names: Object.fromEntries(trial.scene.shapes.map(({ id }: { id: string }) => [id, null])) });
-      assert.notEqual(submitted.status, 200);
+      assert.equal((await jsonOk(submitted)).trial.recovering, true);
       const record = await h.storage.get('record:' + id);
       assert.equal(record.aiSubmission, null);
       assert.equal(record.jevLedger.halted, true);
@@ -3261,9 +3304,9 @@ for (const { dialogueProfile, generation } of [
       assert.deepEqual(failed.queueState.privateState, initial.queueState.privateState);
       h.evict();
       const pending = (await jsonOk(await h.request('state'))).trial;
-      assert.equal(pending.dialogueRecovery, 'retry');
-      await jsonOk(await h.request('retry', { expectedRecordId: id }));
-      await h.idle();
+      assert.equal(pending.dialogueRecovery, 'active');
+      assert.equal(pending.recovering, true);
+      await h.recover();
     }
     const speaking = await h.storage.get(recordKey);
     assert.equal(speaking.queueState.errorCode, null);
@@ -3400,4 +3443,135 @@ test('a missing prepared cache refuses start before consuming admission, while a
   assert.deepEqual(state.trial.events, trial.events);
   assert.equal(h.calls.length, posts);
   assert.doesNotMatch(JSON.stringify(state), /preparedObservation|bundleId|cacheKey|memoSha256/u);
+});
+
+test('a cold GET completes the same start intent after the active commit fails', async t => {
+  const h = harness(true, protocol, true);
+  await h.prepare();
+  await h.receive();
+  const approved = await h.approve();
+  const intent = { version: 2, expectedReceptionRevision: approved.revision, startIntentId: crypto.randomUUID() };
+  let failed = false;
+  const ownerKey = 'base:owner:v1';
+  h.storage.hooks.beforePut = async (key, value) => {
+    if (!failed && key === ownerKey && value.admissions[value.activeKey]?.status === 'active') {
+      failed = true;
+      throw new Error('synthetic active commit failure');
+    }
+  };
+  t.after(() => { h.storage.hooks.beforePut = undefined; });
+  const first = await jsonOk(await h.request('start', intent));
+  assert.equal(failed, true);
+  assert.equal(first.startIntentId, intent.startIntentId);
+  assert.equal(first.starting, true);
+  assert.equal(first.trial, null);
+  assert.equal(first.busy, true);
+  const owner = await h.storage.get(ownerKey);
+  const saved = owner.admissions[owner.activeKey];
+  assert.equal(saved.status, 'failed');
+  assert.equal(saved.errorCode, 'record_write_failed');
+  const before = h.calls.length;
+  await h.settleBackground();
+  h.evict();
+  const firstRead = await jsonOk(await h.request('state'));
+  assert.equal(firstRead.starting, true);
+  assert.equal(firstRead.startIntentId, intent.startIntentId);
+  const replayed = h.request('start', intent);
+  const repeated = h.request('state');
+  await h.settleBackground();
+  const [started] = await Promise.all([h.request('state').then(jsonOk), replayed.then(jsonOk), repeated.then(jsonOk)]);
+  assert.equal(started.startIntentId, intent.startIntentId);
+  assert.equal(started.starting, undefined);
+  assert.equal(started.trial.sessionId, saved.record.recordId);
+  assert.equal(started.trial.events.length, 1);
+  assert.equal((await h.storage.get('reception:v1')).trials.length, 1);
+  const durable = await h.storage.get(ownerKey);
+  assert.equal(durable.admissions[durable.activeKey].assignment.assignmentId, saved.assignment.assignmentId);
+  assert.equal(h.calls.length, before, 'the prepared memo and stored opening survive construction');
+  for (const changed of [{ ...intent, expectedReceptionRevision: intent.expectedReceptionRevision + 1 }, { ...intent, startIntentId: crypto.randomUUID() }]) {
+    const refused = await h.request('start', changed);
+    assert.equal(refused.status, 409);
+    assert.deepEqual(await refused.json(), { error: 'trial_changed' });
+  }
+});
+
+test('an administrator ending a preparing reception wins against a concurrent GET restore', async t => {
+  const h = harness();
+  await h.receive();
+  const approved = await h.approve();
+  const intent = { version: 2, expectedReceptionRevision: approved.revision, startIntentId: crypto.randomUUID() };
+  h.storage.hooks.beforePut = async key => {
+    if (key.startsWith('participant-usage:')) {
+      h.storage.hooks.beforePut = undefined;
+      throw new Error('synthetic admitted start interruption');
+    }
+  };
+  const initial = await jsonOk(await h.request('start', intent));
+  assert.equal(initial.starting, true);
+  await h.storage.transaction(async tx => {
+    const owner = await tx.get('base:owner:v1');
+    const entry = owner.admissions[owner.activeKey];
+    assert.equal(entry.record, null);
+    entry.status = 'preparing'; entry.errorCode = null; delete entry.failureCause;
+    await tx.put({ 'base:owner:v1': owner });
+  });
+  const reading = gate(), release = gate();
+  t.after(release.resolve);
+  let reads = 0;
+  h.storage.hooks.beforeGet = async key => {
+    if (key === 'reception:v1' && ++reads === 2) { reading.resolve(); await release.promise; }
+  };
+  const calls = h.calls.length;
+  const state = h.request('state');
+  await reading.promise;
+  h.storage.hooks.beforeGet = undefined;
+  await h.forceEnd();
+  release.resolve();
+  const finished = await jsonOk(await state);
+  assert.equal(finished.interrupted, true);
+  assert.equal(finished.starting, undefined);
+  assert.equal((await h.request('start', intent)).status, 409);
+  await h.alarm();
+  const owner = await h.storage.get('base:owner:v1');
+  assert.equal(owner.admissions[owner.activeKey].errorCode, 'start_interrupted');
+  assert.equal(owner.admissions[owner.activeKey].record, null);
+  assert.equal(h.calls.length, calls);
+  assert.equal(await h.storage.getAlarm(), null);
+});
+
+test('v23 recovers generated opening and final submission without another participant POST', { timeout: 20_000 }, async t => {
+  const h = harness(true, figureBankProtocol);
+  const transport = v12Transport(t, h);
+  transport.options.sharedReading = true;
+  h.env.PARTICIPANT_DIALOGUE_PROFILE = PILOT012_V23_PARTICIPANT_PROFILE;
+  h.env.PARTICIPANT_AI_PROXY.participantInitialObservationPolicy = transport.observationPolicy;
+  const failures = new Set(['generation', 'final_submission']);
+  transport.options.beforeTextResponse = async phase => failures.delete(phase) ? new Response(null, { status: 503 }) : undefined;
+  await h.receive();
+  const approved = await h.approve();
+  delete approved.plan.openingMode; // A frozen reception from before scripted openings.
+  await h.storage.put({ 'reception:v1': approved });
+  const startIntentId = crypto.randomUUID();
+  const { trial: opening } = await jsonOk(await h.request('start', { version: 2, expectedReceptionRevision: approved.revision, startIntentId }));
+  assert.equal(opening.recovering, true);
+  assert.deepEqual(opening.events, []);
+  await h.recover();
+  const { trial: ready } = await jsonOk(await h.request('state'));
+  assert.equal(ready.sessionId, opening.sessionId);
+  assert.equal(ready.events.length, 1);
+  assert.equal(ready.events[0].speaker, 'ai');
+  const submitted = await jsonOk(await h.request('names', { confirm: true, expectedRecordId: ready.sessionId, expectedEventCount: ready.events.length,
+    names: Object.fromEntries(ready.scene.shapes.map(({ id }: { id: string }) => [id, null])) }));
+  assert.equal(submitted.trial.submitted, true);
+  assert.equal(submitted.trial.aiSubmitted, false);
+  assert.equal(submitted.trial.recovering, true);
+  h.evict();
+  await jsonOk(await h.request('state'));
+  await h.recover();
+  const done = await h.storage.get('record:' + ready.sessionId);
+  assert.equal(done.status, 'completed');
+  assert.deepEqual(done.events.map((event: any) => event.id), ready.events.map((event: any) => event.id));
+  assert.ok(done.aiSubmission && done.scoring?.result);
+  assert.equal(transport.textPhases.filter(phase => phase === 'final_submission').length, 2);
+  assert.equal(await h.storage.getAlarm(), null);
 });
