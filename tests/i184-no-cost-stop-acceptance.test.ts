@@ -74,6 +74,7 @@ type Reply = (role: Role, phase: string, signal: AbortSignal | null) => Promise<
 function memory() {
   let entries = new Map<string, any>();
   let queue: Promise<unknown> = Promise.resolve();
+  let onCommit: (() => void) | undefined;
   const view = (values: Map<string, any>) => ({
     async get(key: string) { return structuredClone(values.get(key)); },
     async put(updates: Record<string, unknown>) {
@@ -92,6 +93,7 @@ function memory() {
         const staged = new Map(entries); // Values cross the transaction only through cloning get/put.
         const result = await fn(view(staged));
         entries = staged;
+        onCommit?.();
         return result;
       });
       queue = operation.catch(() => {});
@@ -102,6 +104,17 @@ function memory() {
       const replacement = memory();
       await replacement.transaction(tx => tx.put(Object.fromEntries(entries)));
       return replacement;
+    },
+    waitFor(key: string, predicate: (value: any) => boolean) {
+      assert.equal(onCommit, undefined);
+      return new Promise<void>(resolve => {
+        onCommit = () => {
+          if (!predicate(entries.get(key))) return;
+          onCommit = undefined;
+          resolve();
+        };
+        onCommit();
+      });
     },
   };
 }
@@ -253,6 +266,7 @@ function harness(t: TestContext) {
     return instance;
   }
   let session = worker();
+  t.after(() => session.trial?.stopForAdmin?.());
   const request = (path: string, body?: unknown, method = body === undefined ? 'GET' : 'POST'): Promise<Response> =>
     participantModule.default.fetch(new Request('https://example.invalid/api/' + path, {
       method, headers: { Cookie: 'tangram_session=' + id, 'Content-Type': 'application/json' },
@@ -291,7 +305,16 @@ function harness(t: TestContext) {
     },
     send(recordId: string, clientId: string) { return request('message', { expectedRecordId: recordId, clientId, text: human }); },
     async idle() { await session.trial?.whenIdle(); },
+    async recover() {
+      const keepAlive = setTimeout(() => {}, 9_000);
+      try { await session.trial?.whenIdle({ signal: AbortSignal.timeout(8_000) }); }
+      finally { clearTimeout(keepAlive); }
+    },
     record(recordId: string) { return storage.get('record:' + recordId); },
+    waitForLunaUsage(assignmentId: string) {
+      return storage.waitFor('participant-usage:' + assignmentId, usage => usage?.latest.luna?.status === 'ok' &&
+        usage.latest.luna.phase === 'generation');
+    },
     adminRecord(recordId: string) { return session.adminRecord(recordId); },
     async forceEndReception() {
       const saved = await reception();
@@ -299,6 +322,7 @@ function harness(t: TestContext) {
     },
     async evict({ detached = false } = {}) {
       if (detached) storage = await storage.copy();
+      session.trial?.stopForAdmin?.();
       session = worker();
     },
     async finish(recordId: string, trial: { scene: { shapes: Array<{ id: string }> }; events: unknown[] }) {
@@ -443,7 +467,7 @@ function productionUsage(record: { jevLedger: unknown } | null) {
 const total = (usage: ProductionUsage, role: Role, field: keyof Meter) =>
   Object.values(usage.phases[role]).reduce((count, phase) => count + phase[field], 0);
 
-test('force end keeps the pinned archive and exported usage settles after the stopped turn', async t => {
+test('force end keeps the pinned archive and exported usage settles after the stopped turn', { timeout: 20_000 }, async t => {
   const h = harness(t);
   await h.receive();
   await h.settleBackground();
@@ -465,8 +489,10 @@ test('force end keeps the pinned archive and exported usage settles after the st
     const interrupted = await h.record(recordId);
     assert.deepEqual(interrupted, { ...before, status: 'interrupted', updatedAt: interrupted.termination.at,
       termination: { at: interrupted.updatedAt, by: 'admin' } });
+    const settled = h.waitForLunaUsage(before.assignment.assignmentId);
     release.resolve();
     await h.settleBackground();
+    await settled;
     assert.equal(h.calls.length, posts);
     assert.deepEqual(await h.record(recordId), interrupted);
     assert.deepEqual((await h.reception()).plan, plan);
@@ -550,18 +576,23 @@ test('a normal response with missing cost is recorded independently from a 402 o
     assert.equal(total(rejected, 'jev', 'unknownPosts'), total(previousUsage, 'jev', 'unknownPosts') + 1);
     assert.equal(total(rejected, 'jev', 'missingCostPosts'), total(previousUsage, 'jev', 'missingCostPosts') + 1);
     assert.equal(total(rejected, 'jev', 'knownUsd'), total(previousUsage, 'jev', 'knownUsd'));
+    const requests = h.calls.length;
+    const { trial: waiting } = await ok(await h.request('state'));
+    assert.equal(waiting.dialogueRecovery, 'active');
+    assert.equal(waiting.recovering, true);
+    assert.equal(h.calls.length, requests, 'GET does not bypass backoff');
     h.controlled.reply = undefined;
-    await ok(await h.request('retry', { expectedRecordId: recordId }));
-    await h.idle();
+    await h.recover();
     const retried = await h.record(recordId);
     assert.equal(recordPublicError(retried), null);
     assert.equal(publicAi(retried), ++visible);
     previousUsage = productionUsage(retried);
+    assert.equal(total(previousUsage, 'jev', 'unknownPosts'), total(rejected, 'jev', 'unknownPosts'));
   }
 });
 
 for (const modelOnly of [false, true]) {
-  test('historical ' + (modelOnly ? 'model-only' : 'model-and-limits') + ' admission retains the budget after eviction', async t => {
+  test('historical ' + (modelOnly ? 'model-only' : 'model-and-limits') + ' admission observes old thresholds without stopping in production', async t => {
     const h = harness(t);
     h.env.PARTICIPANT_TERRA_PROFILE = undefined;
     await h.receive();
@@ -578,18 +609,24 @@ for (const modelOnly of [false, true]) {
     h.controlled.charge = true;
     h.controlled.classifyClaims = !modelOnly;
     if (modelOnly) h.controlled.lunaTokens = previousLimits.lunaTokens + 1;
-    let stopped = initial;
-    for (let index = 0; index < 4 && !recordPublicError(stopped); index++) {
-      stopped = await turn(h, recordId, 'historical-over-limit-' + index);
+    let continued = initial;
+    for (let index = 0; index < 4; index++) {
+      continued = await turn(h, recordId, 'historical-over-limit-' + index);
+      assert.equal(recordPublicError(continued), null);
+      assert.equal(publicAi(continued), publicAi(initial) + index + 1);
     }
-    assert.notEqual(recordPublicError(stopped), null);
-    assert.equal(stopped.jevLedger.haltReason, modelOnly ? 'luna_token_budget' : 'observed_jev_budget');
-    assert.ok(publicAi(stopped) < publicAi(initial) + 4);
-    assert.equal(Object.hasOwn(stopped.options, 'participantRuntimeProfile'), false);
+    const usage = continued.jevLedger;
+    assert.equal(usage.budgetEnforcement, 'observe_only');
+    assert.equal(usage.halted, false);
+    assert.ok(usage.thresholdsReached.includes(modelOnly ? 'lunaTokens' : 'jevUsd'));
+    assert.ok(modelOnly ? usage.observedLunaTokens > previousLimits.lunaTokens : usage.observedJevUsd > previousLimits.jevUsd);
+    assert.deepEqual(usage.sends.slice(0, initial.jevLedger.sends.length), initial.jevLedger.sends);
+    assert.equal(Object.hasOwn(continued.options, 'participantRuntimeProfile'), false);
     const alreadySent = h.calls.length;
     await h.evict();
-    await ok(await h.request('state'));
-    await h.request('retry', { expectedRecordId: recordId });
+    const { trial: restored } = await ok(await h.request('state'));
+    assert.equal(restored.sessionId, recordId);
+    assert.equal(restored.recovering, undefined);
     assert.equal(h.calls.length, alreadySent);
     assert.deepEqual((await h.record(recordId)).jevLedger.limits, previousLimits);
   });
@@ -628,7 +665,7 @@ test('diagnostic and isolated budgets still stop at the approved limits', () => 
   assert.throws(() => missing.reserve('luna', 'generation', 1), /budget_stop/u);
 });
 
-test('duplicate submissions reuse the queued event and the public retry rate limit prevents a new send', { timeout: 6000 }, async t => {
+test('duplicate submissions reuse the queued event and the public action rate limit prevents a new send', { timeout: 6000 }, async t => {
   const h = harness(t);
   await h.receive();
   const recordId = (await h.start()).trial.sessionId;
@@ -660,56 +697,64 @@ test('duplicate submissions reuse the queued event and the public retry rate lim
   const before = h.calls.length;
   assert.equal((await ok(await h.send(recordId, 'duplicate-client-id'))).eventId, eventId);
   h.controlled.rateLimited = true;
-  const denied = await h.request('retry', { expectedRecordId: recordId });
+  const denied = await h.send(recordId, 'duplicate-client-id');
   assert.equal(denied.status, 429);
   assert.equal(denied.headers.get('Retry-After'), '60');
   assert.equal(h.calls.length, before);
 });
 
-test('a sent but unresolved POST does not automatically repeat on Worker reconstruction', { timeout: 6000 }, async t => {
+test('cold GET recovers an unresolved POST with the same event and keeps the old reservation unknown', { timeout: 20_000 }, async t => {
   const h = harness(t);
   await h.receive();
   const recordId = (await h.start()).trial.sessionId;
   const original = await h.record(recordId);
   const entered = latch();
   const release = latch();
+  const lateSpeech = '古い要求だけの合成返答です。';
   let held = false;
-  h.controlled.reply = async role => {
-    if (role === 'luna' && !held) {
+  h.controlled.reply = async (role, phase) => {
+    if (role === 'luna' && phase === 'generation' && !held) {
       held = true;
       entered.resolve();
       await release.promise;
+      return Response.json({ model: pin.lunaModelId, choices: [{ message: { content: lateSpeech }, finish_reason: 'stop' }],
+        usage: { prompt_tokens: 5, completion_tokens: 3, cost: 0 } });
     }
     return undefined;
   };
   let originalIdle: Promise<void> | undefined;
   const countBefore = h.calls.length;
   try {
-    await ok(await h.send(recordId, 'interrupted-client-id'));
+    const { eventId } = await ok(await h.send(recordId, 'interrupted-client-id'));
     await entered.promise;
     originalIdle = h.idle();
     const interrupted = await h.record(recordId);
-    assert.equal(interrupted.queueState.pendingHumanEventIds.length, 1);
+    assert.deepEqual(interrupted.queueState.pendingHumanEventIds, [eventId]);
+    assert.equal(publicAi(interrupted), publicAi(original));
     const sent = h.calls.length;
-    assert.equal(sent, countBefore + 1);
+    assert.equal(h.calls.slice(countBefore).filter(call => call.phase === 'generation').length, 1);
+    const reserved = productionUsage(await h.adminRecord(recordId));
+    assert.equal(total(reserved, 'luna', 'unknownPosts'), 1);
+    assert.equal(reserved.latest.luna?.status, 'reserved');
     await h.evict({ detached: true });
-    assert.equal((await ok(await h.request('state'))).trial.sessionId, recordId);
-    await h.idle();
-    const restored = await h.record(recordId);
-    assert.equal(h.calls.length, sent);
-    assert.equal(publicAi(restored), publicAi(original));
-    assert.deepEqual(restored.queueState.pendingHumanEventIds, interrupted.queueState.pendingHumanEventIds);
-    assert.notEqual(recordPublicError(restored), null, 'the pending turn is available for explicit retry');
-    const interruptedUsage = productionUsage(restored);
-    assert.equal(total(interruptedUsage, 'luna', 'unknownPosts'), 1);
-    assert.equal(interruptedUsage.latest.luna?.status, 'reserved');
-    await ok(await h.request('retry', { expectedRecordId: recordId }));
+    const { trial } = await ok(await h.request('state'));
+    assert.equal(trial.sessionId, recordId);
+    assert.equal(trial.events.find((event: { id: string }) => event.id === eventId)?.clientId, 'interrupted-client-id');
     await h.idle();
     const finished = await h.record(recordId);
     assert.equal(recordPublicError(finished), null);
+    assert.equal(finished.queueState.requestSeq, interrupted.queueState.requestSeq + 1);
+    assert.deepEqual(finished.queueState.pendingHumanEventIds, []);
+    assert.deepEqual(finished.events.slice(0, -1), interrupted.events);
     assert.equal(publicAi(finished), publicAi(original) + 1);
     assert.equal(h.calls.slice(sent).filter(call => call.phase === 'generation').length, 1);
     assert.equal(total(productionUsage(finished), 'luna', 'unknownPosts'), 1);
+    release.resolve();
+    await originalIdle;
+    await h.settleBackground();
+    const { trial: state } = await ok(await h.request('state'));
+    assert.equal(state.events.length, finished.events.length);
+    assert.ok(state.events.every((event: { text: string }) => event.text !== lateSpeech));
   } finally {
     release.resolve();
     await originalIdle;
