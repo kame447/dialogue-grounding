@@ -93,8 +93,12 @@ function storeDraft() {
   // An earlier trial opened for review never touches the active trial's draft.
   if (!trialIdentity(current) || reviewing) return;
   const unsent = pending.filter((item) => item.status !== "rejected" && !item.legacy);
+  const intent = pendingSubmission;
   try { sessionStorage.setItem(draftKey, JSON.stringify({ trial: trialIdentity(current), stage: localStage,
-    review: reviewStage, answers: [...answers], pending: unsent })); } catch { /* Storage may be disabled. */ }
+    review: reviewStage, answers: [...answers], pending: unsent,
+    ...(intent ? { pendingSubmission: { recordId: intent.body.expectedRecordId, sessionId: intent.sessionId,
+      eventCount: intent.eventCount, retryAt: intent.retryAt, retryWait: intent.retryWait, posting: intent.posting } } : {}),
+  })); } catch { /* Storage may be disabled. */ }
 }
 function clearDraft() {
   if (reviewing) return;
@@ -110,7 +114,8 @@ function restoreDraft(trial, composer = "") {
       (entry[1] === null || (typeof entry[1] === "string" && entry[1].trim() && entry[1].length <= 200))));
     localStage = draft.stage === "names" ? "names" : "chat";
     reviewStage = STAGES.includes(draft.review) ? draft.review : null;
-    if (trial.sessionId && !trial.closed && !trial.submitted && !trial.humanSubmitted && (!trial.status || trial.status === "dialogue")) {
+    const canRestore = trial.sessionId && !trial.closed && !trial.submitted && !trial.humanSubmitted && (!trial.status || trial.status === "dialogue");
+    if (canRestore) {
       const seen = new Set();
       for (const item of Array.isArray(draft.pending) ? draft.pending : []) {
         if (item?.recordId !== trial.sessionId || item.sessionId !== (requestSession() ?? null) ||
@@ -125,6 +130,21 @@ function restoreDraft(trial, composer = "") {
           retryAt: item.status === "sending" ? Math.max(retryAt, Date.now() + MESSAGE_RETRY_MS) : retryAt,
           retryWait: Number.isFinite(item.retryWait) ? item.retryWait : 0 });
       }
+    }
+    const intent = draft.pendingSubmission;
+    if (intent && canRestore && localStage === "names" && intent.recordId === trial.sessionId &&
+        intent.sessionId === (requestSession() ?? null) && intent.eventCount === eventsFor(trial).length &&
+        ids.size && [...ids].every((id) => answers.has(id))) {
+      const names = Object.fromEntries([...ids].map((id) => [id, answers.get(id)]));
+      const retryAt = Number.isFinite(intent.retryAt) ? intent.retryAt : 0;
+      pendingSubmission = { body: { names, confirm: true, expectedRecordId: trial.sessionId,
+        ...(intent.sessionId ? { expectedEventCount: intent.eventCount } : {}) },
+        sessionId: intent.sessionId, eventCount: intent.eventCount,
+        retryAt: intent.posting ? Math.max(retryAt, Date.now() + MESSAGE_RETRY_MS) : retryAt,
+        retryWait: Number.isFinite(intent.retryWait) ? intent.retryWait : 0 };
+    } else if (intent) {
+      delete draft.pendingSubmission;
+      sessionStorage.setItem(draftKey, JSON.stringify(draft));
     }
   } catch { /* Ignore unavailable or invalid browser drafts. */ }
   finally { if (composer) $("utterance").value = composer; }
@@ -636,12 +656,15 @@ function render(state) {
   restoreStartAttempt();
   if (state.interrupted || ["interrupted", "cancelled", "finished"].includes(state.reception?.status)) {
     openingStart = null; storeStartAttempt();
+    if (state.interrupted || ["interrupted", "cancelled"].includes(state.reception?.status)) {
+      pendingSubmission = null; clearDraft();
+    }
   }
   current = trial; serverBusy = Boolean(state.busy || trial?.busy); serverStarting = state.starting === true;
   if (pendingSubmission && (submitted() || state.interrupted || !dialogueOpen() ||
       events().length !== pendingSubmission.eventCount)) {
     if (dialogueOpen() && !state.interrupted) $("notice").textContent = participantMessage("trial_changed");
-    pendingSubmission = null;
+    pendingSubmission = null; storeDraft();
   }
   if (openingStart && state.startIntentId === openingStart.body.startIntentId) {
     openingStart.admitted = true; storeStartAttempt();
@@ -1374,6 +1397,7 @@ $("submission").addEventListener("submit", (event) => {
 $("confirm-cancel").addEventListener("click", () => closeDialog("confirm-dialog"));
 async function postNames(attempt) {
   attempt.posting = true;
+  storeDraft();
   stateEpoch++;
   $("notice").textContent = "";
   setControls(); scheduleRefresh();
@@ -1385,7 +1409,7 @@ async function postNames(attempt) {
   } catch (error) {
     if (pendingSubmission !== attempt) return;
     if (!isTransientRequestError(error) && !["already_submitted", "submission_error"].includes(error.code)) {
-      pendingSubmission = null;
+      pendingSubmission = null; storeDraft();
       $("notice").textContent = participantMessage(error.code);
       operationStop = $("notice").textContent === STOPPED ? progressSignature() : null;
     }
@@ -1394,7 +1418,7 @@ async function postNames(attempt) {
     attempt.retryWait = Math.min(CHAT_STALL_MS, attempt.retryWait ? attempt.retryWait * 2 : MESSAGE_RETRY_MS);
     attempt.retryAt = Date.now() + attempt.retryWait;
     setControls(); scheduleRefresh();
-    if (pendingSubmission === attempt) void refreshState();
+    if (pendingSubmission === attempt) { storeDraft(); void refreshState(); }
   }
 }
 $("confirm-submit").addEventListener("click", () => {

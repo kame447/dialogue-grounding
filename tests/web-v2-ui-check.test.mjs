@@ -63,13 +63,15 @@ function trial(id = "trial-private") {
   } };
 }
 const tick = async () => { for (let i = 0; i < 40; i++) await Promise.resolve(); };
-async function ui(initial = trial(), handler) {
+async function ui(initial = trial(), handler, { tabSessionId, storage = new Map(), startTime = 10000 } = {}) {
   const { root, ids: e } = makeDOM();
-  let state = { trial: initial }, timerId = 0, now = 10000, clientSequence = 0;
+  let state = { trial: initial }, timerId = 0, now = startTime, clientSequence = 0;
   const timers = new Map(), calls = [];
   runInNewContext(script, {
     Date: class extends Date { static now() { return now; } },
     crypto: { randomUUID: () => "browser-client-" + ++clientSequence },
+    ...(tabSessionId ? { TangramTabSession: { resolve: async () => ({ kind: "restored", sessionId: tabSessionId }) } } : {}),
+    sessionStorage: { getItem: (key) => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value), removeItem: (key) => storage.delete(key) },
     document: { getElementById: (id) => e[id], createElement: (tag) => new Element(tag), createElementNS: (_, tag) => new Element(tag) },
     FormData: class {
       constructor(form) { this.values = Object.entries(form.elements).map(([name, node]) => [name, node.value]); }
@@ -79,7 +81,7 @@ async function ui(initial = trial(), handler) {
     clearTimeout: (id) => timers.delete(id),
     fetch: async (path, options) => {
       const body = options?.body ? JSON.parse(options.body) : undefined;
-      calls.push({ path, body });
+      calls.push({ path, body, tabHeader: options?.headers?.["X-Tab-Session"] });
       const custom = await handler?.({ path, body, state });
       let value = state;
       // invalidJson models an HTML error page from a proxy in front of the app.
@@ -105,7 +107,7 @@ async function ui(initial = trial(), handler) {
     }
     assert.fail("fixture timer did not settle");
   };
-  return { e, root, calls, getState: () => state, advance,
+  return { e, root, calls, storage, now: () => now, getState: () => state, advance,
     poll: async () => {
       const timer = [...timers.values()].filter((entry) => entry.delay === 700 || entry.delay === 2000).sort((a, b) => a.at - b.at)[0];
       assert.ok(timer, "a state refresh is scheduled"); await advance(timer.at - now);
@@ -264,6 +266,89 @@ test("a scoring failure keeps polling until automatic final submission completes
   await poll();
   assert.equal(e["submission-status"].textContent, "双方の提出が完了しました。");
   assert.equal(calls.some(call => manualPaths.includes(call.path) || call.path === "/api/names"), false);
+});
+
+const finishAndConfirm = async ({ e }, cancel = false) => {
+  e["finish-conversation"].fire("click");
+  await nameAll(e);
+  e.submission.fire("submit");
+  assert.equal(e["confirm-dialog"].open, true);
+  e[cancel ? "confirm-cancel" : "confirm-submit"].fire("click");
+  await tick();
+};
+const nameCalls = ({ calls }) => calls.filter(call => call.path === "/api/names");
+const originalTab = "same-tab";
+const failedSubmission = (path) => path === "/api/names" ? { status: 409, body: { error: "ai_busy" } } : undefined;
+const reloaded = (first, record, handler, tabSessionId = originalTab) =>
+  ui(record, handler, { tabSessionId, storage: first.storage, startTime: first.now() });
+const storedIntent = ({ storage }) => JSON.parse(storage.get("joint-naming-v2-draft") ?? "null")?.pendingSubmission;
+
+for (const [label, fail] of [
+  ["a busy response", failedSubmission],
+  ["a disconnected POST", (path) => { if (path === "/api/names") throw new TypeError("offline"); }],
+]) {
+  test(`${label} preserves a single confirmed submission across reload until the same trial is ready`, async () => {
+    const first = await ui(trial(), ({ path }) => fail(path), { tabSessionId: originalTab });
+    await finishAndConfirm(first);
+    assert.equal(nameCalls(first).length, 1);
+    assert.equal(storedIntent(first).recordId, "trial-private");
+    let submissions = 0;
+    const next = await reloaded(first, { ...trial(), aiStatus: "thinking", recovering: true }, ({ path, body, state }) => {
+      if (path !== "/api/names") return;
+      submissions++;
+      state.trial = { ...state.trial, aiStatus: "idle", submitted: true, closed: true, humanSubmission: body.names, status: "submitting" };
+      return { status: 200, body: state };
+    });
+    await next.advance(3500);
+    assert.equal(submissions, 0, "the original submission waits for the job");
+    delete next.getState().trial.recovering;
+    next.getState().trial.aiStatus = "idle";
+    await next.advance(700);
+    assert.deepEqual(nameCalls(next), nameCalls(first), "the same names, record, event count and tab are used");
+    assert.equal(next.calls[0].path, "/api/state");
+    assert.equal(submissions, 1);
+    assert.equal(next.e["submission-status"].textContent, WAITING);
+    assert.equal(storedIntent(next), undefined);
+    await next.advance(5000);
+    assert.equal(submissions, 1);
+  });
+}
+
+test("a submitted record found after reload is tracked without another POST", async () => {
+  const first = await ui(trial(), ({ path }) => failedSubmission(path), { tabSessionId: originalTab });
+  await finishAndConfirm(first);
+  const next = await reloaded(first, submittedTrial({ aiSubmitted: false }));
+  assert.equal(next.e["submission-status"].textContent, WAITING);
+  await next.advance(5000);
+  assert.equal(nameCalls(next).length, 0);
+  assert.equal(storedIntent(next), undefined);
+  Object.assign(next.getState().trial, { aiSubmitted: true, status: "completed", resultLocked: true });
+  await next.poll();
+  assert.equal(next.e["submission-status"].textContent, "双方の提出が完了しました。");
+});
+
+test("changed scopes, forced termination and a cancelled confirmation never replay names", async () => {
+  const later = { ...trial(), events: [...trial().events, { id: "later", speaker: "ai", text: "追加の公開返答" }] };
+  for (const [record, tab, ended] of [
+    [trial("new-trial"), originalTab],
+    [trial(), "different-tab"],
+    [later, originalTab],
+    [null, originalTab, true],
+  ]) {
+    const first = await ui(trial(), ({ path }) => failedSubmission(path), { tabSessionId: originalTab });
+    await finishAndConfirm(first);
+    const next = await reloaded(first, record, ({ path }) => ended && path === "/api/state"
+      ? { status: 200, body: { trial: null, interrupted: true } } : undefined, tab);
+    await next.advance(10000);
+    assert.equal(nameCalls(next).length, 0);
+    assert.equal(storedIntent(next), undefined);
+  }
+  const cancelled = await ui(trial(), undefined, { tabSessionId: originalTab });
+  await finishAndConfirm(cancelled, true);
+  const next = await reloaded(cancelled, trial());
+  await next.advance(10000);
+  assert.equal(nameCalls(cancelled).length + nameCalls(next).length, 0);
+  assert.equal(storedIntent(next), undefined);
 });
 
 test("while AI submission is recovering the 60-second copy reports that fact", async () => {
