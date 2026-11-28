@@ -14,7 +14,7 @@ import type { TrialTerminationExpectation } from './trial-termination.ts';
 import { isAdminTermination, isIncompleteTrialStatus } from '../../../../dialogue-model/runtime/v2/admin-termination.ts';
 import { renderQrSvg } from './qr.ts';
 import { createTrialV2, participantView, ROTATION_MODES } from '../../../../dialogue-model/runtime/stimuli/scatter-v2.mjs';
-import { FIGURE_BANK, FIGURE_BANK_VERSION, FIGURE_SETS, validateResolvedFigureSelection } from '../../../../dialogue-model/runtime/stimuli/figure-bank.ts';
+import { FIGURE_BANK, FIGURE_BANK_VERSION, FIGURE_SETS, FIGURE_SET_SIZE, SUPPORTED_FIGURE_COUNTS, validateResolvedFigureSelection } from '../../../../dialogue-model/runtime/stimuli/figure-bank.ts';
 import type { BankFigure } from '../../../../dialogue-model/runtime/stimuli/figure-bank.ts';
 
 export const ADMIN_CSS = `:root{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans JP",sans-serif;font-size:14px;line-height:1.5;color:#222;background:#f7f7f4;--line:#d8d8d2;--accent:#2a5d8f;--tint:#eaf1f8}
@@ -447,16 +447,18 @@ export function renderSettings(view: SettingsView, observations?: PreparedObserv
   const current: Record<string, string> = p ? { figureSetPolicy: p.figureSetPolicy ?? '', seedPolicy: p.seedPolicy, referenceMemory: p.referenceMemory ? 'on' : 'off', betweenTrials: p.betweenTrials,
     rotationMode: p.rotationMode, receptionNumberFormat: p.receptionNumberFormat } : {};
   const orders = new Set(p ? p.allowedOrders.map(o => o.join(',')) : []);
-  // A protocol saved before the figure bank has no figure fields: they stay unselected so the researcher chooses them.
+  // The source and allocation are explicit. A saved random selection without a count denotes the legacy size.
   const selection = p?.figureSelection, policy = p?.figureSetPolicy;
   const customIds = new Set(selection?.mode === 'custom' ? selection.figureIds : []);
-  const randomCount = selection?.mode === 'seeded_random' ? selection.figureCount ?? 6 : undefined;
-  const figureSource = `<fieldset class="figure-source"><legend>図形セット</legend>
-<div><label><input type="radio" name="figureMode" value="preset" required${selection?.mode === 'preset' ? ' checked' : ''}> プリセット</label>
-<div class="sub">${Object.keys(FIGURE_SETS).map(id => `<label><input type="radio" name="figureSetId" value="${escapeHtml(id)}"${selection?.mode === 'preset' && selection.setId === id ? ' checked' : ''}> ${escapeHtml(FIGURE_SET_LABELS[id] ?? id)}</label>`).join('')}</div></div>
+  const randomCount = selection?.mode === 'seeded_random' ? selection.figureCount ?? FIGURE_SET_SIZE : undefined;
+  const currentPreset = selection?.mode === 'preset' ? selection.setId : undefined;
+  const savedPreset = currentPreset && Object.hasOwn(FIGURE_SETS, currentPreset)
+    ? `<div><label><input type="radio" name="figureMode" value="preset" required checked> プリセット</label>
+<div class="sub"><label><input type="radio" name="figureSetId" value="${escapeHtml(currentPreset)}" checked> ${escapeHtml(FIGURE_SET_LABELS[currentPreset] ?? currentPreset)}</label></div></div>` : '';
+  const figureSource = `<fieldset class="figure-source"><legend>図形セット</legend>${savedPreset}
 <div><label><input type="radio" name="figureMode" value="seeded_random" required${selection?.mode === 'seeded_random' ? ' checked' : ''}> シード乱数</label>
-<div class="sub"><label>図形数 <select name="figureCount"><option value="">選択してください</option>${[4, 6].map(count => `<option value="${count}"${randomCount === count ? ' selected' : ''}>${count}</option>`).join('')}</select></label><label>シード <input type="text" name="selectionSeed" inputmode="numeric" autocomplete="off" placeholder="空欄で自動"${selection?.mode === 'seeded_random' && selection.selectionSeed !== null ? ` value="${escapeHtml(selection.selectionSeed)}"` : ''}></label></div></div>
-<div><label><input type="radio" name="figureMode" value="custom" required${selection?.mode === 'custom' ? ' checked' : ''}> 図形を選ぶ（4個または6個）</label>
+<div class="sub"><label>図形数 <select name="figureCount">${SUPPORTED_FIGURE_COUNTS.map(count => `<option value="${count}"${randomCount === count ? ' selected' : ''}>${count}</option>`).join('')}</select></label><label>シード <input type="text" name="selectionSeed" inputmode="numeric" autocomplete="off" placeholder="空欄で自動"${selection?.mode === 'seeded_random' && selection.selectionSeed !== null ? ` value="${escapeHtml(selection.selectionSeed)}"` : ''}></label></div></div>
+<div><label><input type="radio" name="figureMode" value="custom" required${selection?.mode === 'custom' ? ' checked' : ''}> 図形を選ぶ（3個・4個・6個）</label>
 <div class="sub">${FIGURE_BANK.map(f => `<label><input type="checkbox" name="figureIds" value="${escapeHtml(f.id)}"${customIds.has(f.id) ? ' checked' : ''}> ${escapeHtml(f.id)}</label>`).join('')}</div></div></fieldset>`;
   const mark = (on: boolean) => on ? ' checked' : '';
   const fieldset = (name: string, legend: string, choices: [string, string][]) => `<fieldset><legend>${escapeHtml(legend)}</legend>${choices.map(([value, label]) =>
