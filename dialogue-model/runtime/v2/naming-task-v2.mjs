@@ -101,6 +101,7 @@ export function parseAiNamesV2(text, slots) {
 /**
  * @param {{ client, strategy, seed, referenceMemory?: boolean, runDir?: string | null, createTrial?, scoreTrial?,
  *   judge?: import('../judgment/schema.mjs').DialogueJudge | null, now?: () => number, restore?: object | null, onPersist?: Function | null,
+ *   recoveryTimers?: {set(callback: () => void, delayMs: number): ReturnType<typeof setTimeout>, clear(handle: ReturnType<typeof setTimeout>): void},
  *   decisionShadowClient?: {chooseAction(request: object): Promise<any>} | null,
  *   activeDecision?: {purpose: string, client: {chooseAction(request: object): Promise<any>}} | null,
  *   openingMode?: import("./opening-mode.ts").OpeningMode, utteranceStyle?: string, rotationMode?: string, groundingShadow?: import('./grounding-shadow.ts').GroundingShadowOptions | null,
@@ -113,6 +114,7 @@ export function parseAiNamesV2(text, slots) {
 export async function createNamingTaskV2({
   client, strategy, seed, referenceMemory = true, memoryPruneVersion, runDir = process.env.RESEARCH_RUN_DIR,
   createTrial = createTrialV2, scoreTrial = defaultScoreTrial, judge = null, now = () => Date.now(),
+  recoveryTimers = { set(callback, delayMs) { const timer = setTimeout(callback, delayMs); timer.unref?.(); return timer; }, clear: clearTimeout },
   restore = null, onPersist = null, onPersistFailure = null, onPersistSlow = null, decisionShadowClient = null, activeDecision = null, utteranceStyle = "default",
   openingMode = undefined, groundingShadow = null, localGrounding = null, onLocalGroundingTrace = null, jevResearch = null, rotationMode = "relative_pm90", figureSelection = undefined,
 }) {
@@ -324,10 +326,6 @@ export async function createNamingTaskV2({
       if (timing) timing.status = "delivery_unknown";
     }
   }
-  if (initialQueue && usage?.needsExplicitRetry(initialQueue.pendingHumanEventIds.at(-1))) {
-    // A restored POST may already have reached the provider. Reuse the existing queue error/retry path.
-    initialQueue = { ...initialQueue, errorCode: 'ai_unavailable' };
-  }
   async function openingText() {
     try {
       return await generateOpeningV17(messages => trackingClient.complete(messages, { phase: "generation" }));
@@ -340,7 +338,7 @@ export async function createNamingTaskV2({
       if (pendingPublicationId !== null) {
         pendingPublicationId = null;
         publicationAtMs = now();
-        turnTimings.at(-1).publicationDurableAtMs = publicationAtMs;
+        if (deferredExtraction) turnTimings.at(-1).publicationDurableAtMs = publicationAtMs;
       }
       deferredSaveFailed = false;
       return true;
@@ -408,7 +406,7 @@ export async function createNamingTaskV2({
     return finalizeDeferredExtraction(replacePrivateState);
   }
   const createQueue = (opening, saved) => createHumanMessageQueue({ runAiTurn: timedAiTurn, initialPrivateState, now,
-    ...(deferredExtraction ? { afterPublication, beforeRequest } : {}),
+    afterPublication, beforeRequest,
     initialEvents: opening === null ? [] : [{ speaker: "ai", text: opening, nonReferential: true }],
     ...(saved ? { initialState: saved } : {}) });
   const opening = generatedOpening ? restore ? null : await openingText() : scriptedOpening;
@@ -438,6 +436,9 @@ export async function createNamingTaskV2({
   let humanSubmission = restore?.humanSubmission ?? null, aiSubmission = restore?.aiSubmission ?? null,
     result = restore?.scoring?.result ?? null, closed = restore?.closed ?? false,
     finalError = restore?.finalError ?? null;
+  let persistencePending = false, recoveryReady = false;
+  let durableEventCount = initialQueue?.events.length ?? 0;
+  let humanSubmissionDurable = humanSubmission !== null, aiSubmissionDurable = aiSubmission !== null, resultDurable = result !== null;
 
   function publicEvents() {
     return queue.getSnapshot().events.map(({ id, speaker, text, at, clientId }) => ({ id, speaker, text, at,
@@ -498,7 +499,21 @@ export async function createNamingTaskV2({
   }
   async function guardedWrite() {
     persistStage = "build";
-    try { await writeRecord(); } catch (error) { notePersistFailure(error); throw error; }
+    const eventCount = queue.getSnapshot().events.length;
+    const savedHuman = humanSubmission, savedAi = aiSubmission, savedResult = result;
+    try {
+      await writeRecord();
+      durableEventCount = eventCount;
+      humanSubmissionDurable = savedHuman !== null;
+      aiSubmissionDurable = savedAi !== null;
+      resultDurable = savedResult !== null;
+      persistencePending = false;
+    } catch (error) {
+      persistencePending = true;
+      notePersistFailure(error);
+      if (recoveryReady) scheduleRecovery();
+      throw error;
+    }
   }
   // Writes are serialized, and each one writes the latest state at the moment it starts. So at most one write needs to wait behind the running one:
   // a persist() that arrives while a write is queued but not started joins it (the state it asked to save is written by that very write).
@@ -532,7 +547,7 @@ export async function createNamingTaskV2({
     return entry.promise;
   }
   async function writeRecord() {
-    if (!directory && !onPersist) return;
+    if (administrativelyInterrupted || !directory && !onPersist) return;
     const snapshot = queue.getSnapshot();
     markBudgetInterruption(snapshot);
     const durableQueue = queue.getDurableState();
@@ -601,20 +616,14 @@ export async function createNamingTaskV2({
     result = clone(await scoreTrial({ key: clone(trial.key), humanSubmission: toScore(humanSubmission), aiSubmission: toScore(aiSubmission) }));
   }
 
-  // Submissions require every human message to have been answered. An upstream
-  // error leaves messages pending: the participant must retry, not lose them.
+  // A submission never closes an unanswered dialogue.
   function assertSettled() {
-    if (openingPending()) throw new NamingTaskError("ai_retry_required");
-    if (deferredExtraction) {
-      const job = queue.getPrivateState().deferredAiExtraction;
-      if (deferredSaveFailed || job?.state === "failed" || usage?.halted) throw new NamingTaskError("ai_retry_required");
-      if (job || pendingPublicationId !== null || deferredCompletion) throw new NamingTaskError("ai_busy");
-    }
     const snapshot = queue.getSnapshot();
-    if (snapshot.status === "error") throw new NamingTaskError("ai_retry_required");
-    if (snapshot.status !== "idle" || snapshot.pendingHumanEventIds.length) throw new NamingTaskError("ai_busy");
+    if (snapshot.status !== "idle" || openingPending() || persistencePending || pendingPublicationId !== null ||
+        deferredCompletion || deferredExtraction && queue.getPrivateState().deferredAiExtraction) throw new NamingTaskError("ai_busy");
   }
   let aiSubmitting = null;
+  let submissionRequested = humanSubmission !== null || Boolean(closed && finalError);
   let settlementPromise = null;
   function settlePublicOnce() {
     if (!jev || aiPublicSettlement !== null) return Promise.resolve();
@@ -624,7 +633,59 @@ export async function createNamingTaskV2({
     return settlementPromise;
   }
 
-  let recoveryInFlight = null;
+  const recoveryDelays = [2000, 4000, 8000, 16000, 30000, 60000];
+  let recoveryInFlight = null, recoveryTimer = null, retryIndex = 0;
+  const stoppedForBudget = () => dialogueInterruption === "budget_exhausted" ||
+    Boolean(!usage && queue.getSnapshot().status === "error" && jev?.ledger.stopReason());
+  const recoveryAllowed = () => !administrativelyInterrupted && dialogueInterruption !== "participant_paused" && !stoppedForBudget();
+  const submissionPending = () => submissionRequested && (!aiSubmission || humanSubmission && !result);
+  function hasRecoveryWork() {
+    if (!recoveryAllowed()) return false;
+    const snapshot = queue.getSnapshot();
+    return Boolean(persistencePending || submissionPending() || !closed && (openingPending() ||
+      pendingPublicationId !== null || snapshot.pendingHumanEventIds.length ||
+      deferredExtraction && queue.getPrivateState().deferredAiExtraction));
+  }
+  function cancelRecoveryTimer() {
+    if (!recoveryTimer) return;
+    recoveryTimers.clear(recoveryTimer.handle);
+    recoveryTimer.resolve();
+    recoveryTimer = null;
+  }
+  function scheduleRecovery() {
+    if (!hasRecoveryWork()) {
+      cancelRecoveryTimer();
+      retryIndex = 0;
+      return;
+    }
+    if (recoveryTimer || recoveryInFlight || aiSubmitting || queue.isRunning()) return;
+    let resolve;
+    const done = new Promise(callback => { resolve = callback; });
+    const handle = recoveryTimers.set(() => {
+      recoveryTimer = null;
+      startRecovery();
+      resolve();
+    }, recoveryDelays[retryIndex]);
+    recoveryTimer = { handle, done, resolve };
+  }
+  function startRecovery() {
+    if (recoveryInFlight || !hasRecoveryWork()) return recoveryInFlight;
+    recoveryInFlight = Promise.resolve().then(async () => {
+      checkAdminInterruption();
+      if (usage) await usage.resumeAfterModelMismatch();
+      if (persistencePending) await persist();
+      if (!closed) await resumePendingDialogue();
+      if (submissionPending()) await submitAI();
+    }).catch(() => { /* Inputs and candidates remain in the task for the next scheduled attempt. */ }).finally(() => {
+      recoveryInFlight = null;
+      retryIndex = hasRecoveryWork() ? Math.min(retryIndex + 1, recoveryDelays.length - 1) : 0;
+      scheduleRecovery();
+    });
+    return recoveryInFlight;
+  }
+  function followQueue() {
+    queue.whenIdle().then(() => persist()).catch(() => {}).finally(scheduleRecovery);
+  }
   async function resumePendingDialogue() {
     if (openingPending()) {
       if (!openingWritePending) {
@@ -638,53 +699,77 @@ export async function createNamingTaskV2({
       openingWritePending = false;
       return;
     }
-    if (deferredExtraction && (deferredSaveFailed || queue.getPrivateState().deferredAiExtraction)) {
+    if (deferredSaveFailed || deferredExtraction && queue.getPrivateState().deferredAiExtraction) {
       await queue.retry();
       checkAdminInterruption();
       await persist();
       return;
     }
-    const snapshot = queue.getSnapshot();
-    if (snapshot.status !== "error") return;
-    markBudgetInterruption(snapshot);
-    if (dialogueInterruption !== "budget_exhausted") {
-      dialogueInterruption = undefined;
+    if (queue.getSnapshot().pendingHumanEventIds.length) {
       await queue.retry();
       checkAdminInterruption();
+      await persist();
     }
-    await persist();
   }
 
-  await persist();
-  if (deferredExtraction && initialQueue && (initialQueue.privateState.deferredAiExtraction ||
-      queue.getSnapshot().status === "pending")) queue.startPublishedWork();
   const checkAdminInterruption = () => {
     if (administrativelyInterrupted) throw new NamingTaskError("trial_interrupted");
   };
+  function submitAI() {
+    checkAdminInterruption();
+    // Concurrent callers share the same final request.
+    aiSubmitting ??= submitAIOnce().finally(() => { aiSubmitting = null; scheduleRecovery(); });
+    return aiSubmitting;
+  }
+
+  await persist();
+  recoveryReady = true;
+  if (recoveryAllowed() && !closed && !usage?.halted && initialQueue && !initialQueue.errorCode &&
+      (queue.getSnapshot().status === "pending" || initialQueue.privateState.deferredAiExtraction?.state === "queued")) {
+    queue.startPublishedWork();
+    followQueue();
+  } else scheduleRecovery();
   return {
     version: VERSION,
     /** Accept a human message immediately, even while the AI is thinking. */
     message(text, clientId) {
       checkAdminInterruption();
       if (closed) throw new NamingTaskError("dialogue_closed");
-      if (openingPending()) throw new NamingTaskError("ai_retry_required");
+      if (openingPending() || !recoveryAllowed()) throw new NamingTaskError("ai_busy");
       if (typeof text !== "string" || !text.trim() || text.length > 2000) throw new NamingTaskError("invalid_message");
-      if (dialogueRecoveryEnabled) {
-        const snapshot = queue.getSnapshot();
-        const duplicate = clientId !== undefined && snapshot.events.some(event => event.clientId === clientId);
-        if (snapshot.status === "error" && !duplicate) throw new NamingTaskError("ai_retry_required");
-      }
-      const receipt = queue.enqueue({ clientId, text: text.trim() });
-      queue.whenIdle().then(() => persist()).catch(() => {});
+      scheduleRecovery();
+      const startWork = !recoveryTimer && !recoveryInFlight && !usage?.halted;
+      const receipt = queue.enqueue({ clientId, text: text.trim() }, { startWork });
+      if (startWork) followQueue();
+      else scheduleRecovery();
       return { eventId: receipt.event.id, duplicate: receipt.duplicate };
     },
-    async whenIdle() { await queue.whenIdle(); await persist(); },
+    hasRecoveryWork,
+    async whenIdle({ signal } = {}) {
+      if (!signal) {
+        await queue.whenIdle();
+        await recoveryInFlight;
+        await persist();
+        return;
+      }
+      let stop;
+      const stopped = new Promise(resolve => { stop = resolve; });
+      signal.addEventListener("abort", stop, { once: true });
+      try {
+        while (!signal.aborted && hasRecoveryWork()) {
+          scheduleRecovery();
+          const work = recoveryInFlight ?? aiSubmitting ?? recoveryTimer?.done ?? queue.whenIdle();
+          await Promise.race([work.catch(() => {}), stopped]);
+        }
+      } finally { signal.removeEventListener("abort", stop); }
+    },
     async persistNow() { await persist(); },
     async retry() {
       checkAdminInterruption();
-      if (!dialogueRecoveryEnabled) { await queue.retry(); await persist(); return; }
-      recoveryInFlight ??= resumePendingDialogue().finally(() => { recoveryInFlight = null; });
-      await recoveryInFlight;
+      if (dialogueInterruption === "participant_paused") {
+        dialogueInterruption = undefined;
+        await startRecovery();
+      } else scheduleRecovery();
     },
     async interruptDialogue() {
       checkAdminInterruption();
@@ -692,32 +777,33 @@ export async function createNamingTaskV2({
       if (!dialogueRecoveryEnabled || snapshot.status !== "error" || recoveryInFlight || openingPending()) throw new NamingTaskError("ai_busy");
       markBudgetInterruption(snapshot);
       dialogueInterruption ??= "participant_paused";
+      cancelRecoveryTimer();
       await persist();
     },
     getState() {
+      scheduleRecovery();
       const snapshot = queue.getSnapshot();
       const openingUnavailable = openingPending();
-      const job = deferredExtraction ? queue.getPrivateState().deferredAiExtraction : null;
-      const extractionError = deferredExtraction && (deferredSaveFailed || job?.state === "failed" || usage?.halted);
-      const recovery = snapshot.status !== "error" && !openingUnavailable && !extractionError ? "active" :
-        deferredExtraction && usage?.halted || dialogueRecoveryEnabled && !usage && jev.ledger.stopReason() ? "unavailable" :
-        dialogueInterruption === "participant_paused" ? "paused" : "retry";
-      const visibleEvents = publicEvents();
+      const recovery = dialogueInterruption === "participant_paused" ? "paused" : stoppedForBudget() ? "unavailable" : "active";
+      const recovering = recoveryAllowed() && Boolean(recoveryTimer || recoveryInFlight);
+      const visibleEvents = publicEvents().slice(0, durableEventCount);
       const cutoff = pendingPublicationId === null ? -1 : visibleEvents.findIndex(event => event.id === pendingPublicationId);
-      const thinking = cutoff >= 0 || snapshot.status === "pending" || snapshot.status === "processing";
+      const thinking = recovery === "active" && (recovering || cutoff >= 0 || queue.isRunning() || Boolean(aiSubmitting));
+      const visibleResult = resultDurable ? result : null;
       return clone({
         // No seed or seed-derived trial id: either would let a client regenerate the boards and key.
         version: VERSION, sessionId: recordId, scene, ...(openingMode ? { openingMode } : {}),
         events: openingUnavailable ? [] : cutoff < 0 ? visibleEvents : visibleEvents.slice(0, cutoff),
-        aiStatus: extractionError ? "error" : thinking ? "thinking" : snapshot.status === "error" || openingUnavailable ? "error" : "idle",
-        submitted: humanSubmission !== null, aiSubmitted: aiSubmission !== null, closed,
-        ...(dialogueRecoveryEnabled ? { dialogueRecovery: recovery } : {}),
-        status: result ? "completed" : closed ? "submitting" : "dialogue",
-        busy: !extractionError && thinking,
+        aiStatus: recovery !== "active" ? "error" : thinking ? "thinking" : "idle",
+        submitted: humanSubmissionDurable, aiSubmitted: aiSubmissionDurable, closed,
+        ...(dialogueRecoveryEnabled || recovering ? { dialogueRecovery: recovery } : {}),
+        ...(recovering ? { recovering: true } : {}),
+        status: visibleResult ? "completed" : closed ? "submitting" : "dialogue",
+        busy: thinking,
         // Participant-facing result: own slots and names only, never figure ids.
-        ...(result ? { result: { provisional: result.provisional, success: result.success, matchedCount: result.matchedCount, total: result.total,
-          figures: result.figures.map(({ human, ai, matched }) => ({ human: { slot: human.slot, rawName: human.rawName }, ai: { rawName: ai.rawName }, matched })) } } : {}),
-        ...(finalError ? { finalError } : {}),
+        ...(visibleResult ? { result: { provisional: visibleResult.provisional, success: visibleResult.success, matchedCount: visibleResult.matchedCount, total: visibleResult.total,
+          figures: visibleResult.figures.map(({ human, ai, matched }) => ({ human: { slot: human.slot, rawName: human.rawName }, ai: { rawName: ai.rawName }, matched })) } } : {}),
+        ...(finalError && !recovering ? { finalError } : {}),
       });
     },
     async submitHuman({ names }) {
@@ -729,20 +815,18 @@ export async function createNamingTaskV2({
       closed = true;
       queue.close();
       humanSubmission = valid;
+      submissionRequested = true;
       await settlePublicOnce();
       checkAdminInterruption();
-      try { await scoreIfReady(); } catch { finalError = "scoring_error"; await persist(); throw new NamingTaskError("scoring_error"); }
       await persist();
+      try { await submitAI(); }
+      catch { checkAdminInterruption(); /* The scheduled task owns final submission from here. */ }
       return { submitted: true };
     },
-    submitAI() {
-      checkAdminInterruption();
-      // Concurrent calls share one final request.
-      aiSubmitting ??= submitAIOnce().finally(() => { aiSubmitting = null; });
-      return aiSubmitting;
-    },
+    submitAI,
     stopForAdmin() {
       administrativelyInterrupted = true;
+      cancelRecoveryTimer();
       queue.close();
     },
     // Researcher-only; never returned over the participant API.
@@ -751,11 +835,17 @@ export async function createNamingTaskV2({
   };
 
   async function submitAIOnce() {
-    if (aiSubmission) { await scoreIfReady(); await persist(); return { submitted: true }; }
+    if (aiSubmission) {
+      await scoreIfReady();
+      finalError = null;
+      await persist();
+      return { submitted: true };
+    }
     // Let an in-flight reply settle so the final request sees every answered message.
     await queue.whenIdle();
     checkAdminInterruption();
     if (!closed) assertSettled();
+    submissionRequested = true;
     closed = true;
     queue.close();
     const snapshot = { events: queue.getSnapshot().events, privateState: queue.getPrivateState() };

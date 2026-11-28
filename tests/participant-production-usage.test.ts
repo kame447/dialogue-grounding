@@ -18,6 +18,40 @@ function memory() {
   };
 }
 
+test('a late mismatch between ledger opens is discarded and the scheduled attempt reuses the pinned model', async () => {
+  const id = 'synthetic-late-mismatch', store = memory();
+  const first = await ParticipantUsageLedger.open(store, id, pin);
+  const archived = first.snapshot();
+  let reservedNow!: () => void, release!: () => void;
+  const reserved = new Promise<void>(resolve => { reservedNow = resolve; });
+  const released = new Promise<void>(resolve => { release = resolve; });
+  const oldRequest = first.dispatch('terra', async () => {
+    reservedNow();
+    await released;
+    return { status: 200, data: { model: 'wrong-model', choices: [{ message: { content: 'discard this draft' } }] } };
+  }, {});
+  const rejected = assert.rejects(oldRequest, { code: 'ai_unavailable' });
+  await reserved;
+  const current = await ParticipantUsageLedger.open(store, id, pin, archived);
+  assert.equal(current.halted, false);
+  release();
+  await rejected;
+  assert.equal((await store.read())?.halted, true);
+  assert.equal(current.halted, false);
+
+  await current.resumeAfterModelMismatch();
+  await current.dispatch('terra', async (_payload, expected) => {
+    assert.equal(expected, pin.terraModelId);
+    return { status: 200, data: { model: expected } };
+  }, {});
+  const recovered = current.snapshot();
+  assert.equal(recovered.halted, false);
+  assert.equal(recovered.modelMismatchPosts, 1);
+  assert.equal(recovered.phases.terra.initial_observation.unknownPosts, 1);
+  assert.equal(recovered.latest.terra?.status, 'ok');
+  assert.deepEqual(ParticipantUsageLedger.readSnapshot(recovered, id, pin), recovered);
+});
+
 test('production meters more than the old trial send ceiling for every provider', async () => {
   const store = memory();
   const ledger = await ParticipantUsageLedger.open(store, 'synthetic-assignment', pin);
@@ -56,7 +90,7 @@ test('missing cost is distinct from failed POST and an already-aborted call send
   const aborted = AbortSignal.abort();
   await assert.rejects(ledger.runTurn('event-2', aborted, () => ledger.dispatch('jev', mock, body)), { name: 'AbortError' });
   assert.equal(posts, 0);
-  assert.equal(ledger.needsExplicitRetry('event-2'), false);
+  assert.equal(ledger.snapshot().lastHumanSeq, 0, 'an already aborted request does not reserve the event');
   assert.equal((await ledger.dispatch('jev', mock, body)).status, 429);
   assert.equal((await ledger.dispatch('jev', mock, body)).status, 200);
   const view = ledger.snapshot();

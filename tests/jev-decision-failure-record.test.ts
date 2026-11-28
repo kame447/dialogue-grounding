@@ -65,9 +65,12 @@ async function fixture(t:any,changes:any={},plan:Plan={stage1:{action:'accept',t
 }
 async function makeTask(prepared:any,extra:any={}){
   let saved:any;
+  let recover: (() => void) | undefined;
   const value={strategy:'repair-first',seed,referenceMemory:true,...extra};
-  const task=await createNamingTaskV2({...value,...await prepared.taskOptions(value),runDir:null,createTrial:()=>trial,onPersist:async(r:any)=>{saved=structuredClone(r);}});
-  return{task,record:()=>saved};
+  const task=await createNamingTaskV2({...value,...await prepared.taskOptions(value),runDir:null,createTrial:()=>trial,
+    recoveryTimers:{set(callback){recover=callback;return 0 as unknown as ReturnType<typeof setTimeout>;},clear(){recover=undefined;}},
+    onPersist:async(r:any)=>{saved=structuredClone(r);}});
+  return{task,record:()=>saved,recover(){assert.ok(recover);recover();}};
 }
 async function failedTurn(t:any,changes:any,stage1:Record<string,string>,strategy='repair-first'){
   const h=await fixture(t,changes,{stage1});const prepared=await prepareParticipantJev(h.options);
@@ -80,7 +83,7 @@ const MULTIPLE_ONE={action:'confirm',target:'multiple',candidate_2:'include'};
 test('A7/A8/B1/B4/B5 (v1): multiple_requires_candidates commits nothing, is refused once, and its closed evidence stays private',async t=>{
   const {made,record,trace,h}=await failedTurn(t,{},MULTIPLE_ONE);
   const state=made.task.getState();
-  assert.equal(state.aiStatus,'error');
+  assert.equal(state.recovering,true);
   assert.equal(trace.status,'error');assert.equal(trace.errorCode,'decision_failed');
   assert.deepEqual(trace.decisions,[]);assert.equal(trace.intervention,null);assert.equal(trace.executed,null);assert.equal(trace.finalAction,null);
   const evidence=trace.decisionFailure.evidence;
@@ -98,7 +101,7 @@ test('A7/A8/B1/B4/B5 (v1): multiple_requires_candidates commits nothing, is refu
   assert.equal(sends.filter((s:any)=>s.phase==='generation').length,0);
   assert.equal(h.upstream.posts.filter((b:any)=>b.questions?.name||b.questions?.feature).length,0);
   // B4: nothing of the record reaches public surfaces; after a retry that commits, the trial still completes.
-  h.upstream.plan.stage1={action:'accept',target:'none'};await made.task.retry();await made.task.whenIdle();
+  h.upstream.plan.stage1={action:'accept',target:'none'};made.recover();await made.task.whenIdle();
   assert.equal(made.task.getState().aiStatus,'idle');
   assert.deepEqual(made.record().jevTraces.map((r:any)=>[r.status,Object.hasOwn(r,'decisionFailure')]),[['error',true],['committed',false]]);
   await made.task.submitHuman({names:Object.fromEntries(state.scene.shapes.map((s:any)=>[s.id,null]))});await made.task.submitAI();
@@ -243,11 +246,13 @@ test('B4: loopback state, outward errors, retry, final, questionnaire, review, r
   const logged:string[]=[];
   for(const method of ['log','info','warn','error','debug'] as const)t.mock.method(console,method,(...args:unknown[])=>{logged.push(args.map(a=>a instanceof Error?a.stack+String((a as any).code):typeof a==='string'?a:JSON.stringify(a)).join(' '));});
   const h=await fixture(t,{},{stage1:MULTIPLE_ONE}),prepared=await prepareParticipantJev(h.options),root=join(h.dir,'owners');await mkdir(root,{mode:0o700});
-  let current:any,lastRecord:any;
+  let current:any,lastRecord:any,recover: (() => void) | undefined;
   const server=await startNamingServer({port:0,client:{},baseAssignmentFile:h.options.baseAssignmentFile,baseStoreRoot:root,
     createTaskV2:async(value:any)=>{
       const onPersist=value.onPersist;
-      current=await createNamingTaskV2({...value,...await prepared.taskOptions(value),onPersist:async(r:any)=>{lastRecord=structuredClone(r);await onPersist(r);}});
+      current=await createNamingTaskV2({...value,...await prepared.taskOptions(value),
+        recoveryTimers:{set(callback){recover=callback;return 0 as unknown as ReturnType<typeof setTimeout>;},clear(){recover=undefined;}},
+        onPersist:async(r:any)=>{lastRecord=structuredClone(r);await onPersist(r);}});
       return current;
     }} as any);
   t.after(()=>new Promise<void>(resolve=>server.close(()=>resolve())));
@@ -260,11 +265,11 @@ test('B4: loopback state, outward errors, retry, final, questionnaire, review, r
   const id=start.json.trial.sessionId;
   await request('/api/message',{text:'どれのことか分からないです',clientId:'b4-failure',expectedRecordId:id});await current.whenIdle();
   assert.equal(lastRecord.jevTraces[0].decisionFailure.evidence.rejectionCode,'multiple_requires_candidates','the private record holds the evidence');
-  const failed=await request('/api/state');assert.equal(failed.json.trial.aiStatus,'error');
+  const failed=await request('/api/state');assert.equal(failed.json.trial.recovering,true);
   const blocked=await request('/api/names',{confirm:true,expectedRecordId:id,names:Object.fromEntries(failed.json.trial.scene.shapes.map((s:any)=>[s.id,null]))});
-  assert.deepEqual([blocked.status,blocked.json],[409,{error:'ai_retry_required'}]);
+  assert.deepEqual([blocked.status,blocked.json],[409,{error:'ai_busy'}]);
   h.upstream.plan.stage1={action:'accept',target:'none'};
-  await request('/api/retry',{expectedRecordId:id});await current.whenIdle();
+  assert.ok(recover);recover();await current.whenIdle();
   const retried=await request('/api/state');assert.equal(retried.json.trial.aiStatus,'idle');
   const submitted=await request('/api/names',{confirm:true,expectedRecordId:id,names:Object.fromEntries(retried.json.trial.scene.shapes.map((s:any)=>[s.id,null]))});
   assert.equal(submitted.json.trial.status,'completed');
