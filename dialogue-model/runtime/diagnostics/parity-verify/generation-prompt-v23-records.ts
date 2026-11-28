@@ -1,5 +1,5 @@
 import type { JevTarget } from "../../decision/contract.ts";
-import { ROTATION_FEATURE_SOURCES } from "./rotation-memory-records.ts";
+import { ROTATION_FEATURE_SOURCES } from "./turned-view-records.ts";
 
 type Message = { role: string; content: unknown };
 type Execution = {

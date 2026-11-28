@@ -29,30 +29,36 @@ export const ROTATION_OBSERVE_TOPICS: Readonly<Record<string, string>> = {
  "construal": "指定図形が相手の別の見立てにも見えるか",
  "referent": "指定図形と公開発話の特徴の照合"
 };
+// The six replacements of the generation instructions. Each one is held as the whole sentence it changes, before and after, so a character changed anywhere in
+// that sentence (not only inside the replaced words) is a mismatch.
+const WHOLE_FIRST = "図形全体を初めて尋ねられたら、観察メモと公開対話に根拠のある";
+const GREETING = "挨拶や漠然とした開始には、短く受け止めるか、相手が選べるようにするか、";
+const DIRECTION_WORD_RULE = "上下左右、側、端、斜め、縦長・横長などの方位が区別に必要なら、同じ節の方位語より前に「こちらの画面では」などと";
+const INTERNAL_NAMES = "targetSlot、figureId、visualPurpose、issue、destination、items、parts、observationFeatures、publicQuestions、retainedReferenceHistory、hold_open、carry_over、consult、partner_choice、other_figure、same_figure_naming、same_figure_other_issue、old_issue";
 export const GENERATION_ROTATION_EDITS: readonly (readonly [string, string])[] = [
  [
-  "観察メモと公開対話に根拠のある全体の見立て・印象・大まかな形を先に短く伝えてください。",
-  "観察メモと公開対話に根拠のある、全体が何に見えるか・印象・大まかな形を先に短く伝えてください。"
+  WHOLE_FIRST + "全体の見立て・印象・大まかな形を先に短く伝えてください。",
+  WHOLE_FIRST + "、全体が何に見えるか・印象・大まかな形を先に短く伝えてください。"
  ],
  [
   "自然な見立てがなければ全体の形でかまいません。",
   "今の向きで何かに見えるならそれを自然に優先し、なければ最初から、別の向きで何に見えるかを「見る角度によっては〜」「向きを変えて見ると〜に見える」と添えて伝えてかまいません。相手が今の見え方を受け入れなかったときや、相手の説明が別の向きの見え方に合うと気づいたときにも使えます。どの向きでも全体が何かに見えなければ、全体の形や、領域ごとの部分が何に見えるか（耳・くちばし・柄など）から印象を伝えてください。"
  ],
  [
-  "簡単な全体の見立てを一つ示してください。",
-  "全体が何に見えるかを一つ簡単に示してください。"
+  GREETING + "簡単な全体の見立てを一つ示してください。",
+  GREETING + "全体が何に見えるかを一つ簡単に示してください。"
  ],
  [
-  "自分側の見え方を示し、相手には形の対応を尋ねてください。",
-  "自分側の見え方を示してください。"
+  DIRECTION_WORD_RULE + "自分側の見え方を示し、相手には形の対応を尋ねてください。",
+  DIRECTION_WORD_RULE + "自分側の見え方を示してください。"
  ],
  [
   "相手の方位は相手の見え方として扱い、自分と同じ配置や向きだと断定しないでください。",
   "相手の方位は相手の見え方として扱い、自分と同じ配置や向きだと断定しないでください。「見る角度によっては」「向きを変えて見ると」は自分側の想像で、相手の画面の向きや相手の見え方を述べるものではありません。角度の数値は言わなくてかまいません。"
  ],
  [
-  "などの内部項目名や種別名も公開しないでください。",
-  "などの内部項目名や種別名も公開しないでください。rotation、regions、current、turned、whole、roles、領域のid（P1など）も同様です。"
+  INTERNAL_NAMES + " などの内部項目名や種別名も公開しないでください。",
+  INTERNAL_NAMES + " などの内部項目名や種別名も公開しないでください。rotation、regions、current、turned、whole、roles、領域のid（P1など）も同様です。"
  ]
 ];
 
@@ -150,6 +156,9 @@ export function memoInLayer(memo: Obj, layer: RotationLayer): Obj {
 
 // ---- What the turn's requests carry ----
 export type RotationTurn = { carried: boolean; memo: Obj };
+/** The registered versions whose instruction sources hold the texts of this table. A record of an earlier version never carries the memory. */
+const ROTATION_VERSIONS: readonly string[] = ["p5_pilot012_rotation_memory_v1"];
+export const rotationVersion = (id: unknown): boolean => typeof id === "string" && ROTATION_VERSIONS.includes(id);
 /** From the memo the turn starts with; the memo the turn records must hold the same rotation memories. Null when the two disagree. */
 const rotationsOf = (memo: unknown): [unknown, unknown][] => figuresOf(memo).filter(figure => Object.hasOwn(figure, "rotation")).map(figure => [figure.id, figure.rotation]);
 export function rotationTurn(start: unknown, recorded: unknown): RotationTurn | null {
@@ -217,13 +226,14 @@ function actionCriteriaOk(state: Obj, criteria: Obj, texts: RotationTexts): bool
     return !stray(criterion);
   });
 }
-const nfkc = (text: unknown): string => typeof text === "string" ? text.normalize("NFKC").trim() : "";
+// The same name for the ledger: width and case folded, spaces removed, katakana read as hiragana.
+const nfkc = (text: unknown): string => typeof text === "string" ? text.normalize("NFKC").trim().replace(/\s/gu, "").replace(/[ァ-ヶ]/gu, ch => String.fromCharCode(ch.charCodeAt(0) - 0x60)) : "";
 /**
  * The names offered for a proposal: the figure's holistic construals, then the whole nouns of the memory (current view first, then the turned
  * views, each once, at most 80 characters), then the public names. Nothing else may be offered, and a noun of the memory that is not offered is
  * left out only for a reason the request itself shows (a name already taken by or proposed for another figure, a figure whose name is settled).
  */
-function nameCandidatesOk(turn: RotationTurn, state: Obj, criteria: Obj): boolean {
+export function nameCandidatesOk(turn: RotationTurn, state: Obj, criteria: Obj): boolean {
   if (state.selected?.action !== "propose_name") return true;
   const offers: { value: string; figureIds: string[] }[] = [];
   for (const raw of Object.values<any>(criteria)) {
@@ -241,9 +251,10 @@ function nameCandidatesOk(turn: RotationTurn, state: Obj, criteria: Obj): boolea
     const nouns = rotation ? nameNouns(rotation).filter(n => n.length <= 80) : [];
     const pub: string[] = (Array.isArray(state.publicNames) ? state.publicNames : []).filter((n: Obj) => plain(n) && (n.figureId === null || n.figureId === id)).map((n: Obj) => n.name);
     const offered = offers.filter(offer => offer.figureIds.includes(id)).map(offer => offer.value);
-    const rank = (name: string): number => holistic.includes(name) ? 0 : nouns.includes(name) ? 1 : pub.includes(name) ? 2 : -1;
-    const ranks = offered.map(rank);
-    if (ranks.some(r => r < 0) || ranks.some((r, i) => i > 0 && r < ranks[i - 1])) return false;
+    // The list is the holistic construals, then the memory's whole nouns, then the public names, each name once at its first place; filtering only removes names.
+    const expected = [...new Set([...holistic, ...nouns, ...pub])];
+    const places = offered.map(name => expected.indexOf(name));
+    if (places.some((place, i) => place < 0 || i > 0 && place <= places[i - 1])) return false;
     const status = plain(state.figures) && plain(state.figures["f" + slots.indexOf(id)]) ? state.figures["f" + slots.indexOf(id)].status : undefined;
     if (status === "agreed" || status === "deferred") continue;
     if (nouns.some(noun => !offered.includes(noun) && !taken.has(nfkc(noun)) && !pub.includes(noun))) return false;
@@ -311,10 +322,13 @@ export function rotationLunaMatches(turn: RotationTurn, phase: string, payload: 
     const keys = Object.keys(memo.value);
     if (keys[0] !== "scope" || keys[1] !== "rotationLegend" || keys[2] !== "memo" || memo.value.rotationLegend !== ROTATION_LEGEND_ROLES ||
         !plain(memo.value.memo) || !layerOk(turn, memo.value.memo.figures, "id", "roles")) return false;
-    // The edits' own sentences sit in the instructions, the roles legend in the memo message(s), the sources line in the action message; nowhere else.
+    // The edits' own sentences sit in the instructions, the roles legend in the memo message(s), the sources line in the action message and, when a draft is regenerated,
+    // once more in the retry message that restates the action message whole; nowhere else.
+    const retry = messages.length > 3 && text(messages[messages.length - 1]).startsWith("公開発話を書き直してください。") ? messages.length - 1 : -1;
+    const restated = retry >= 0 && text(messages[retry]).includes(text(messages[2])) && count(text(messages[retry]), ROTATION_FEATURE_SOURCES) === count(text(messages[2]), ROTATION_FEATURE_SOURCES);
     return messages.every((m, i) => !stray(text(m), i === 1 ? [GENERATION_ROTATION_EDITS[1][1], GENERATION_ROTATION_EDITS[4][1], GENERATION_ROTATION_EDITS[5][1]]
-      : i >= at && i < memo.end ? [ROTATION_LEGEND_ROLES] : i === 2 ? [ROTATION_FEATURE_SOURCES] : [])) &&
-      messages.reduce((n, m) => n + count(text(m), ROTATION_FEATURE_SOURCES), 0) <= 1;
+      : i >= at && i < memo.end ? [ROTATION_LEGEND_ROLES] : i === 2 || i === retry && restated ? [ROTATION_FEATURE_SOURCES] : [])) &&
+      messages.every(m => count(text(m), ROTATION_FEATURE_SOURCES) <= 1);
   }
   if (phase === "observation_targeted") {
     const context = contexts(messages, 1).find(c => Array.isArray(c.figureIds));

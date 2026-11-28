@@ -40,7 +40,7 @@ import {NAMING_GUIDANCE,holdPublication,namingHold,namingInputMatches,namingMate
 import {draftTopicShiftMatches,TOPIC_SHIFT_CHOICES,TOPIC_SHIFT_RETRY_REASON} from './draft-topic-shift-records.ts';
 import {retainedClassificationMatches,retainedGenerationMatches,retainedReferenceHistory,RETAINED_REFERENCE_EXTRACTION} from './retained-reference-records.ts';
 import {v23OutputMatches,v23PlanMatches,v23PlanMessage} from './generation-prompt-v23-records.ts';
-import {rotationTurn,rotationJevMatches,rotationLunaMatches,rotationObserveMatches,rotationAiPrompt,memoInLayer,EXTRACTION_ROTATION_USE} from './rotation-memory-records.ts';
+import {rotationTurn,rotationJevMatches,rotationLunaMatches,rotationObserveMatches,rotationAiPrompt,rotationVersion,memoInLayer,EXTRACTION_ROTATION_USE} from './turned-view-records.ts';
 import {extractionEvidenceForJob,isIssueHandlingExecution,issueHandlingDecisionShape,issueHandlingExtraRequestsMatch,issueHandlingFailureStage,issueHandlingFeatureScope,
  issueHandlingBasisMatches,issueHandlingCloseMatches,issueHandlingLedger,issueHandlingPartsMatch,issueHandlingPublicationPath,
  issueHandlingRelation,issueHandlingReplayBoundary,issueHandlingRequestMatches,issueHandlingSourcesMatch,
@@ -1316,7 +1316,7 @@ function generatedRetryMessagesMatch(generations:any[],topics:ReadonlyMap<number
  return true;
 }
 function generatedReplayProof(tr:any,t:any,tape:any,result:any,pair:any,
-  referenceEvidence:ReturnType<typeof buildReferenceEvidence>|null,graph:any):'missing'|'invalid'|'ok' {
+  referenceEvidence:ReturnType<typeof buildReferenceEvidence>|null,graph:any,prompt:PromptVersion):'missing'|'invalid'|'ok' {
  if(!pair)return'missing';
  if(!equal(result.sides,[pair.left,pair.right])||tape.recorded.label!==tr.label)return'invalid';
  if(s4UsesIssueHandling(tape.generationRetryVersion)&&!equal(
@@ -1355,9 +1355,10 @@ function generatedReplayProof(tr:any,t:any,tape:any,result:any,pair:any,
  const humanRequestedMove=moveSource?.choices?.[MOVE_ON_SOURCE_QUESTION]==='human_request'&&
   validMoveOnSource(moveSource.choices[MOVE_ON_SOURCE_QUESTION],moveSource.scores?.[MOVE_ON_SOURCE_QUESTION]);
  const generationPlans=new Map<string,unknown>();
- // The memo the turn starts with decides whether its requests carry the rotation memory (the independent table is in rotation-memory-records.ts).
+ // The memo the turn starts with decides whether its requests carry the rotation memory (the independent table is in turned-view-records.ts).
+ // Only the registered rotation-memory version may carry it: the earlier versions' sources do not hold its texts.
  const rot=rotationTurn(tape.state?.observationMemo,t.observationMemo);
- if(!rot)return'invalid';
+ if(!rot||rot.carried&&!rotationVersion(prompt.id))return'invalid';
  const aiPrompt=(visualFeatures:boolean)=>rotationAiPrompt(rot,memoAiExtractionPrompt(SHAPE_TERMINOLOGY_GENERATION),memoAiExtractionPrompt(SHAPE_TERMINOLOGY_GENERATION,true),VISUAL_FEATURE_SOURCES_V19,visualFeatures);
  for(const [n,label] of ['repair-first','bypass-enabled'].entries()){
   const s=result.sides[n],m=s?.material,tail=tape.tails?.[label],p=s?.generatedPublication;
@@ -1695,7 +1696,7 @@ function replayProof(records:any,tr:any,t:any,key:string):'missing'|'invalid'|'o
   const scope=tape.state.agreeNameScopeVersion;
   if((rechecksJevNamingAnswers(scope)||s4UsesV22GenerationRules(version))&&
      (committedState?.agreeNameScopeVersion!==scope||s4LocalReverify(tape,t,tr.profile.dialoguePolicy,committed)!=='ok'))return'invalid';
-  return generatedReplayProof(tr,t,tape,result,pair,referenceEvidence,committed);
+  return generatedReplayProof(tr,t,tape,result,pair,referenceEvidence,committed,v);
  }
   const policy=tr.profile?.dialoguePolicy??null;
   const p5=p5At(layout,policy,version),p5Overclaim=p5OverclaimAt(layout,policy,version);
