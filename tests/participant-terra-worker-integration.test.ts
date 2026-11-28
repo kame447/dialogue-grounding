@@ -14,12 +14,12 @@ import { DEFERRED_AI_EXTRACTION_GENERATION, GENERATION_RETRY_V22, GENERATION_RET
 import { createNamingTaskV2 } from '../dialogue-model/runtime/v2/naming-task-v2.mjs';
 import { VISUAL_FEATURE_GENERATION } from '../dialogue-model/runtime/v2/generation-guard.ts';
 import { VISUAL_FEATURE_DRAFT_V19 } from '../dialogue-model/runtime/v2/visual-feature-evidence.ts';
-import { createTrialV2, modelView } from '../dialogue-model/runtime/stimuli/scatter-v2.mjs';
+import { createLayoutsV2, createTrialV2, modelView, trialStimulusV2 } from '../dialogue-model/runtime/stimuli/scatter-v2.mjs';
 import { FIGURE_SETS, PILOT_FIGURE_SET_ID } from '../dialogue-model/runtime/stimuli/figure-bank.ts';
 import { CLAIM_PRUNE_V2, CLAIM_PRUNE_V3, REFERENCE_LIMITS } from '../dialogue-model/runtime/memory/reference-graph.mjs';
 import { validateBoundBaseRecord } from '../dialogue-model/runtime/v2/base-assignment-data.ts';
 import { validateParticipantModelPin } from '../dialogue-model/runtime/v2/participant-model-pin.ts';
-import { checkDecisionFailureEvidence } from '../dialogue-model/runtime/decision/jev-decision.ts';
+import { checkDecisionFailureEvidence, ROTATION_V5, ROTATION_V5_90_180_270 } from '../dialogue-model/runtime/decision/jev-decision.ts';
 import { researchHash } from '../dialogue-model/runtime/v2/research-profile.ts';
 import { handleRequest } from '../workers/research-ai-proxy/src/index.mjs';
 import { PARTICIPANT_PRODUCTION_PROFILE } from '../dialogue-model/runtime/web/participant-usage-policy.ts';
@@ -166,7 +166,7 @@ function harness(enabled = true, selectedProtocol: typeof protocol & {
     usageChat?: (body: any, expected: string) => Promise<any>; holdChoice?: (body: { state: string; questions: Choices }) => Promise<void>;
     onStartObservationRead?: () => void;
     choose?: (name: string, body: { state: string; questions: Choices }) => string | undefined;
-    wrongChoiceModel?: (questions: Choices) => boolean; secondAction?: string; postGenerationCheck?: 'on' | 'off' } =
+    wrongChoiceModel?: (questions: Choices) => boolean; secondAction?: string; postGenerationCheck?: 'on' | 'off'; randomSeed?: () => number } =
     { policy: { ...pin }, terra: pin.terraModelId, luna: pin.lunaModelId, jev: pin.jevModelId, legacyCalls: 0, observe: false, mixedUsage: false };
   let slots: string[] = [];
   const env = {
@@ -248,7 +248,8 @@ function harness(enabled = true, selectedProtocol: typeof protocol & {
     if (preparedBundle) return preparedBundle;
     if (preparationPromise) return preparationPromise;
     preparationPromise = (async () => {
-      const recipe = await createPreparedObservationRecipe({ protocol: sourceProtocol, orderIndex: 0, participant, createdAt: new Date().toISOString() });
+      const recipe = await createPreparedObservationRecipe({ protocol: sourceProtocol, orderIndex: 0, participant, createdAt: new Date().toISOString(),
+        ...(controlled.randomSeed ? { randomSeed: controlled.randomSeed } : {}) });
       const entries = new Map<string, unknown>();
       const cache: WorkerTerraCache = {
         async read(key) { return entries.get(key); },
@@ -3572,11 +3573,20 @@ for (const { dialogueProfile, generation } of [
 });
 
 
-test('three-figure Worker uses prepared stock across protocol revisions through both conditions, scoring and cold restore', async t => {
+// #269: the same flow runs for every rotation mode. relative_90_180_270 also fixes the seed, chosen from the turns it realizes (90, 180 and 270).
+const NEW_MODE_SEED = (() => {
+  for (let seed = 0; ; seed++) {
+    const layouts = createLayoutsV2({ seed, rotationMode: 'relative_90_180_270', figureSelection: { mode: 'custom', figureIds: ['F2', 'F17', 'F30'] } });
+    const turns = layouts.human.map((h: any) => (layouts.ai.find((a: any) => a.figureId === h.figureId).rotation - h.rotation + 360) % 360).sort((a: number, b: number) => a - b);
+    if (turns.join() === '90,180,270') return seed;
+  }
+})();
+async function threeFigureStockFlow(t: TestContext, rotationMode: string, seed?: number) {
   const figureIds = ['F2', 'F17', 'F30'];
-  const selected = { ...figureBankProtocol, revision: figureBankProtocol.revision + 1,
+  const selected = { ...figureBankProtocol, rotationMode, revision: figureBankProtocol.revision + 1,
     figureSelection: { mode: 'custom', figureIds: [...figureIds].reverse() } };
   const h = harness(true, selected, true);
+  if (seed !== undefined) h.controlled.randomSeed = () => seed;
   const transport = v12Transport(t, h);
   h.env.PARTICIPANT_DIALOGUE_PROFILE = PILOT012_V23_PARTICIPANT_PROFILE;
   h.env.PARTICIPANT_TERRA_INITIAL_OBSERVATION_GENERATION = INITIAL_OBSERVATION_STRUCTURED_V2;
@@ -3594,6 +3604,17 @@ test('three-figure Worker uses prepared stock across protocol revisions through 
   assert.notEqual(prepared.plan.protocolSha256, approved.plan.protocolSha256);
   assert.equal(approved.plan.preparedObservations.bundleId, prepared.bundleId);
   assert.deepEqual(approved.plan.trials.map((trial: any) => trial.figureSelection.figureIds), [figureIds, figureIds]);
+  assert.ok(approved.plan.trials.every((trial: any) => trial.rotationMode === rotationMode));
+  if (seed !== undefined) assert.deepEqual(approved.plan.trials.map((trial: any) => trial.seed), [seed, seed]);
+  const regenerated = createTrialV2({ seed: approved.plan.trials[0].seed, rotationMode, figureSelection: approved.plan.trials[0].figureSelection });
+  if (rotationMode === 'relative_90_180_270') {
+    const angles = trialStimulusV2(regenerated).angles;
+    const turns = Object.entries(regenerated.key.ai).map(([slot, figureId]) => {
+      const humanSlot = Object.keys(regenerated.key.human).find(s => regenerated.key.human[s] === figureId)!;
+      return (angles.ai[slot] - angles.human[humanSlot] + 360) % 360;
+    }).sort((a, b) => a - b);
+    assert.deepEqual(turns, [90, 180, 270]);
+  }
 
   let predecessor: string | undefined;
   for (const strategy of ['bypass-enabled', 'repair-first']) {
@@ -3605,6 +3626,9 @@ test('three-figure Worker uses prepared stock across protocol revisions through 
     const opening = await h.storage.get(key);
     assert.equal(opening.strategy, strategy);
     assert.deepEqual(opening.stimulus.figureIds, figureIds);
+    assert.equal(opening.options.rotationMode, rotationMode);
+    assert.deepEqual(opening.stimulus, trialStimulusV2(regenerated));
+    assert.equal(opening.trialId, regenerated.trialId);
     assert.equal(opening.queueState.privateState.observationMemo.figures.length, 3);
     assert.equal(opening.jevLedger.phases.terra.initial_observation.posts, 0);
     assert.equal(opening.jevLedger.phases.terra.initial_observation.cacheHits, 1);
@@ -3615,6 +3639,10 @@ test('three-figure Worker uses prepared stock across protocol revisions through 
     assert.ok(action);
     assert.equal(JSON.parse(action.body.state).ownSlots.length, 3);
     assert.match(action.body.questions.action.instructions, /f0〜f2はownSlots/);
+    // The request states the rotation of its own mode, once, and never the other mode's sentence.
+    const [stated, notStated] = rotationMode === 'relative_90_180_270' ? [ROTATION_V5_90_180_270, ROTATION_V5] : [ROTATION_V5, ROTATION_V5_90_180_270];
+    assert.equal(action.body.questions.action.instructions.split(stated).length - 1, 1);
+    assert.equal(action.body.questions.action.instructions.split(notStated).length - 1, 0);
     const generation = transport.prompts.slice(promptStart).find(prompt => prompt.phase === 'generation');
     assert.ok(generation);
     assert.match(generation.system.join('\n'), /タングラム3図形/);
@@ -3649,7 +3677,11 @@ test('three-figure Worker uses prepared stock across protocol revisions through 
   }
   assert.deepEqual(transport.textPhases.filter(phase => phase === 'initial_observation'), ['initial_observation']);
   assert.deepEqual((await h.storage.get('reception:v1')).plan, approved.plan);
-});
+}
+test('three-figure Worker uses prepared stock across protocol revisions through both conditions, scoring and cold restore',
+  t => threeFigureStockFlow(t, 'relative_pm90'));
+test('relative_90_180_270 three-figure Worker prepares, approves and starts with no observation request, then scores both conditions and cold-restores them',
+  t => threeFigureStockFlow(t, 'relative_90_180_270', NEW_MODE_SEED));
 
 test('a missing prepared cache refuses start before consuming admission, while a saved trial restores from its own memo', async () => {
   const h = harness(true, protocol, true);
