@@ -149,18 +149,24 @@ test('management list reads multiple independent reception owners concurrently, 
   let release!: () => void;
   const gate = new Promise<void>(resolve => { release = resolve; });
   let entered = 0, active = 0, peak = 0;
+  let ready!: () => void;
+  const firstBatch = new Promise<void>(resolve => { ready = resolve; });
   for (const cookie of cookies) {
     const owner = h.object(cookie), read = owner.adminReceptionListState.bind(owner);
     owner.adminReceptionListState = async () => {
       entered++; active++; peak = Math.max(peak, active);
+      if (entered === 4) ready();
       try { await gate; return await read(); } finally { active--; }
     };
   }
   const page = h.fetch(adminGet());
+  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    for (let i = 0; i < 100 && entered < 4; i++) await new Promise<void>(resolve => setImmediate(resolve));
+    await Promise.race([firstBatch, new Promise<void>((_, reject) => {
+      timer = setTimeout(() => reject(new Error('four owner requests did not start')), 10000);
+    })]);
     assert.equal(entered, 4, 'four owner requests start before any response');
-  } finally { release(); }
+  } finally { clearTimeout(timer); release(); }
   const response = await page;
   assert.equal(response.status, 200);
   const html = await response.text();
@@ -257,6 +263,34 @@ test('adapter cancellation persists without trial creation; unknown and misdirec
   assert.ok(!html.includes(unknown),'a misdirected index UUID is absent from both rows and operation targets');
   assert.equal(html.split(`/admin/reception/${otherRow.receptionId}/approve`).length-1,1,'the legitimate other reception appears once, without an alias row');
   assert.deepEqual(h.snapshot(other),before); await h.done();
+});
+
+test('cancelled receptions disappear, including old cancellations and failed index updates, without deleting saved state', async () => {
+  const h = harness(), cancelled = await h.browser(), stale = await h.browser(), pending = await h.browser();
+  const a = rec(h,cancelled), b = rec(h,stale), c = rec(h,pending);
+  for (const r of [a,b]) {
+    const result = await h.fetch(adminPost(r.receptionId,'cancel',0,confirm(r)));
+    assert.equal(result.status,200);
+  }
+  const key = 'reception:' + b.receptionId;
+  await h.indexStorage.put({[key]:{...await h.indexStorage.get(key),status:'pending',revision:0}});
+  const savedA = h.snapshot(cancelled), savedB = h.snapshot(stale);
+  const before = h.receptionReads;
+  const response = await h.fetch(adminGet());
+  assert.equal(response.status,200);
+  const html = await response.text();
+  assert.ok(html.includes(c.receptionId));
+  assert.ok(!html.includes(a.receptionId) && !html.includes(b.receptionId));
+  assert.doesNotMatch(html,/取消済み/);
+  assert.equal(h.receptionReads-before,2,'indexed cancellation needs no owner RPC');
+  assert.deepEqual(h.snapshot(cancelled),savedA);
+  assert.deepEqual(h.snapshot(stale),savedB);
+  assert.equal((await h.index.getReception(a.receptionId)).status,'cancelled');
+  // Old cancelled cursors remain usable; hidden rows never occupy a visible page slot.
+  const past = await h.fetch(adminGet('/admin/receptions?after='+a.receptionId));
+  assert.equal(past.status,200);
+  assert.ok(!(await past.text()).includes(a.receptionId));
+  await h.done();
 });
 
 test('adapter remains behind admin authentication, CSRF, configured token and limiter', async () => {
