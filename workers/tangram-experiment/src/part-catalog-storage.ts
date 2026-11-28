@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { PART_GEOMETRY_VERSION, validatePartGeometry } from '../../../dialogue-model/runtime/stimuli/part-geometry.ts';
+import { isPartObservationVersion, validatePartGeometry } from '../../../dialogue-model/runtime/stimuli/part-geometry.ts';
 import type { PartGeometry } from '../../../dialogue-model/runtime/stimuli/part-geometry.ts';
 
 export const PART_CATALOG_STORAGE_VERSION = 'part_geometry_storage_v1';
@@ -47,7 +47,7 @@ export function encodePartCatalogValue(value: unknown): unknown {
     try {
       if (plain(item)) {
         if (hasMarker(item)) return { [LITERAL]: structuredClone(item) };
-        if (item.version === PART_GEOMETRY_VERSION) {
+        if (isPartObservationVersion(item.version)) {
           const hash = digest(item);
           if (!Object.hasOwn(catalog, hash)) catalog[hash] = checkedGeometry(item);
           return { [REFERENCE]: hash };
@@ -88,7 +88,7 @@ export function decodePartCatalogValue(value: unknown): unknown {
           if (!geometry) return fail();
           used.add(hash); return structuredClone(geometry);
         }
-        if (item.version === PART_GEOMETRY_VERSION) return fail();
+        if (isPartObservationVersion(item.version)) return fail();
         return Object.fromEntries(Object.entries(item).map(([key, child]) => [key, walk(child)]));
       }
       return item.map(walk);

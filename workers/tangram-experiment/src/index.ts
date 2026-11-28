@@ -53,7 +53,7 @@ import { createWorkerParticipantRuntime, workerParticipantPolicy, matchesWorkerD
   type ParticipantService } from "./participant-runtime.ts";
 import { ParticipantPreobservations } from './participant-preobservation.ts';
 import { createPartCatalogStorage } from './part-catalog-storage.ts';
-import { PART_GEOMETRY_VERSION, type PartObservationVersion } from '../../../dialogue-model/runtime/stimuli/part-geometry.ts';
+import { REVIEWED_PART_GEOMETRY_VERSION, type PartObservationVersion } from '../../../dialogue-model/runtime/stimuli/part-geometry.ts';
 import { trialTerminationExpectation } from './admin/trial-termination.ts';
 import type { TrialTerminationExpectation, TrialTerminationResult } from './admin/trial-termination.ts';
 export { AdminIndex };
@@ -337,7 +337,7 @@ export class TangramSession extends DurableObject<Env> {
           randomSeed:() => crypto.getRandomValues(new Uint32Array(1))[0], ...participant,
           ...(['reception_protocol_v2', 'reception_protocol_v3'].includes(protocol.schemaVersion) &&
             participant.participantRuntimeProfile === PARTICIPANT_PRODUCTION_PROFILE && protocol.referenceMemory
-            ? { partObservationVersion: PART_GEOMETRY_VERSION } : {}),
+            ? { partObservationVersion: REVIEWED_PART_GEOMETRY_VERSION } : {}),
           ...(['reception_protocol_v2', 'reception_protocol_v3'].includes(protocol.schemaVersion) ? { openingMode: SCRIPTED_OPENING_MODE } : {}),
           ...(protocol.referenceMemory ? { memoryPruneVersion: participantMemoryPruneVersion(participant.participantDialogueProfile) } : {}) });
         await tx.put({ 'reception:v1':next }); return next;
@@ -349,6 +349,7 @@ export class TangramSession extends DurableObject<Env> {
 
   private async schedulePreobservations(plan: Reception['plan'], proxy?: ParticipantService) {
     if (!plan || plan.schemaVersion === 'reception_plan_v1' ||
+        plan.partObservationVersion === REVIEWED_PART_GEOMETRY_VERSION ||
         plan.participantRuntimeProfile !== PARTICIPANT_PRODUCTION_PROFILE || !plan.participantModelPin || !proxy) return;
     const { participantModelPin: pin, initialObservationGeneration } = plan;
     const prepareBoard = async (seed: number, rotation: RotationMode, selection: unknown) => {

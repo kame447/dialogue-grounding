@@ -1,4 +1,4 @@
-import { PART_GEOMETRY_VERSION } from '../stimuli/part-geometry.ts';
+import { isPartObservationVersion } from '../stimuli/part-geometry.ts';
 import { SCRIPTED_OPENING_MODE, SCRIPTED_OPENING_TEXT, isOpeningMode } from './opening-mode.ts';
 import { ParticipantUsageLedger } from '../web/participant-usage.ts';
 import { PARTICIPANT_USAGE_ONLY } from '../web/participant-usage-policy.ts';
@@ -144,10 +144,10 @@ export async function createNamingTaskV2({
   if (restore) {
     const saved = restore.options?.partObservationVersion;
     if (partObservationVersion !== undefined && partObservationVersion !== saved ||
-        Object.hasOwn(restore.options ?? {}, 'partObservationVersion') && saved !== PART_GEOMETRY_VERSION) throw new NamingTaskError('invalid_options');
+        Object.hasOwn(restore.options ?? {}, 'partObservationVersion') && !isPartObservationVersion(saved)) throw new NamingTaskError('invalid_options');
     partObservationVersion = saved;
   }
-  if (partObservationVersion !== undefined && (partObservationVersion !== PART_GEOMETRY_VERSION || !jev)) throw new NamingTaskError('invalid_options');
+  if (partObservationVersion !== undefined && (!isPartObservationVersion(partObservationVersion) || !jev)) throw new NamingTaskError('invalid_options');
   if (openingMode !== undefined && !isOpeningMode(openingMode)) throw new NamingTaskError('invalid_options');
   const scriptedOpening = openingMode === SCRIPTED_OPENING_MODE ? SCRIPTED_OPENING_TEXT : SCRIPTED_OPENING;
   const generatedOpening = openingMode === undefined && isGenerationV17(jev?.generationRetryVersion);

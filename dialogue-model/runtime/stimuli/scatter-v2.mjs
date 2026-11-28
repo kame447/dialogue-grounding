@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { FIGURE_BANK, isLegacyFigureSelection, resolveFigureSelection } from './figure-bank.ts';
 import { boundarySegments, polygonArea, transformPolygon } from './geometry.mjs';
 import { renderPolygons } from './render.mjs';
-import { createPartGeometry, PART_GEOMETRY_VERSION } from './part-geometry.ts';
+import { createPartGeometry, isPartObservationVersion } from './part-geometry.ts';
 
 // Prototype presentation constants, not adopted experimental conditions.
 export const BOARD_WIDTH = 1200;
@@ -259,15 +259,18 @@ export function participantView(trial) {
  * @param {{ partObservationVersion?: import('./part-geometry.ts').PartObservationVersion }} [options]
  */
 export function modelView(trial, { partObservationVersion = undefined } = {}) {
-  if (partObservationVersion !== undefined && partObservationVersion !== PART_GEOMETRY_VERSION) throw new TypeError('unknown part observation version');
+  if (partObservationVersion !== undefined && !isPartObservationVersion(partObservationVersion)) throw new TypeError('unknown part observation version');
   let parts;
   if (partObservationVersion !== undefined) {
     const sources = ownPartSources.get(trial);
     if (!sources) throw new TypeError('part observation requires the original generated trial');
-    parts = ownPartCatalogs.get(trial);
+    const cached = ownPartCatalogs.get(trial);
+    parts = cached?.get(partObservationVersion);
     if (!parts) {
-      parts = sources.map(({ id, polygons }) => ({ id, parts: createPartGeometry(polygons) }));
-      ownPartCatalogs.set(trial, parts);
+      parts = sources.map(({ id, polygons }) => ({ id, parts: createPartGeometry(polygons, partObservationVersion) }));
+      const versions = cached ?? new Map();
+      versions.set(partObservationVersion, parts);
+      ownPartCatalogs.set(trial, versions);
     }
   }
   return {

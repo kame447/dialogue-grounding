@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { PART_GEOMETRY_VERSION, type PartObservationVersion } from '../stimuli/part-geometry.ts';
+import { isPartObservationVersion, type PartObservationVersion } from '../stimuli/part-geometry.ts';
 import { isOpeningMode, type OpeningMode } from './opening-mode.ts';
 import { PARTICIPANT_PRODUCTION_PROFILE, type ParticipantProductionProfile } from '../web/participant-usage-policy.ts';
 import type { Strategy } from './base-assignment.ts';
@@ -214,7 +214,7 @@ function participantPlan(value: unknown) {
     ...(hasProfile ? ['participantRuntimeProfile'] : []), ...(hasGeneration ? ['initialObservationGeneration'] : []),
     ...(hasDialogueProfile ? ['participantDialogueProfile'] : [])]);
   if (hasOpeningMode && !isOpeningMode(p.openingMode)) return fail();
-  if (hasParts && (p.partObservationVersion !== PART_GEOMETRY_VERSION || !hasPin || !hasProfile)) return fail();
+  if (hasParts && (!isPartObservationVersion(p.partObservationVersion) || !hasPin || !hasProfile)) return fail();
   if (hasProfile && p.participantRuntimeProfile !== PARTICIPANT_PRODUCTION_PROFILE) return fail();
   const generation = isInitialObservationGeneration(p.initialObservationGeneration) ? p.initialObservationGeneration : undefined;
   if (hasGeneration && generation === undefined) return fail();
@@ -229,7 +229,7 @@ function participantPlan(value: unknown) {
       (!hasPrune || generation !== INITIAL_OBSERVATION_STRUCTURED_V2)) return fail();
   const limits = hasLimits ? validateParticipantLimits(p.participantLimits) : undefined;
   const participant: ParticipantPlanSettings = {
-    ...(hasParts ? { partObservationVersion: PART_GEOMETRY_VERSION } : {}),
+    ...(hasParts ? { partObservationVersion: p.partObservationVersion as PartObservationVersion } : {}),
     ...(hasOpeningMode ? { openingMode: p.openingMode as OpeningMode } : {}),
     ...(hasPrune ? { memoryPruneVersion } : {}),
     ...(pin ? { participantModelPin: pin } : {}),

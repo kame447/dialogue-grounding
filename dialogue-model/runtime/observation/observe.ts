@@ -1,4 +1,6 @@
-import { PART_OBSERVATION_INSTRUCTIONS, validateOwnParts, validatePartsForRegion } from "./parts.ts";
+import { readPreparedInitial } from '../stimuli/primary-regions.ts';
+import { modelPartGeometry, withPartDescriptions } from './part-consumers.ts';
+import { PART_OBSERVATION_INSTRUCTIONS, REVIEWED_PART_OBSERVATION_INSTRUCTIONS, hasReviewedOwnParts, validateOwnParts, validatePartsForRegion } from "./parts.ts";
 import { isSupportedFigureCount } from '../stimuli/figure-bank.ts';
 import { INITIAL_OBSERVATION_STRUCTURED_V2, INITIAL_OBSERVATION_V2_INSTRUCTIONS,
   isInitialObservationGeneration, type InitialObservationGeneration } from './initial-observation-generation.ts';
@@ -190,18 +192,18 @@ export function buildObservationMessages(input: ObservationInput): ObservationMe
   const own = snapshotInput(input);
   return [{ role: "system", content: observationInitialInstructions(own.ownAnchors.length) },
     { role: "user", content: JSON.stringify({ ownAnchors: own.ownAnchors }) },
-    ...(own.ownParts ? [{ role: "user" as const, content: PART_OBSERVATION_INSTRUCTIONS },
-      ...observationContextMessages(JSON.stringify({ ownParts: own.ownParts }))] : []),
+    ...(own.ownParts ? [{ role: "user" as const, content: hasReviewedOwnParts(own.ownParts) ? REVIEWED_PART_OBSERVATION_INSTRUCTIONS : PART_OBSERVATION_INSTRUCTIONS },
+      ...observationContextMessages(JSON.stringify({ ownParts: hasReviewedOwnParts(own.ownParts) ? own.ownParts.map(row => ({ id: row.id, parts: modelPartGeometry(row.parts) })) : own.ownParts }))] : []),
     ...ownImageMessage(own.ownImage) as ImageMessage[]];
 }
 export function buildReobservationMessages(input: ReobservationInput): ObservationMessage[] {
   const own = snapshotTargeted(input);
   const ids = new Set(own.figureIds);
   return [{ role: "system", content: OBSERVATION_TARGETED_INSTRUCTIONS },
-    ...(own.ownParts ? [{ role: "user" as const, content: PART_OBSERVATION_INSTRUCTIONS }] : []),
+    ...(own.ownParts ? [{ role: "user" as const, content: hasReviewedOwnParts(own.ownParts) ? REVIEWED_PART_OBSERVATION_INSTRUCTIONS : PART_OBSERVATION_INSTRUCTIONS }] : []),
     ...observationContextMessages(JSON.stringify({
     figureIds: own.figureIds, issue: own.issue, ownAnchors: own.ownAnchors.filter(a => ids.has(a.id)),
-    figures: own.memo.figures.filter(f => ids.has(f.id)),
+    figures: (hasReviewedOwnParts(own.ownParts) ? withPartDescriptions(own.memo).figures : own.memo.figures).filter(f => ids.has(f.id)),
   })), ...ownImageMessage(own.ownImage) as ImageMessage[]];
 }
 export function parseInitialObservation(raw: unknown, input: ObservationInput, { observedAt }: { observedAt: string }): ObservationMemo {
@@ -241,6 +243,19 @@ export function mergeReobservation(memo: ObservationMemo, result: ReobservationR
   return validateObservationMemo(next);
 }
 
+// Prepared before any reception. No provider request is made for a supported reviewed stimulus.
+export function preparedObservationMemo(input: ObservationInput, observedAt: string): ObservationMemo | undefined {
+  if (!hasReviewedOwnParts(input.ownParts)) return;
+  const own = snapshotInput(input);
+  const figures = own.ownAnchors.map(anchor => {
+    const parts = own.ownParts!.find(row => row.id === anchor.id)!.parts;
+    const initial = readPreparedInitial(parts);
+    return initial ? { id: anchor.id, region: { ...anchor.bbox }, ...initial, reobservations: [], parts } : undefined;
+  });
+  if (figures.some(figure => figure === undefined)) return;
+  return validateObservationMemo({ observedAt, figures }, { ownAnchors: own.ownAnchors, ownParts: own.ownParts });
+}
+
 export function createLunaObserver(client: ObservationClient, { timeoutMs = 20000, now = () => new Date(), researchLimits }:
   { timeoutMs?: number; now?: () => Date; researchLimits?: ResearchLimits } = {}): ObservationObserver {
   const limit = deadlineLimit(researchLimits);
@@ -276,6 +291,9 @@ export function createLunaObserver(client: ObservationClient, { timeoutMs = 2000
   return {
     async observeAll(input, options = {}) {
       const own = snapshotInput(input);
+      if (options.signal?.aborted) fail("aborted");
+      const prepared = preparedObservationMemo(own, now().toISOString());
+      if (prepared) return prepared;
       return run(buildObservationMessages(own), "observation_initial", (raw, observedAt) => parseInitialObservation(raw, own, { observedAt }), options);
     },
     async reobserve(input, options = {}) {

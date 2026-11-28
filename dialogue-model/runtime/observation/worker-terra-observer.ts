@@ -1,4 +1,4 @@
-import { PART_OBSERVATION_INSTRUCTIONS } from './parts.ts';
+import { PART_OBSERVATION_INSTRUCTIONS, hasReviewedOwnParts } from './parts.ts';
 import { responseText } from '../client.mjs';
 import {
   createLunaObserver, ObservationError, observationInitialInstructions,
@@ -139,7 +139,7 @@ export function createWorkerTerraObserver({ modelPin, own, visual, cache, timeou
     async observeAll(input, options) {
       checkAbort(options);
       checkOwn(input);
-      if (!cache) return observer.observeAll(bound, options);
+      if (!cache || hasReviewedOwnParts(bound.ownParts)) return observer.observeAll(bound, options);
       try {
         const key = await (keyPromise ??= initialKey(terraModelId, boundJson, bound.ownAnchors.length, initialObservationGeneration, !!bound.ownParts));
         const hit = await cache.read(key, options?.signal);

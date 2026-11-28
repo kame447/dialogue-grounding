@@ -1,7 +1,9 @@
 import { boundarySegments, EPSILON, intersectionArea, polygonArea, sharesEdge } from './geometry.mjs';
 
 export const PART_GEOMETRY_VERSION = 'tangram_parts_v1';
-export type PartObservationVersion = typeof PART_GEOMETRY_VERSION;
+export const REVIEWED_PART_GEOMETRY_VERSION = 'tangram_parts_reviewed_20261128_v1' as const;
+export type PartObservationVersion = typeof PART_GEOMETRY_VERSION | typeof REVIEWED_PART_GEOMETRY_VERSION;
+export const isPartObservationVersion = (value: unknown): value is PartObservationVersion => value === PART_GEOMETRY_VERSION || value === REVIEWED_PART_GEOMETRY_VERSION;
 
 export type PartPoint = [number, number];
 type Polygon = readonly (readonly [number, number])[];
@@ -103,7 +105,7 @@ function simplify(loop: PartPoint[]): PartPoint[] {
   return result.map((_, i) => result[(start + i) % result.length]);
 }
 
-function loopsOf(polygons: PartPoint[][]): { outlines: PartPoint[][]; simple: boolean } {
+export function loopsOf(polygons: PartPoint[][]): { outlines: PartPoint[][]; simple: boolean } {
   const merged = boundarySegments(polygons) as Segment[];
   const endpoints = [...new Map(merged.flat().map(p => [pointKey(p), p])).values()];
   const edges: Segment[] = [];
@@ -148,7 +150,7 @@ function loopsOf(polygons: PartPoint[][]): { outlines: PartPoint[][]; simple: bo
   return { outlines, simple: simple && outlines.length === 1 };
 }
 
-function classify(outlines: PartPoint[][], simple: boolean): Pick<GeometryPart, 'shape' | 'sides' | 'convex'> {
+export function classify(outlines: PartPoint[][], simple: boolean): Pick<GeometryPart, 'shape' | 'sides' | 'convex'> {
   if (!simple) return { shape: 'compound', sides: null, convex: null };
   const p = outlines[0], sides = p.length, convex = isConvex(p);
   let shape: PartShape = sides === 3 ? 'triangle' : sides === 4 ? 'quadrilateral' :
@@ -179,7 +181,8 @@ function visibleFraction(a: PartPoint, b: PartPoint, fullBoundary: Segment[]): n
 }
 
 /** Structural candidates from own-side drawing geometry, never observed agreement or a unique decomposition. */
-export function createPartGeometry(value: readonly Polygon[]): PartGeometry {
+export function createPartGeometry(value: readonly Polygon[], version: PartObservationVersion = PART_GEOMETRY_VERSION): PartGeometry {
+  if (!isPartObservationVersion(version)) return invalid();
   const input = inputPolygons(value);
   const [x, y, w, h] = box(input);
   const polygons: PartPoint[][] = input.map(p => p.map(([px, py]) => [round(px - x), round(py - y)]));
@@ -198,7 +201,7 @@ export function createPartGeometry(value: readonly Polygon[]): PartGeometry {
     parts.push({ members, ...classify(outlines, simple), outlines, bbox: box(outlines),
       edgeVisibility: outlines.map(loop => loop.map((a, i) => visibleFraction(a, loop[(i + 1) % loop.length], fullBoundary))) });
   }
-  return { version: PART_GEOMETRY_VERSION, source: 'own_stimulus_geometry', coordinateFrame: 'figure_local_pixels',
+  return { version, source: 'own_stimulus_geometry', coordinateFrame: 'figure_local_pixels',
     origin: [x, y], size: [w, h], adjacency, parts };
 }
 
@@ -214,7 +217,7 @@ function equalValue(actual: unknown, expected: unknown): boolean {
 /** Rebuild from the seven original polygons so missing combinations and altered geometry fail closed. */
 export function validatePartGeometry(value: unknown): PartGeometry {
   if (!exact(value, ['version', 'source', 'coordinateFrame', 'origin', 'size', 'adjacency', 'parts']) ||
-      value.version !== PART_GEOMETRY_VERSION || value.source !== 'own_stimulus_geometry' ||
+      !isPartObservationVersion(value.version) || value.source !== 'own_stimulus_geometry' ||
       value.coordinateFrame !== 'figure_local_pixels' || !point(value.origin) || !point(value.size) ||
       !value.size.every(v => v > 0) || !Array.isArray(value.adjacency) || value.adjacency.length > 21 ||
       !Array.isArray(value.parts) || value.parts.length < 8 || value.parts.length > 127) return invalid();
@@ -239,7 +242,7 @@ export function validatePartGeometry(value: unknown): PartGeometry {
     if (!single || single.outlines.length !== 1) return invalid();
     polygons.push(single.outlines[0].map(([x, y]: PartPoint) => [round(x + origin[0]), round(y + origin[1])]));
   }
-  const expected = createPartGeometry(polygons);
+  const expected = createPartGeometry(polygons, value.version);
   if (!equalValue(value, expected)) return invalid();
   return expected;
 }

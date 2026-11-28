@@ -1,5 +1,5 @@
 import { isSupportedFigureCount } from '../stimuli/figure-bank.ts';
-import { compactPartGeometry, hasPartGeometry, PART_INDEX_INSTRUCTIONS } from '../observation/part-consumers.ts';
+import { modelPartGeometry, hasPartGeometry, PART_INDEX_INSTRUCTIONS } from '../observation/part-consumers.ts';
 import { ISSUE_HANDLING_MOVE_ON_CRITERIA, ISSUE_HANDLING_MOVE_ON_INSTRUCTIONS, MOVE_ON_SOURCE_QUESTION } from "./human-led-move-on.ts";
 import { COMMITMENT_STATES, ISSUE_HANDLING_VERSION, JEV_ACTIONS_V21, NON_BYPASS_ALTERNATIVES, SWITCH_FUNCTIONS, issueAlternativeTarget, issueHandlingMatchesSource, projectExtraHandling } from "./issue-handling.ts";
 import type { CarryDestination, ExecutedExtra, ExtraHandling, ExtraSelection, JevIssueRef } from "./issue-handling.ts";
@@ -646,7 +646,7 @@ function prepare(input: JevDecisionInput, layout: JevQuestionLayout = "two_stage
     });
     let parts;
     if (Object.hasOwn(f, "parts")) {
-      try { parts = compactPartGeometry((f as typeof f & { parts?: unknown }).parts); }
+      try { parts = modelPartGeometry((f as typeof f & { parts?: unknown }).parts); }
       catch { return fail("invalid_input"); }
       if (!f.region || parts.origin[0] !== f.region.x || parts.origin[1] !== f.region.y ||
           parts.size[0] !== f.region.w || parts.size[1] !== f.region.h) fail("invalid_input");

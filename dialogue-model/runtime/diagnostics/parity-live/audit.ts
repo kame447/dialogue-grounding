@@ -129,6 +129,7 @@ export async function promptSourceManifest() {
   // act/decision/guard strings. Actual sent instructions are hashed per call too.
   const files = ["v2/dialogue-v2.mjs", "v2/jev-turn.ts", "v2/generation-guard.ts", "judgment/instructions.mjs",
     "observation/observe.ts", "observation/parts.ts", "observation/part-consumers.ts",
+    "stimuli/primary-regions.ts", "stimuli/primary-regions-data.ts", "stimuli/part-geometry.ts",
     "local-grounding/extract.ts", "local-grounding/jev-local-test.ts",
     "decision/jev-decision.ts", "local-grounding/extract-ai.ts", "local-grounding/jev-ai-public.ts", "shape-terminology.ts",
     "v2/visual-feature-evidence.ts", "v2/deferred-ai-extraction.ts", "v2/issue-publication.ts",

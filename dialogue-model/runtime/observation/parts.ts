@@ -1,5 +1,6 @@
 import type { LocalOwnAnchor } from '../local-grounding/contract.ts';
 import { validatePartGeometry } from '../stimuli/part-geometry.ts';
+import { REVIEWED_PART_GEOMETRY_VERSION } from '../stimuli/part-geometry.ts';
 import type { PartGeometry } from '../stimuli/part-geometry.ts';
 
 export type OwnPartObservation = { id: string; parts: PartGeometry };
@@ -12,6 +13,14 @@ export const PART_OBSERVATION_INSTRUCTIONS = [
   'edgeVisibilityは輪郭の各辺が図形全体の可視輪郭と重なる割合です。1未満の辺は画面にない切り分けを含みます。内部の切り分けは仮説として扱い、人間が同じように分けていると決めつけず、画像と位置・つながりを照合してください。',
   '候補があるだけで対象同定や合意を確定しません。候補にない形も直ちに存在しないと断定せず、画像の別の切り分けとして必要に応じて確かめてください。観察JSONへpartsを出力し直す必要はありません。',
 ].join('\n');
+
+export const REVIEWED_PART_OBSERVATION_INSTRUCTIONS = [
+  '自分側の確定済み分割に基づく主要なまとまりの観察メモです。形、面積割合、向き、位置、隣接関係は幾何学的情報です。',
+  'regionsのconstrualは形からの見立ての仮説であり、相手の認識や合意・正解名称ではありません。内部の境界は画面に見える線ではありません。別の切り分けもあり得ます。',
+  '上下左右は自分の画面での向きです。相手との照合では形と相対的な大きさ・つながりも使ってください。',
+].join('\n');
+export const hasReviewedOwnParts = (rows: readonly OwnPartObservation[] | undefined): boolean =>
+  !!rows?.length && rows.every(row => row.parts.version === REVIEWED_PART_GEOMETRY_VERSION);
 
 const invalid = (): never => { throw new TypeError('invalid_part_observation'); };
 const exact = (value: unknown, keys: string[]): value is Record<string, unknown> =>
