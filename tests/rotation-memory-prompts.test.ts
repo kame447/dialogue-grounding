@@ -162,7 +162,7 @@ test('extraction and re-observation texts are added only for a rotation memory; 
   const memo = (withRotation: boolean) => ({ observedAt: '2026-01-01T00:00:00.000Z', figures: anchors.map((a, i) => ({ id: a.id, region: { ...a.bbox }, reobservations: [],
     ...(withRotation ? { holistic: [], analytic: { shapes: [], composition: COMPOSITION, relations: [] }, unknowns: [], rotation: rotationOf(i) }
       : { holistic: [], analytic: { shapes: [], composition: COMPOSITION, relations: [] }, unknowns: [] }) })) });
-  const request = (withRotation: boolean) => buildReobservationMessages({ ownImage: OWN.ownImage, ownAnchors: anchors, memo: memo(withRotation) as never, figureIds: ['s-000a'],
+  const request = (withRotation: boolean) => buildReobservationMessages({ ownImage: OWN.ownImage as never, ownAnchors: anchors, memo: memo(withRotation) as never, figureIds: ['s-000a'],
     issue: { aspect: 'part', question: 'くちばしはありますか？', partnerConstrual: null } });
   const plain = request(false), withMemo = request(true);
   assert.equal(plain[0].content, OBSERVATION_TARGETED_INSTRUCTIONS);
