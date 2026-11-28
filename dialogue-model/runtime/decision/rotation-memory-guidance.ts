@@ -29,14 +29,13 @@ export function hasRotationMemory(memo: { figures: readonly unknown[] } | undefi
 
 type Layered = Record<string, unknown>;
 const mark = (c: { confidence?: "中" | "高" }) => c.confidence === undefined ? {} : { confidence: c.confidence };
+const nounMark = (c: { noun: string; confidence?: "中" | "高" }) => c.confidence === undefined ? c.noun : `${c.noun}（${c.confidence}）`;
+/** The roles and full layers: whole candidates as objects (noun, confidence mark, roles per region; full adds posture and direction), part candidates as plain nouns. The owner of a part is not carried. */
 function layerView(view: OwnRotationView, layer: RotationLayer): Layered {
-  const whole = view.whole.map(w => ({ noun: w.noun, ...mark(w),
-    ...(layer === "nouns" ? {} : { roles: w.roles }), ...(layer === "full" ? { posture: w.posture, direction: w.direction } : {}) }));
-  const parts = Object.fromEntries(Object.entries(view.parts).map(([id, list]) => [id,
-    list.map(c => ({ noun: c.noun, ...mark(c), ...(layer === "full" && c.owner !== undefined ? { owner: c.owner } : {}) }))]));
+  const whole = view.whole.map(w => ({ noun: w.noun, ...mark(w), roles: w.roles, ...(layer === "full" ? { posture: w.posture, direction: w.direction } : {}) }));
+  const parts = Object.fromEntries(Object.entries(view.parts).map(([id, list]) => [id, list.map(nounMark)]));
   return { whole, parts };
 }
-const nounMark = (c: { noun: string; confidence?: "中" | "高" }) => c.confidence === undefined ? c.noun : `${c.noun}（${c.confidence}）`;
 /** The nouns layer writes a view as one line: "全体: 見立て・見立て / P1 部分の見立て・… / P2 …"; "全体: なし" when the view has no whole construal. */
 const viewLine = (view: OwnRotationView): string => ["全体: " + (view.whole.length ? view.whole.map(nounMark).join("・") : "なし"),
   ...Object.entries(view.parts).map(([id, list]) => `${id} ${list.map(nounMark).join("・")}`)].join(" / ");
@@ -70,7 +69,7 @@ export function rotationLegend(layer: RotationLayer): string {
     "currentは今の向き、turnedは今の向きを時計回りにrel度回したと想像した向きで、どの向きも同じ形式です。" +
     "各向きのwholeは全体の見立ての配列で、nounは見立てた物、confidenceは中・高のときだけ付き無ければ低です" +
     (detail ? "、rolesは領域idごとの役割" : "") + (full ? "、postureはその姿勢、directionはその見え方の中での向き" : "") + "。空の配列はその向きに全体の見立てがないことです。" +
-    "partsは全体の見立てとは別の、領域idごとの部分の見立ての候補です" + (full ? "（ownerはその部分を持つ物）" : "") + "。wholeAnywhereはどれかの向きにwholeがあるかを示します。" +
+    "partsは全体の見立てとは別の、領域idごとの部分の見立ての候補で、確信度は括弧で付きます。wholeAnywhereはどれかの向きにwholeがあるかを示します。" +
     (detail ? "turnedの位置や方向の語はその見え方の中の向きなので、今の画面での位置はregionsのatで言います。" : "");
 }
 export const ROTATION_LEGENDS: Readonly<Record<RotationLayer, string>> = Object.freeze({ nouns: rotationLegend("nouns"), roles: rotationLegend("roles"), full: rotationLegend("full") });
