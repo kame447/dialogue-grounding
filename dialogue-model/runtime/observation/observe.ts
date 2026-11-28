@@ -1,4 +1,5 @@
 import { readPreparedInitial } from '../stimuli/primary-regions.ts';
+import { validateOwnRotationMemory } from '../stimuli/rotation-memory-shape.ts';
 import { modelPartGeometry, withPartDescriptions } from './part-consumers.ts';
 import { PART_OBSERVATION_INSTRUCTIONS, REVIEWED_PART_OBSERVATION_INSTRUCTIONS, hasReviewedOwnParts, validateOwnParts, validatePartsForRegion } from "./parts.ts";
 import { isSupportedFigureCount } from '../stimuli/figure-bank.ts';
@@ -110,7 +111,9 @@ export function validateObservationMemo(value: unknown, options: {
   }
   const ids = new Set<string>();
   for (const f of value.figures) {
-    if (!exact(f, ["id", "region", "holistic", "analytic", "unknowns", "reobservations", ...(hasParts ? ["parts"] : [])]) ||
+    // Unlike parts, a figure may carry the pre-made rotation memory or not (a figure the bundle lacks simply has none).
+    const hasRotation = !!f && Object.hasOwn(f, "rotation");
+    if (!exact(f, ["id", "region", "holistic", "analytic", "unknowns", "reobservations", ...(hasParts ? ["parts"] : []), ...(hasRotation ? ["rotation"] : [])]) ||
         !initialFigure({ id: f.id, holistic: f.holistic, analytic: f.analytic, unknowns: f.unknowns }) ||
         !text(f.id, 160) || ids.has(f.id) || !region(f.region) || !Array.isArray(f.reobservations) ||
         f.reobservations.length > OBSERVATION_LIMITS.reobservations) fail("invalid_input");
@@ -119,6 +122,10 @@ export function validateObservationMemo(value: unknown, options: {
       const a = own.find(a => a.id === f.id);
       const bbox = f.region;
       if (!a || !(["x", "y", "w", "h"] as const).every(k => a.bbox[k] === bbox[k])) fail("invalid_input");
+    }
+    // Only a malformed saved value is refused; whether it equals today's bundle is never asked (a restore uses what was saved).
+    if (hasRotation) {
+      try { validateOwnRotationMemory(f.rotation); } catch { fail("invalid_input"); }
     }
     if (hasParts) {
       try {

@@ -18,6 +18,11 @@ import { resolveParticipantConfiguration } from '../workers/tangram-experiment/s
 import { createPreparedObservationRecipe, prepareObservationBundle, preparedObservationPoolKey } from '../workers/tangram-experiment/src/prepared-observation-recipe.ts';
 import type { PreparedObservationBundle, PreparedObservationParticipant } from '../workers/tangram-experiment/src/prepared-observation-recipe.ts';
 import type { WorkerTerraCache } from '../dialogue-model/runtime/observation/worker-terra-observer.ts';
+import { overrideRotationMemorySource } from '../workers/tangram-experiment/src/rotation-memory-source.ts';
+
+// This file approves receptions that claim prepared Terra memos (the earlier path). A new reception freezes the rotation-memory bundle
+// and claims nothing (tests/rotation-memory-*.test.ts), so here the deploy is one without a bundle.
+overrideRotationMemorySource(undefined);
 
 
 registerHooks({ resolve(name, context, next) {

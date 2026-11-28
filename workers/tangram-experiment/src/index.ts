@@ -54,6 +54,10 @@ import { resolveParticipantConfiguration } from './participant-configuration.ts'
 import type { PreparedObservationBundle } from './prepared-observation-recipe.ts';
 import { preparedTrialObservation, validatePreparedObservations } from '../../../dialogue-model/runtime/v2/prepared-observations.ts';
 import { ParticipantPreobservations } from './participant-preobservation.ts';
+import { projectOwnFigures, rotationMemoryFor, rotationMemorySource } from './rotation-memory-source.ts';
+import { createRotationMemoryObserver } from '../../../dialogue-model/runtime/observation/rotation-memo.ts';
+import { validateRotationMemoryRecord } from '../../../dialogue-model/runtime/v2/rotation-memory-pin.ts';
+import type { RotationMemoryRecord } from '../../../dialogue-model/runtime/v2/rotation-memory-pin.ts';
 import { createPartCatalogStorage } from './part-catalog-storage.ts';
 import { REVIEWED_PART_GEOMETRY_VERSION, type PartObservationVersion } from '../../../dialogue-model/runtime/stimuli/part-geometry.ts';
 import { trialTerminationExpectation } from './admin/trial-termination.ts';
@@ -304,7 +308,9 @@ export class TangramSession extends DurableObject<Env> {
       const { participant } = await resolveParticipantConfiguration(this.env, protocol);
       const check = participant.participantDialogueProfile === PILOT012_V24_PARTICIPANT_PROFILE
         ? { postGenerationCheck: settings.postGenerationCheck?.value ?? 'off' as const } : {};
-      const needsPrepared = participant.participantRuntimeProfile === PARTICIPANT_PRODUCTION_PROFILE &&
+      // A new reception freezes the rotation-memory bundle and reads it at the start: it claims no prepared Terra memo, so approval never waits for stock.
+      const rotationMemory = rotationMemoryFor(participant, protocol.referenceMemory);
+      const needsPrepared = !rotationMemory && participant.participantRuntimeProfile === PARTICIPANT_PRODUCTION_PROFILE &&
         participant.participantModelPin !== undefined && protocol.referenceMemory;
       let prepared: { reception: Reception; entries: PreparedObservationBundle['entries'] } | undefined;
       if (needsPrepared) {
@@ -368,8 +374,8 @@ export class TangramSession extends DurableObject<Env> {
           await tx.put(saved);
           return prepared.reception;
         }
-        const next = await approveReception(raw, { ...approval, ...participant, ...check, approvedAt: new Date().toISOString(),
-          randomSeed: () => crypto.getRandomValues(new Uint32Array(1))[0] });
+        const next = await approveReception(raw, { ...approval, ...participant, ...check, ...(rotationMemory ? { rotationMemory } : {}),
+          approvedAt: new Date().toISOString(), randomSeed: () => crypto.getRandomValues(new Uint32Array(1))[0] });
         await tx.put({ 'reception:v1': next }); return next;
       }));
       await this.indexReception(r); return r;
@@ -1158,7 +1164,7 @@ export class TangramSession extends DurableObject<Env> {
   }
 
   private async createTrial(binding: Parameters<MakeBaseTask>[0]): Promise<NamingTask> {
-    const {seed,strategy,referenceMemory,restore,participantRuntime,initialObservationGeneration,memoryPruneVersion,participantDialogueProfile,openingMode,preparedObservation,partObservationVersion,postGenerationCheck} = binding;
+    const {seed,strategy,referenceMemory,restore,participantRuntime,initialObservationGeneration,memoryPruneVersion,participantDialogueProfile,openingMode,preparedObservation,partObservationVersion,rotationMemory,postGenerationCheck} = binding;
     if (restore && !matchesWorkerDialogueProfile(participantDialogueProfile, restore) ||
         participantDialogueProfile !== undefined &&
           (memoryPruneVersion !== participantMemoryPruneVersion(participantDialogueProfile) ||
@@ -1185,10 +1191,21 @@ export class TangramSession extends DurableObject<Env> {
       ? restore?.startRequestReceivedAt ?? admission?.startRequestReceivedAt : undefined;
     let initialMemoReadStartedAt = restore?.initialMemoReadStartedAt;
     let initialMemoReadyAt = restore?.initialMemoReadyAt;
+    // The pin is the plan's. `used` is the bundle the projection comes from: this deploy's at the start, the saved one on a restore.
+    // They may differ only if a deploy intervened; that is recorded and never stops a trial.
+    let rotationRecord: RotationMemoryRecord | undefined;
+    if (rotationMemory) {
+      let used = rotationMemorySource()?.pin() ?? rotationMemory;
+      if (restore) {
+        try { used = validateRotationMemoryRecord(restore.options.rotationMemory).used; } catch { used = rotationMemory; }
+      }
+      rotationRecord = { pin: rotationMemory, used };
+    }
     const onPersist = async (snapshot: StoredTrial) => {
       const record = pin ? { ...snapshot, options: { ...snapshot.options, participantModelPin: pin,
         ...(initialObservationGeneration ? { initialObservationGeneration } : {}),
         ...(preparedObservation ? { preparedObservation } : {}),
+        ...(rotationRecord ? { rotationMemory: rotationRecord } : {}),
         ...(participantRuntime ? { participantRuntimeProfile: participantRuntime.profile } : {}),
         ...(participantDialogueProfile ? { participantDialogueProfile } : {}) },
         ...(typeof startRequestReceivedAt === 'string' ? { startRequestReceivedAt } : {}),
@@ -1224,6 +1241,12 @@ export class TangramSession extends DurableObject<Env> {
         } : this.preobservations.startCache,
       });
       let jevResearch = runtime.jevResearch;
+      if (rotationRecord) {
+        // The first read is the static memo: no observation request, cache read or wait. A restore reads what it saved instead.
+        const source = rotationMemorySource();
+        jevResearch = { ...jevResearch, observer: createRotationMemoryObserver({ base: jevResearch.observer, own,
+          project: () => source ? projectOwnFigures(trial, own.ownAnchors, source) : new Map() }) };
+      }
       if (initialObservationGeneration === INITIAL_OBSERVATION_STRUCTURED_V2 && !restore) {
         const observer = jevResearch.observer;
         jevResearch = { ...jevResearch, observer: {

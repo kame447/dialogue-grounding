@@ -34,6 +34,8 @@ import { configuredParticipantPin, participantChoices, participantUsageChoices }
 import { INITIAL_OBSERVATION_STRUCTURED_V1, INITIAL_OBSERVATION_STRUCTURED_V2,
   type InitialObservationGeneration } from '../dialogue-model/runtime/observation/initial-observation-generation.ts';
 import { buildObservationMessages } from '../dialogue-model/runtime/observation/observe.ts';
+import { rotationMemoryPin } from '../dialogue-model/runtime/stimuli/rotation-memory.ts';
+import { overrideRotationMemorySource } from '../workers/tangram-experiment/src/rotation-memory-source.ts';
 import { SHAPE_TERMINOLOGY, SHAPE_TERMINOLOGY_GENERATION } from '../dialogue-model/runtime/shape-terminology.ts';
 
 registerHooks({ resolve(name, context, next) {
@@ -149,9 +151,15 @@ afterEach(() => {
   disposeHarnesses.clear();
 });
 
+// The deploy's rotation-memory bundle. Cases that use the real approval RPC to exercise prepared Terra memos are about earlier
+// receptions (a deploy without a bundle); `bundle` keeps the bundle so a new reception freezes it and claims no stock.
+const deployedBundle = overrideRotationMemorySource(undefined);
+overrideRotationMemorySource(deployedBundle);
+
 function harness(enabled = true, selectedProtocol: typeof protocol & {
   figureSelection?: { mode: string; setId?: string; selectionSeed?: number; figureIds?: string[] }; figureSetPolicy?: string;
-} = protocol, preobserve = false) {
+} = protocol, preobserve = false, bundle = false) {
+  overrideRotationMemorySource(preobserve && !bundle ? undefined : deployedBundle);
   const canonical = selectedProtocol.schemaVersion === 'reception_protocol_v3'
     ? canonicalReceptionProtocolV3(selectedProtocol) : canonicalReceptionProtocolV2(selectedProtocol);
   const sha256 = receptionProtocolSha256(canonical);
@@ -3844,4 +3852,81 @@ test('v23 recovers generated opening and final submission without another partic
   assert.ok(done.aiSubmission && done.scoring?.result);
   assert.equal(transport.textPhases.filter(phase => phase === 'final_submission').length, 2);
   assert.equal(await h.storage.getAlarm(), null);
+});
+
+// ---- A new reception freezes the rotation-memory bundle and reads it at the start (no prepared stock, no observation request) ----
+const threeFigureProtocol = { ...protocol, schemaVersion: 'reception_protocol_v3', allowedOrders: [['bypass-enabled', 'repair-first']],
+  figureSelection: { mode: 'custom', figureIds: ['F1', 'F2', 'F8'] }, figureSetPolicy: 'shared' };
+const rotationOf = (record: any) => record.queueState.privateState.observationMemo.figures.map((figure: any) => figure.rotation);
+const bundleHarness = (t: TestContext) => {
+  const h = harness(true, threeFigureProtocol, true, true);
+  const transport = v12Transport(t, h);
+  transport.options.sharedReading = true;
+  h.controlled.selectedAction = 'accept';
+  h.env.PARTICIPANT_DIALOGUE_PROFILE = PILOT012_V24_PARTICIPANT_PROFILE;
+  h.env.PARTICIPANT_AI_PROXY.participantInitialObservationPolicy = transport.observationPolicy;
+  return { h, transport };
+};
+
+test('a new three-figure reception approves, starts and cold-restores with no prepared memo and no observation request', async t => {
+  const { h, transport } = bundleHarness(t);
+  const bundlePin = rotationMemoryPin();
+  await h.receive(); // nothing was prepared: a claim of stock would fail here
+  const { plan } = await h.approve();
+  assert.deepEqual(plan.rotationMemory, bundlePin);
+  assert.equal(Object.hasOwn(plan, 'preparedObservations'), false);
+  assert.equal(plan.postGenerationCheck, 'off');
+  h.evict();
+  const { trial } = await jsonOk(await h.start());
+  const id = trial.sessionId, key = 'record:' + id;
+  const started = await h.storage.get(key);
+  assert.deepEqual(started.options.rotationMemory, { pin: bundlePin, used: bundlePin });
+  assert.deepEqual(started.assignment.source.plan.rotationMemory, bundlePin);
+  const memo = started.queueState.privateState.observationMemo;
+  assert.equal(memo.figures.length, 3);
+  assert.ok(memo.figures.every((figure: any) => figure.rotation && figure.holistic.length === 0));
+  assert.equal(transport.textPhases.filter(phase => phase === 'initial_observation' || phase === 'reobservation').length, 0);
+  const initial = started.jevLedger.phases.terra.initial_observation;
+  assert.deepEqual([initial.posts, initial.cacheHits], [0, 0], 'no Terra post and no cache read for the first memo');
+  assert.doesNotMatch(JSON.stringify(trial), /rotationMemory|dataSha256|catalogRevision|turned|wholeAnywhere|shapeName/u, 'nothing of the memory reaches the participant');
+  // The record is bound to the plan's pin like every other pin: a missing or different one is refused.
+  const missing = structuredClone(started), forged = structuredClone(started), tampered = structuredClone(started);
+  delete missing.options.rotationMemory;
+  forged.options.rotationMemory = { pin: { ...bundlePin, dataSha256: '1'.repeat(64) }, used: bundlePin };
+  tampered.queueState.privateState.observationMemo.figures[0].rotation.regions[0].shapeName = '改ざん';
+  for (const bad of [missing, forged, tampered]) assert.throws(() => validateBoundBaseRecord(bad, started.assignment));
+  // A turn runs on the saved memo, and a cold restore reads exactly what was saved.
+  await jsonOk(await h.request('message', { expectedRecordId: id, text: p5Question }));
+  await h.idle();
+  const record = await h.storage.get(key);
+  assert.equal(record.queueState.errorCode, null);
+  assert.equal(record.jevTraces.at(-1).status, 'committed');
+  assert.deepEqual(rotationOf(record), rotationOf(started));
+  h.evict();
+  assert.equal((await jsonOk(await h.request('state'))).trial.sessionId, id);
+  assert.deepEqual(rotationOf(await h.adminRecord(id)), rotationOf(started));
+  assert.equal(transport.textPhases.filter(phase => phase === 'initial_observation').length, 0);
+});
+
+test('a deploy that changes the bundle after approval stops nothing: the start records the bundle it used and a restore reads only what was saved', async t => {
+  const { h } = bundleHarness(t);
+  await h.receive();
+  const { plan } = await h.approve();
+  const changed = { ...plan.rotationMemory, dataSha256: '1'.repeat(64) };
+  overrideRotationMemorySource({ ...deployedBundle!, pin: () => changed });
+  const { trial } = await jsonOk(await h.start());
+  const key = 'record:' + trial.sessionId;
+  const started = await h.storage.get(key);
+  assert.deepEqual(started.options.rotationMemory, { pin: plan.rotationMemory, used: changed });
+  assert.ok(rotationOf(started).every(Boolean));
+  // The bundle is gone from the deploy altogether; the restore still reads the saved memo and keeps what was recorded.
+  overrideRotationMemorySource(undefined);
+  h.evict();
+  assert.equal((await jsonOk(await h.request('state'))).trial.sessionId, trial.sessionId);
+  const restored = await h.storage.get(key);
+  assert.deepEqual(restored.options.rotationMemory, { pin: plan.rotationMemory, used: changed });
+  assert.deepEqual(rotationOf(restored), rotationOf(started));
+  await jsonOk(await h.request('message', { expectedRecordId: trial.sessionId, text: p5Question }));
+  await h.idle();
+  assert.equal((await h.storage.get(key)).queueState.errorCode, null);
 });
