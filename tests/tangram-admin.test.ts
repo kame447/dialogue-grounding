@@ -3,7 +3,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { ADMIN_USER, MIN_TOKEN_LENGTH, checkAdmin, presentedToken, tokensMatch } from "../workers/tangram-experiment/src/admin/auth.ts";
-import { handleAdmin, isAdminPath, ADMIN_HEADERS } from "../workers/tangram-experiment/src/admin/routes.ts";
+import { handleAdmin, isAdminPath, ADMIN_HEADERS, LIVE_CSP } from "../workers/tangram-experiment/src/admin/routes.ts";
 import type { AdminDeps } from "../workers/tangram-experiment/src/admin/routes.ts";
 import { summarizeRecord, indexLatency } from "../workers/tangram-experiment/src/admin/summary.ts";
 import type { AdminSummary } from "../workers/tangram-experiment/src/admin/summary.ts";
@@ -152,7 +152,10 @@ test("admin responses carry no-store, noindex and a strict CSP, and no CORS or c
   for (const request of [req("/admin", AUTH), req("/admin/style.css", AUTH), req("/admin/record/" + RECORD, AUTH), req("/admin/nope", AUTH),
     req("/admin"), deleteRequest(RECORD, RECORD), deleteRequest(RECORD, "x")]) {
     const response = await handleAdmin(request, value);
-    for (const [name, expected] of Object.entries(ADMIN_HEADERS)) assert.equal(response.headers.get(name), expected, `${request.url} ${name}`);
+    const path = new URL(request.url).pathname;
+    const live = response.status === 200 && (path === "/admin" || path === "/admin/record/" + RECORD);
+    for (const [name, expected] of Object.entries(ADMIN_HEADERS)) assert.equal(response.headers.get(name),
+      live && name === "Content-Security-Policy" ? LIVE_CSP : expected, `${request.url} ${name}`);
     assert.equal(response.headers.get("Access-Control-Allow-Origin"), null);
     assert.equal(response.headers.get("Set-Cookie"), null);
   }

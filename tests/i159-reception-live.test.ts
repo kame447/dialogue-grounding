@@ -92,8 +92,8 @@ test('live page: version is read before the list, one self-hosted script, CSP ad
   assert.doesNotMatch(html, /\son\w+=/i);
   assert.match(html, new RegExp(`data-version="${'0'.repeat(63)}1"`)); assert.match(html, /data-since="\d{4}-\d{2}-\d{2}T[\d:.]+Z"/);
   assert.match(html, /<p id="reception-new" role="status" aria-live="polite"><\/p>/);
-  // Other admin pages keep the script-free CSP.
-  for (const path of ['/admin/entry', '/admin']) assert.equal((await handleAdmin(get(path), f.deps)).headers.get('Content-Security-Policy'), ADMIN_HEADERS['Content-Security-Policy']);
+  // The entry page stays script-free; logs now have their own live script.
+  for (const path of ['/admin/entry']) assert.equal((await handleAdmin(get(path), f.deps)).headers.get('Content-Security-Policy'), ADMIN_HEADERS['Content-Security-Policy']);
 });
 
 test('without the version port the list renders as before: no script, no live regions, the strict CSP', async () => {

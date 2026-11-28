@@ -1,5 +1,4 @@
-// Researcher-only admin pages, rendered on the server. Only the reception list loads a script, the
-// self-hosted /admin/receptions.js (receptions-live.ts); every other page has none.
+// Researcher-only admin pages, rendered on the server. Live views load only their own authenticated, self-hosted script.
 // Every value from a record is escaped; unknown nested values are shown as
 // escaped JSON, so new record fields cannot break the page or inject markup.
 import type { AdminSummary } from "./summary.ts";
@@ -84,7 +83,8 @@ const table = (names: string[], rows: unknown[][]) => rows.length
 const isPlain = (value: unknown): value is Record<string, any> => Boolean(value) && typeof value === "object" && !Array.isArray(value);
 const list = (value: unknown): any[] => Array.isArray(value) ? value : [];
 
-function page(title: string, body: string, wide = false): string {
+function page(title: string, body: string, wide = false, live: 'list' | 'detail' | null = null): string {
+  if (live) body = `<p id="admin-log-sync" class="muted" role="status"></p><main id="admin-log-live" data-view="${live}">${body}</main><script src="/admin/log-live.js" defer></script>`;
   return `<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex, nofollow"><title>${escapeHtml(title)}</title><link rel="stylesheet" href="/admin/style.css"></head>
 <body${wide ? ' class="record-detail"' : ""}>${body}</body></html>`;
@@ -153,7 +153,7 @@ const aiBadge = (aiStatus: string) => badge("AI " + aiStatus, aiStatus === "erro
 const surveyBadge = (value: string) => badge("仮アンケート" + (QUESTIONNAIRE_LABELS[value] ?? QUESTIONNAIRE_LABELS.none), value === "submitted" ? "done" : value === "draft" ? "warn" : "");
 
 export function renderList(summaries: AdminRecordSummary[], filter: ListFilter, next: string | null, audit: AuditEntry[],
-  _retentionDays?: number, deleted = false, receptions = false, forceEnd = false): string {
+  _retentionDays?: number, deleted = false, receptions = false, forceEnd = false, live = false): string {
   const query = (extra: Record<string, string>) => "?" + new URLSearchParams({ status: filter.status, error: filter.error, memory: filter.memory,
     ...(filter.role ? { role: filter.role } : {}), ...extra });
   const td = (label: string, content: string, cls = "") => `<td data-label="${escapeHtml(label)}"${cls ? ` class="${cls}"` : ""}><div class="cell">${content}</div></td>`;
@@ -182,7 +182,7 @@ ${deleted ? `<p class="bad">記録を削除しました。</p>` : ""}
 <p class="muted">更新が新しい順に ${PAGE_LIMIT_NOTE}（同じブラウザの過去の試行を含む）。絞り込みはこのページ内に適用します。記録は自動では削除されません（手動での削除のみ）。</p>
 ${summaries.length ? `<div class="wrap cards log"><table><thead>${head(["記録", "状態", "条件", "発話・確定", "応答・エラー"])}</thead><tbody>${rows}</tbody></table></div>` : `<p class="muted">該当なし</p>`}
 ${next ? `<p><a href="/admin${escapeHtml(query({ after: next }))}">次のページ →</a></p>` : ""}
-<h2>削除の記録（内容なし）</h2>${table(["削除日時", "理由", "記録IDのハッシュ"], audit.map((a) => [a.deletedAt, a.reason, a.recordHash]))}`);
+<h2>削除の記録（内容なし）</h2>${table(["削除日時", "理由", "記録IDのハッシュ"], audit.map((a) => [a.deletedAt, a.reason, a.recordHash]))}`, false, live ? "list" : null);
 }
 const PAGE_LIMIT_NOTE = "1ページ100件";
 // Index entries written before the questionnaire existed have no state: shown as "none".
@@ -244,7 +244,7 @@ function recordedFigures(r: Record<string, any>): unknown {
 }
 
 export function renderDetail(record: unknown, summary: AdminRecordSummary, latency: LatencySummary, _retentionDays?: number,
-  forceEnd: TrialTerminationExpectation | null = null): string {
+  forceEnd: TrialTerminationExpectation | null = null, live = false): string {
   const r = isPlain(record) ? record : {};
   const judgments = list(r.judgments).filter(isPlain).map((j) => [j.turnIndex, j.judgment?.action, j.judgment?.targetSlot,
     j.judgment?.candidateName, j.judgment?.discriminatingFeature, j.judgment?.followUp ?? null, j.activeJudge ?? null]);
@@ -303,7 +303,7 @@ ${fold("詳細メタデータ・キュー・提出と採点の生データ", tab
   ["最終エラー", r.finalError ?? null], ["件数", summary.counts], ["人間の提出", r.humanSubmission ?? null], ["AIの提出", r.aiSubmission ?? null],
   ["診断", r.diagnostics ?? null], ["採点", r.scoring ?? null], ["初回観察", r.initialObservation ?? null], ["最終参照グラフ", r.referenceGraph ?? null], ["最終参照台帳", r.ownLedger ?? null], ["図形セット", recordedFigures(r)]]))}
 ${fold("削除", `<p class="muted">この記録は自動では削除されません。削除する場合は、記録IDを確認欄に入力してください（仮アンケートの回答も削除されます）。削除は取り消せません。</p>
-${deleteRecordForm(summary.recordId)}`, "danger")}`, true);
+${deleteRecordForm(summary.recordId)}`, "danger")}`, true, live ? "detail" : null);
 }
 
 export function renderMessage(title: string, message: string, back: { href: string; label: string } = { href: '/admin', label: '一覧へ' }): string {

@@ -4,6 +4,7 @@
 // GET /admin/record/<recordId>.json downloads that one full record as JSON.
 import { checkAdmin, presentedToken } from "./auth.ts";
 import { RECEPTIONS_LIVE_JS } from './receptions-live.ts';
+import { LOG_LIVE_JS } from './log-live.ts';
 import { ADMIN_CSS, applyFilter, parseFilter, renderDetail, renderList, renderMessage, renderReceptions, renderEntry, renderSettings, renderExperimentPreview, renderFigures } from "./render.ts";
 import { FIGURE_SETS, FIGURE_BANK, isSupportedFigureCount } from '../../../../dialogue-model/runtime/stimuli/figure-bank.ts';
 import { OBJECT_ID, RECORD_ID } from "./summary.ts";
@@ -52,7 +53,7 @@ export const ADMIN_HEADERS: Readonly<Record<string, string>> = Object.freeze({
   "Content-Security-Policy": "default-src 'none'; style-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'",
   "Cross-Origin-Resource-Policy": "same-origin",
 });
-/** Only the self-updating reception list may run its own same-origin script and fetch from this origin. */
+/** Only explicitly live admin views may run their own same-origin script and fetch from this origin. */
 export const LIVE_CSP = ADMIN_HEADERS["Content-Security-Policy"] + "; script-src 'self'; connect-src 'self'";
 const REALM = 'Basic realm="tangram-admin", charset="UTF-8"';
 // Large enough for the settings form with six custom figure ids; still a hard stop for anything bigger.
@@ -456,13 +457,14 @@ export async function handleAdmin(request: Request, deps: AdminDeps): Promise<Re
     await deps.deleteRecord(summary);
     return respond(303, "", "text/plain; charset=utf-8", { Location: "/admin?deleted=1" });
   }
+  if (url.pathname === "/admin/log-live.js") return respond(200, LOG_LIVE_JS, "text/javascript; charset=utf-8");
   if (url.pathname === "/admin/style.css") return respond(200, ADMIN_CSS, "text/css; charset=utf-8");
   if (url.pathname === "/admin/figures") return respond(200, renderFigures());
   if (url.pathname === "/admin" || url.pathname === "/admin/") {
     const filter = parseFilter(url.searchParams);
     const page = await deps.listPage(url.searchParams.get("after"));
     return respond(200, renderList(applyFilter(page.items, filter), filter, page.next, await deps.audit(), deps.retentionDays,
-      url.searchParams.get("deleted") === "1", Boolean(deps.receptions), Boolean(deps.forceEndRecord)));
+      url.searchParams.get("deleted") === "1", Boolean(deps.receptions), Boolean(deps.forceEndRecord), true), undefined, { "Content-Security-Policy": LIVE_CSP });
   }
   const experiment = url.pathname.match(/^\/admin\/record\/([^/]+)\/experiment$/u);
   if (experiment) {
@@ -488,5 +490,5 @@ export async function handleAdmin(request: Request, deps: AdminDeps): Promise<Re
   if (match[2]) return respond(200, JSON.stringify({ ...record, participantRole: summary.participantRole ?? participantRoleView() }, null, 2), "application/json; charset=utf-8",
     { "Content-Disposition": `attachment; filename="tangram-record-${summary.recordId}.json"` });
   return respond(200, renderDetail(record, summary, deps.summarizeLatency(record), deps.retentionDays,
-    deps.forceEndRecord ? trialTerminationExpectation(record) : null));
+    deps.forceEndRecord ? trialTerminationExpectation(record) : null, true), undefined, { "Content-Security-Policy": LIVE_CSP });
 }
