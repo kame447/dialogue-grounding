@@ -20,7 +20,10 @@ const UPTAKE_V24 = "【相手への返答】相手が今求めていることに
 // Each text is written out in full, before (v24) and after (v25); a v25 request holds the new ones and none of the old ones, a v24 request the old ones and none of the new ones.
 const UPTAKE_V25 = "【相手への返答】相手が今求めていることに先に答えてください。説明には自分の見え方とその根拠、選択の依頼には選んだものと短い理由を返してください。呼び名や進め方の提案には計画の範囲で直接応じてください。分からない場合は、分かっている点と未確定の点を短く伝えてください。相手が訂正した点や依頼を言い直した内容を反映し、既に答えが出た点を聞き直さないでください。質問が必要なら原則一発話で一つに絞り、何に答えてほしいか明示してください。図形についての質問は、問いだけで終えず、自分の見え方や今の理解を一言添えてください。相づちは「なるほど」程度にとどめ、長い言い直しや相づちだけの往復を避けてください。判断に必要なら、自分の観察と相手の説明のどこが一致し、どこが違うかを示してください。根拠のない同意で埋めないでください。";
 const CONFIRM_V24 = "選んだ論点について聞かれたことには、自分の観察で答えられる点を先に述べてください。確認がまだ必要なら、答えを得ていない一点だけを形の参照枠に沿って尋ねてください。観察メモにない特徴、対象の一致、名前の合意は断定しないでください。";
-const CONFIRM_V25 = "選んだ論点について確認がまだ必要なら、答えを得ていない点を形の参照枠に沿って尋ねてください。観察メモにない特徴、対象の一致、名前の合意は断定しないでください。";
+const CONFIRM_V25 = "選んだ論点について確認がまだ必要なら、答えを得ていない一点だけを形の参照枠に沿って尋ねてください。観察メモにない特徴、対象の一致、名前の合意は断定しないでください。";
+// What follows CONTINUE_V25 in a continuation: a confirm asks the one unanswered point, an accept adds no new question (the line is exactly this, nothing else).
+const CONFIRM_CONTINUING_V25 = "次の返答に相手の情報が必要なときだけ、未回答の具体的な一点を尋ねてください。何を確かめるかを相手に委ねないでください。";
+const ACCEPT_CONTINUING_V25 = "新たな質問は加えないでください。";
 const CONTINUE_V24 = "【未確定のまま答える】相手の説明・選択・命名・進行の依頼に、今の論点の範囲で直接答えてください。自分の観察で答えられる内容とその根拠を先に述べ、決められない部分があれば何が未確定かを短く明示してください。相手から訂正や依頼の言い直しがあれば反映してください。名前を新しく提案・採用・撤回したり、未確定の対象を一つに決めたりしないでください。";
 const CONTINUE_V25 = "【未確定のまま答える】答えは今の論点の範囲にとどめ、名前を新しく提案・採用・撤回したり、未確定の対象を一つに決めたりしないでください。";
 const VISUAL_SELECTION_V23 = "対象と論点の範囲で観察メモから確認・修復に使う特徴を選んでください。具体的な特徴への質問は先に扱い、肯否・訂正済みの点と未解決の点を区別してください。候補の区別や説明の対応に役立つ点を優先し、観察メモに記載がないことを特徴がない証拠にしないでください。根拠が不足する場合はその不確かさを示し、必要な情報を尋ねてください。";
@@ -82,8 +85,10 @@ export function v23PlanMatches(messages: readonly Message[], execution: Executio
     const line = lines[index + 1];
     if (!line?.startsWith(prefix) || line.length === prefix.length) return false;
     if (Object.hasOwn(NAMING_SCOPES, action)) return line === prefix + NAMING_SCOPES[action];
-    // v25: a confirm opens with its own text (the question to ask) or with the one of a continuation (which keeps the plan's scope); neither repeats UPTAKE.
-    if (v25 && action === "confirm") return line.startsWith(prefix + CONFIRM_V25) || line.startsWith(prefix + CONTINUE_V25);
+    // v25: a confirm opens with its own text (the one unanswered point to ask) or with the one of a continuation (which keeps the plan's scope and still asks only the one unanswered
+    // point, when it asks); an accept of a continuation adds no new question. None of them repeats UPTAKE.
+    if (v25 && action === "confirm") return line.startsWith(prefix + CONTINUE_V25) ? line === prefix + CONTINUE_V25 + CONFIRM_CONTINUING_V25 : line.startsWith(prefix + CONFIRM_V25);
+    if (v25 && action === "accept" && line.startsWith(prefix + CONTINUE_V25)) return line === prefix + CONTINUE_V25 + ACCEPT_CONTINUING_V25;
     return action !== "repair" || line.includes(REPAIR_EVIDENCE);
   })) return false;
 

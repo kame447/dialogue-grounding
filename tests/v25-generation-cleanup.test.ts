@@ -87,14 +87,17 @@ const requestText = (version: 'v24' | 'v25', input: Record<string, unknown>) =>
   (version === 'v25' ? GENERATION_INSTRUCTIONS_V25 : GENERATION_INSTRUCTIONS_V24) + '\n' +
   prompt({ ...base, ...input, ...(version === 'v25' ? { tidied: true } : {}) }).split('\n').slice(0, -2).join('\n');
 
-// The four themes v24 said more than once. A sentence counts for a theme by the words that carry it; a sentence about the public questions (hold_open, carry_over answer the
+// The themes v24 said more than once. A sentence counts for a theme by the words that carry it; a sentence about the public questions (hold_open, carry_over answer the
 // questions already asked in public before they move on) is a different statement and is not counted.
+// "Ask one question" is how many questions an utterance holds ("原則一発話で一つに絞り", once in the common instructions in both versions). Which POINT a confirmation asks about
+// ("答えを得ていない一点だけ": only the one still unanswered) is another constraint, counted apart below and kept as it was.
 const THEMES: [string, (sentence: string) => boolean][] = [
   ['answer what was asked first', s => /先に[^。]*(答え|述べ|扱い)/u.test(s) && !s.includes('publicQuestions')],
-  ['ask one question', s => /一つに絞|一点/u.test(s)],
+  ['ask one question', s => /一つに絞/u.test(s)],
   ['state the known and the unknown', s => /未確定の点を短く|何が未確定か|答えられる内容と限界/u.test(s)],
   ['reflect a correction or a restated request', s => /訂正した点や依頼を言い直した|訂正や依頼の言い直し/u.test(s)],
 ];
+const ONE_POINT = (sentence: string) => /一点/u.test(sentence);
 const countTheme = (text: string, matches: (sentence: string) => boolean) => sentences(text).filter(matches).length;
 
 test('v25 says each theme once in every request, where v24 said some of them two or three times', () => {
@@ -105,13 +108,30 @@ test('v25 says each theme once in every request, where v24 said some of them two
     assert.ok(before >= 1, `v24 / ${name} / ${theme}`);
     if (before > 1) repeated.set(`${name} / ${theme}`, before);
   }
-  // What the cleanup removed (v24 said these two or three times): each of the four actions' answer, the one-question and the known/unknown statements.
+  // What the cleanup removed (v24 said these two or three times): each action's answer, the known/unknown and the correction statements.
   for (const expected of ['confirm (visual detail) / answer what was asked first', 'confirm / answer what was asked first', 'confirm (continuing) / answer what was asked first',
-    'repair (visual detail) / answer what was asked first', 'accept (continuing) / answer what was asked first', 'confirm / ask one question',
-    'confirm (continuing) / ask one question', 'accept (continuing) / state the known and the unknown', 'confirm (continuing) / reflect a correction or a restated request']) {
+    'repair (visual detail) / answer what was asked first', 'accept (continuing) / answer what was asked first',
+    'accept (continuing) / state the known and the unknown', 'confirm (continuing) / reflect a correction or a restated request']) {
     assert.ok(repeated.has(expected), `v24 repeated: ${expected}`);
   }
   assert.equal(repeated.get('confirm (visual detail) / answer what was asked first'), 3);
+  // The number of questions was never said twice: it is in the common instructions only, in v24 and in v25.
+  assert.deepEqual([...repeated.keys()].filter(key => key.endsWith('ask one question')), []);
+});
+
+test('the one point a confirmation asks about is kept as v24 had it: once in a confirm and a confirming continuation, nowhere else, with the same words', () => {
+  for (const [name, input] of CASES) {
+    const [v24, v25] = [requestText('v24', input), requestText('v25', input)];
+    const expected = name.startsWith('confirm') ? 1 : 0;
+    assert.equal(countTheme(v24, ONE_POINT), expected, `v24 / ${name}`);
+    assert.equal(countTheme(v25, ONE_POINT), expected, `v25 / ${name}`);
+    // The sentence is v24's sentence: the cleanup took away the sentence before it (and, in a continuation, one connective), never the point itself.
+    const [point24] = sentences(v24).filter(ONE_POINT), [point25] = sentences(v25).filter(ONE_POINT);
+    if (expected === 0) continue;
+    const core = name.includes('continuing') ? '未回答の具体的な一点を尋ねてください。' : '答えを得ていない一点だけを形の参照枠に沿って尋ねてください。';
+    assert.ok(point24.endsWith(core) && point25.endsWith(core), name);
+    assert.equal(point25.endsWith(point24.replace(/^それでも/u, '')), true, `${name}: ${point25}`);
+  }
 });
 
 test('the actions v25 did not touch say exactly what v24 said (the action message), and only the three texts that restated a theme differ', () => {
@@ -149,13 +169,13 @@ test('consult: v24 asked for the AI\'s own view with every question and for no o
 
 test('the three texts v25 shortened keep what is the action\'s own and drop only what the common instructions say', () => {
   const confirm = prompt({ ...base, ...CASES.find(([name]) => name === 'confirm (visual detail)')![1], tidied: true });
-  assert.ok(confirm.includes('選んだ論点について確認がまだ必要なら、答えを得ていない点を形の参照枠に沿って尋ねてください。観察メモにない特徴、対象の一致、名前の合意は断定しないでください。'));
+  assert.ok(confirm.includes('選んだ論点について確認がまだ必要なら、答えを得ていない一点だけを形の参照枠に沿って尋ねてください。観察メモにない特徴、対象の一致、名前の合意は断定しないでください。'));
   assert.ok(confirm.includes('肯否・訂正済みの点と未解決の点を区別してください。'));
   assert.ok(confirm.includes('根拠が不足する場合はその不確かさを示してください。'));
-  for (const gone of ['聞かれたことには、自分の観察で答えられる点を先に述べてください', '具体的な特徴への質問は先に扱い', '必要な情報を尋ねてください', '一点だけ']) assert.equal(confirm.includes(gone), false, gone);
+  for (const gone of ['聞かれたことには、自分の観察で答えられる点を先に述べてください', '具体的な特徴への質問は先に扱い', '必要な情報を尋ねてください']) assert.equal(confirm.includes(gone), false, gone);
   const continuing = prompt({ ...base, ...CASES.find(([name]) => name === 'confirm (continuing)')![1], tidied: true });
   assert.ok(continuing.includes('【未確定のまま答える】答えは今の論点の範囲にとどめ、名前を新しく提案・採用・撤回したり、未確定の対象を一つに決めたりしないでください。'));
-  assert.ok(continuing.includes('次の返答に相手の情報が必要なときだけ、未回答の具体的な点を尋ねてください。何を確かめるかを相手に委ねないでください。'));
+  assert.ok(continuing.includes('次の返答に相手の情報が必要なときだけ、未回答の具体的な一点を尋ねてください。何を確かめるかを相手に委ねないでください。'));
   const accepted = prompt({ ...base, ...CASES.find(([name]) => name === 'accept (continuing)')![1], tidied: true });
   assert.ok(accepted.includes('未確定の対象を一つに決めたりしないでください。新たな質問は加えないでください。'));
   for (const text of [continuing, accepted]) for (const gone of ['直接答えてください', '何が未確定かを短く明示', '答えられる内容と限界', '訂正や依頼の言い直しがあれば反映してください']) assert.equal(text.includes(gone), false, gone);

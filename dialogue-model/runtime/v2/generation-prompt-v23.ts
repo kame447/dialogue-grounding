@@ -51,10 +51,12 @@ const ACCEPT_V23 = "相手の発話を受け止めてください。相槌に同
 const CONFIRM_V23 = "選んだ論点の解消に必要な点だけを、形の参照枠に沿って短く尋ねてください。観察メモにない特徴を肯定したり、同じ図形だと断定したりしないでください。ほかの部分を確かめたり、決まった・それでいこうと言ったりしないでください。";
 const CONFIRM_V24 = "選んだ論点について聞かれたことには、自分の観察で答えられる点を先に述べてください。確認がまだ必要なら、答えを得ていない一点だけを形の参照枠に沿って尋ねてください。観察メモにない特徴、対象の一致、名前の合意は断定しないでください。";
 const CONTINUE_V24 = "【未確定のまま答える】相手の説明・選択・命名・進行の依頼に、今の論点の範囲で直接答えてください。自分の観察で答えられる内容とその根拠を先に述べ、決められない部分があれば何が未確定かを短く明示してください。相手から訂正や依頼の言い直しがあれば反映してください。名前を新しく提案・採用・撤回したり、未確定の対象を一つに決めたりしないでください。";
-// v25 (#273): the direct answer, the one question and the statement of the known and the unknown are said once, in UPTAKE_V25; these three keep only what is the
-// action's own. CONFIRM_V24 and VISUAL_FEATURE_SELECTION_V23 repeated "answer what was asked first" and "ask one point", CONTINUE_V24 repeated those and the corrections.
+// v25 (#273): the direct answer, the statement of the known and the unknown and the reflection of corrections are said once, in UPTAKE_V25; these three keep only what is the
+// action's own. CONFIRM_V24 and VISUAL_FEATURE_SELECTION_V23 repeated "answer what was asked first", CONTINUE_V24 repeated that and the other two.
+// "原則一発話で一つに絞り" (how many questions) stays in UPTAKE_V25. "一点だけ" / "一点" (which point the confirmation asks about: only the one point still unanswered) is the action's own
+// range of the question's content, a different constraint, so the confirm texts keep it (audit F1 of PR #290: a real-API confirm asked two points in one question when it was gone).
 const VISUAL_FEATURE_SELECTION_V25 = "対象と論点の範囲で観察メモから確認・修復に使う特徴を選んでください。肯否・訂正済みの点と未解決の点を区別してください。候補の区別や説明の対応に役立つ点を優先し、観察メモに記載がないことを特徴がない証拠にしないでください。根拠が不足する場合はその不確かさを示してください。";
-const CONFIRM_V25 = "選んだ論点について確認がまだ必要なら、答えを得ていない点を形の参照枠に沿って尋ねてください。観察メモにない特徴、対象の一致、名前の合意は断定しないでください。";
+const CONFIRM_V25 = "選んだ論点について確認がまだ必要なら、答えを得ていない一点だけを形の参照枠に沿って尋ねてください。観察メモにない特徴、対象の一致、名前の合意は断定しないでください。";
 const CONTINUE_V25 = "【未確定のまま答える】答えは今の論点の範囲にとどめ、名前を新しく提案・採用・撤回したり、未確定の対象を一つに決めたりしないでください。";
 const REPAIR_V23 = "選んだ論点について、公開の食い違いを形の参照枠に沿って局所的に確かめ直すか、直してください。取り違えや名前の訂正を明示するのは、これまでの発話に根拠がある時だけです。";
 const HOLD_OPEN_V23 = "相手の提示に短く反応し、論点について理解できた、採用する、食い違っているのいずれも言い切らないでください。ためらい、相手が示した特徴や見立ての短い反復、観察メモに根拠のある候補を独り言のように挙げることのいずれかで、判断がまだ定まらないことを伝えてください。保留、後回し、移行、名前や対象の確定を宣言せず、観察メモで答えられる別の問いが publicQuestions にあれば先に短く答えてください。";
@@ -113,7 +115,7 @@ function actionScope(action: JevDecisionAction, partOnly: boolean, continuing: b
       return continuing
         ? respondToRequest
           ? tidied
-            ? CONTINUE_V25 + "次の返答に相手の情報が必要なときだけ、未回答の具体的な点を尋ねてください。何を確かめるかを相手に委ねないでください。"
+            ? CONTINUE_V25 + "次の返答に相手の情報が必要なときだけ、未回答の具体的な一点を尋ねてください。何を確かめるかを相手に委ねないでください。"
             : CONTINUE_V24 + "それでも次の返答に相手の情報が必要なときだけ、未回答の具体的な一点を尋ねてください。何を確かめるかを相手に委ねないでください。"
           : "同じ論点について何を確かめるとよいか、特定の図形や特徴を決めつけず、今の候補の範囲で短く尋ねてください。同じ図形や名前が決まったとは言わないでください。"
         : (respondToRequest ? tidied ? CONFIRM_V25 : CONFIRM_V24 : CONFIRM_V23) + (partOnly ? "" : "未解決の図形の命名の先送りを提案しないでください。") + stay;

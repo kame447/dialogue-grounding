@@ -3542,7 +3542,7 @@ const PROMPT_VERSIONS:readonly PromptVersion[]=[
   'v2/deferred-ai-extraction.ts':'c8426684784a2be33356c0d18d26981f169c4c7ff7287d30abe5654541016b77',
   'v2/issue-publication.ts':'55c17c514d0257803276ee451eaf4279b00fde0bdced13dd09ae91c1f03259a9',
   'decision/human-led-move-on.ts':'7c5dc7ff16877f1d9ff5cb6a777895c91aeb28fa6e31af1e7ab3d4ad5ed8d048',
-  'v2/generation-prompt-v23.ts':'e27de83d41c623cdcb3cf212980eb153649ee16747efe7e32740642dec004637',
+  'v2/generation-prompt-v23.ts':'53ba1d0f3c4fec889b40cfd3188e0d54ab86dc125bcf864bf71610a04dc42282',
  }},fixed:FIXED_I172,native:NATIVE_I172},
  ...HISTORICAL_MAIN_PROMPT_SOURCES.map(({id, files}) => ({
   id, i172: false, styleMode: 'legacy' as const, sources: {scheme: 'complete_instruction_source_sha256', files: {...HISTORICAL_MAIN_SHARED_SOURCES, ...files}},

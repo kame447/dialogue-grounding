@@ -30,11 +30,15 @@ const MODES: RotationMode[] = ['relative_pm90', 'relative_0', 'relative_90_180_2
 const UPTAKE_V24_Q = '質問するときも問いだけで終えず、自分の見え方や今の理解を一言添えてください。';
 const UPTAKE_V25_Q = '図形についての質問は、問いだけで終えず、自分の見え方や今の理解を一言添えてください。';
 const CONFIRM_V24 = '選んだ論点について聞かれたことには、自分の観察で答えられる点を先に述べてください。確認がまだ必要なら、答えを得ていない一点だけを形の参照枠に沿って尋ねてください。観察メモにない特徴、対象の一致、名前の合意は断定しないでください。';
-const CONFIRM_V25 = '選んだ論点について確認がまだ必要なら、答えを得ていない点を形の参照枠に沿って尋ねてください。観察メモにない特徴、対象の一致、名前の合意は断定しないでください。';
+const CONFIRM_V25 = '選んだ論点について確認がまだ必要なら、答えを得ていない一点だけを形の参照枠に沿って尋ねてください。観察メモにない特徴、対象の一致、名前の合意は断定しないでください。';
 const VISUAL_V23 = '対象と論点の範囲で観察メモから確認・修復に使う特徴を選んでください。具体的な特徴への質問は先に扱い、肯否・訂正済みの点と未解決の点を区別してください。候補の区別や説明の対応に役立つ点を優先し、観察メモに記載がないことを特徴がない証拠にしないでください。根拠が不足する場合はその不確かさを示し、必要な情報を尋ねてください。';
 const VISUAL_V25 = '対象と論点の範囲で観察メモから確認・修復に使う特徴を選んでください。肯否・訂正済みの点と未解決の点を区別してください。候補の区別や説明の対応に役立つ点を優先し、観察メモに記載がないことを特徴がない証拠にしないでください。根拠が不足する場合はその不確かさを示してください。';
 const CONTINUE_V24 = '【未確定のまま答える】相手の説明・選択・命名・進行の依頼に、今の論点の範囲で直接答えてください。自分の観察で答えられる内容とその根拠を先に述べ、決められない部分があれば何が未確定かを短く明示してください。相手から訂正や依頼の言い直しがあれば反映してください。名前を新しく提案・採用・撤回したり、未確定の対象を一つに決めたりしないでください。';
 const CONTINUE_V25 = '【未確定のまま答える】答えは今の論点の範囲にとどめ、名前を新しく提案・採用・撤回したり、未確定の対象を一つに決めたりしないでください。';
+// What follows it: a confirming continuation asks the one unanswered point (v24 said "具体的な一点" too), an accepting one adds no new question.
+const CONFIRM_CONTINUING_V25 = '次の返答に相手の情報が必要なときだけ、未回答の具体的な一点を尋ねてください。何を確かめるかを相手に委ねないでください。';
+const CONFIRM_CONTINUING_V24 = 'それでも次の返答に相手の情報が必要なときだけ、未回答の具体的な一点を尋ねてください。何を確かめるかを相手に委ねないでください。';
+const ACCEPT_CONTINUING_V25 = '新たな質問は加えないでください。';
 const UPTAKE_V25 = GENERATION_INSTRUCTIONS_V25.split('\n').find(line => line.startsWith('【相手への返答】'))!;
 const UPTAKE_V24 = GENERATION_INSTRUCTIONS_V24.split('\n').find(line => line.startsWith('【相手への返答】'))!;
 
@@ -46,7 +50,7 @@ const rotationMemo = () => {
   return rotationInitialMemo(anchors, new Map(anchors.map((anchor: { id: string }, i: number) => [anchor.id, projectionOf(VIEWS[i])] as const)), '2026-01-01T00:00:00.000Z');
 };
 type Check = 'off' | 'on';
-type Scene = 'confirm' | 'confirm_regenerated' | 'accept' | 'accept_continued' | 'propose_name' | 'request_observation';
+type Scene = 'confirm' | 'confirm_regenerated' | 'accept' | 'continued_ask' | 'continued_acknowledge' | 'propose_name' | 'request_observation';
 const draft = (text: string, check: Check, plain = false) => check === 'on' ? JSON.stringify({ text, observationFeatures: [] }) : plain ? text : JSON.stringify({ text });
 const bad = 'この図形をいったん置いて、次のを見よう。';
 const turn = (scene: Scene, check: Check, anchorId: string) => {
@@ -58,11 +62,16 @@ const turn = (scene: Scene, check: Check, anchorId: string) => {
       drafts: [draft(bad, check), draft('もう一つ特徴を確かめさせてください。', check)],
       choose: (key: string, _criteria: unknown, { generationCalls }: { generationCalls: number }) => key === 'draft_topic_shift' ? generationCalls === 1 ? 'unsupported_shift' : 'within_plan' : choose(key) } },
     accept: { human: '図形を見分ける特徴を教えてください。', plan: { ...base, action: 'accept', target: 'none', speech: draft('細い部分が端でつながっています。', check, true) } },
-    // ON only: four drafts that move on, so the check stops asking for a new one and the answer continues without settling (the CONTINUE text).
-    accept_continued: { human: '図形を見分ける特徴を教えてください。', plan: { ...base, action: 'accept', target: 'none',
+    // ON only: four drafts that move on, so the check stops asking for a new one and the answer continues without settling (the CONTINUE text). The continuation asks the one
+    // point still unanswered (a confirm in the end) or only acknowledges it (an accept in the end).
+    continued_ask: { human: '図形を見分ける特徴を教えてください。', plan: { ...base, action: 'accept', target: 'none',
       drafts: [bad, bad, bad, bad, draft('細い部分が端でつながっています。', check)],
       choose: (key: string, _criteria: unknown, { generationCalls }: { generationCalls: number }) => key === 'draft_topic_shift' ? generationCalls < 5 ? 'unsupported_shift' : 'within_plan'
         : key === 'publication_continuation' ? 'ask_unresolved' : choose(key) } },
+    continued_acknowledge: { human: '図形を見分ける特徴を教えてください。', plan: { ...base, action: 'accept', target: 'none',
+      drafts: [bad, bad, bad, bad, draft('細い部分が端でつながっています。', check)],
+      choose: (key: string, _criteria: unknown, { generationCalls }: { generationCalls: number }) => key === 'draft_topic_shift' ? generationCalls < 5 ? 'unsupported_shift' : 'within_plan'
+        : key === 'publication_continuation' ? 'acknowledge_unresolved' : choose(key) } },
     // The decision looks again at the figure (one self-side re-observation) before the final action: the re-observation request is the same bytes as v24's.
     request_observation: { human: 'もう少し詳しく見てください。', plan: { ...base, action: 'confirm', target: 'figure_0', reobserve: true, speech: draft('見てから確かめます。', check),
       choose: (key: string) => key === 'observe_aspect' ? 'construal' : choose(key) } },
@@ -80,7 +89,7 @@ function record(scene: Scene, check: Check, { version = 'jev_generation_retry_v2
 }
 
 // ---- 1. S4 passes a v25 record ----
-const SCENES: [Scene, Check][] = [['confirm', 'off'], ['confirm', 'on'], ['confirm_regenerated', 'on'], ['accept', 'off'], ['accept_continued', 'on'], ['propose_name', 'off'], ['propose_name', 'on'], ['request_observation', 'off'], ['request_observation', 'on']];
+const SCENES: [Scene, Check][] = [['confirm', 'off'], ['confirm', 'on'], ['confirm_regenerated', 'on'], ['accept', 'off'], ['continued_ask', 'on'], ['continued_acknowledge', 'on'], ['propose_name', 'off'], ['propose_name', 'on'], ['request_observation', 'off'], ['request_observation', 'on']];
 for (const [scene, check] of SCENES) for (const label of ['repair-first', 'bypass-enabled'] as Label[]) {
   test(`v25 ${scene} (${check}, ${label}): S4 verifies the record without the rotation memory`, async () => {
     assert.deepEqual(statuses(await record(scene, check, { label })), ALL_PASS);
@@ -91,7 +100,7 @@ for (const [scene, check] of SCENES) for (const label of ['repair-first', 'bypas
   });
 }
 test('the v25 records carry what v25 says: the tidied lines, the noun-unit sentence and the extraction rules where they belong, and none of the v24 lines', async () => {
-  const off = await record('confirm', 'off', { memo: true }), on = await record('confirm', 'on', { memo: true }), continued = await record('accept_continued', 'on');
+  const off = await record('confirm', 'off', { memo: true }), on = await record('confirm', 'on', { memo: true }), asked = await record('continued_ask', 'on'), acknowledged = await record('continued_acknowledge', 'on');
   for (const records of [off, on]) {
     assert.equal(holds(records, UPTAKE_V25), true); assert.equal(holds(records, UPTAKE_V24), false);
     assert.equal(holds(records, CONFIRM_V25), true); assert.equal(holds(records, CONFIRM_V24), false);
@@ -100,7 +109,10 @@ test('the v25 records carry what v25 says: the tidied lines, the noun-unit sente
   assert.equal(holds(off, table.ROTATION_NOUN_UNIT_V25), false, 'OFF asks for no observation sources');
   assert.equal(holds(off, AI_EXTRACTION_SOURCE_RULES_V25), false, 'the extraction that reads no sources keeps the earlier bytes');
   assert.equal(holds(on, table.ROTATION_NOUN_UNIT_V25), true); assert.equal(holds(on, AI_EXTRACTION_SOURCE_RULES_V25), true);
-  assert.equal(holds(continued, CONTINUE_V25), true); assert.equal(holds(continued, CONTINUE_V24), false);
+  for (const continued of [asked, acknowledged]) { assert.equal(holds(continued, CONTINUE_V25), true); assert.equal(holds(continued, CONTINUE_V24), false); }
+  assert.equal(holds(asked, CONFIRM_CONTINUING_V25), true); assert.equal(holds(asked, CONFIRM_CONTINUING_V24), false);
+  assert.equal(holds(acknowledged, ACCEPT_CONTINUING_V25), true);
+  assert.equal(holds(asked, ACCEPT_CONTINUING_V25), false, 'a continuation that asks adds no sentence that forbids a question');
   assert.equal(holds(await record('confirm', 'on'), table.ROTATION_NOUN_UNIT_V25), false, 'a memo without the rotation memory asks for no rotation source');
   assert.equal(holds(await record('confirm', 'on'), AI_EXTRACTION_SOURCE_RULES_V25), true, 'the extraction rules do not depend on the rotation memory');
 });
@@ -111,7 +123,9 @@ const TEXTS: [string, string, Scene, Check, boolean][] = [
   ['the whole tidied common line', UPTAKE_V25, 'accept', 'off', false],
   ['the tidied confirm text', CONFIRM_V25, 'confirm', 'off', false],
   ['the tidied feature selection', VISUAL_V25, 'confirm', 'on', false],
-  ['the tidied continuation text', CONTINUE_V25, 'accept_continued', 'on', false],
+  ['the tidied continuation text', CONTINUE_V25, 'continued_ask', 'on', false],
+  ['the one point a confirming continuation asks about', CONFIRM_CONTINUING_V25, 'continued_ask', 'on', false],
+  ['the sentence that adds no new question to an accepting continuation', ACCEPT_CONTINUING_V25, 'continued_acknowledge', 'on', false],
   ['the noun-unit sentence', table.ROTATION_NOUN_UNIT_V25, 'confirm', 'on', true],
   ['the ON extraction rules', table.AI_EXTRACTION_SOURCE_RULES_V25, 'confirm', 'on', false],
   ['the ON extraction rules (with the rotation memory)', table.AI_EXTRACTION_SOURCE_RULES_V25, 'confirm', 'on', true],
@@ -132,7 +146,10 @@ const OLD_FOR_NEW: [string, string, string, Scene, Check, boolean][] = [
   ['the v24 question line', UPTAKE_V25_Q, UPTAKE_V24_Q, 'confirm', 'off', false],
   ['the v24 confirm text', CONFIRM_V25, CONFIRM_V24, 'confirm', 'off', false],
   ['the v23 feature selection', VISUAL_V25, VISUAL_V23, 'confirm', 'on', false],
-  ['the v24 continuation text', CONTINUE_V25, CONTINUE_V24, 'accept_continued', 'on', false],
+  ['the v24 continuation text', CONTINUE_V25, CONTINUE_V24, 'continued_ask', 'on', false],
+  ['the v24 continuation question text', CONFIRM_CONTINUING_V25, CONFIRM_CONTINUING_V24, 'continued_ask', 'on', false],
+  ['the confirm text without "一点だけ" (the range of the question that v25 must keep)', CONFIRM_V25, CONFIRM_V25.replace('一点だけを', '点を'), 'confirm', 'off', false],
+  ['the continuation question text without "一点" (the range of the question that v25 must keep)', CONFIRM_CONTINUING_V25, CONFIRM_CONTINUING_V25.replace('具体的な一点を', '具体的な点を'), 'continued_ask', 'on', false],
   ['the v24 sources line (no noun-unit sentence)', table.ROTATION_FEATURE_SOURCES_V25, table.ROTATION_FEATURE_SOURCES, 'confirm', 'on', true],
 ];
 for (const [name, v25, old, scene, check, memo] of OLD_FOR_NEW) {
