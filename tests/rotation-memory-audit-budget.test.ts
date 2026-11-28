@@ -48,7 +48,8 @@ test('Jev の判断の各呼び出し: 回転別メモを足しても、基点�
     });
     withRotation.observations.figures.forEach((figure: any, i: number) => { figure.rotation = projections[i]; });
     const before = harness.buildAll(baseline), after = harness.buildAll(withRotation);
-    const lastHuman = baseline.publicTurns.filter((p: any) => p.speaker === 'human').at(-1).text as string;
+    const humanTurns = baseline.publicTurns.filter((p: any) => p.speaker === 'human');
+    const lastHuman: string = humanTurns[humanTurns.length - 1]!.text;
     for (const call of Object.keys(before)) {
       const label = `${setName} ${n}図形 ${kind} AI${aiTurns}手番 ${call}`;
       if (!before[call].ok) { baselineFailures.push(`${label}: 基点で既に ${before[call].error}`); continue; }
