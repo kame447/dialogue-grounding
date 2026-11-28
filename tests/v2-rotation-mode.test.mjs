@@ -10,7 +10,7 @@ const { createTrialV2, modelView, participantView } = scatter;
 const SEED = 1701, PM90_TRIAL_ID = 'tangram-prototype-v2-e96c46888b1582b6';
 const MODES = ['relative_pm90', 'relative_0'];
 const opposite = (mode) => mode === 'relative_0' ? 'relative_pm90' : 'relative_0';
-const pngOf = (rotationMode) => modelView(createTrialV2({ seed: SEED, rotationMode })).png.toString('base64');
+const pngOf = (rotationMode, seed = SEED) => modelView(createTrialV2({ seed, rotationMode })).png.toString('base64');
 const ACCEPT = { action: 'accept', targetSlot: null, candidateName: null, discriminatingFeature: null, note: null };
 
 function harness() {
@@ -33,7 +33,7 @@ async function run(options, h = harness()) {
   await task.whenIdle();
   return { task, h, record: h.records.at(-1) };
 }
-const sawImage = (h, rotationMode) => h.images.some((url) => url.includes(pngOf(rotationMode)));
+const sawImage = (h, rotationMode, seed = SEED) => h.images.some((url) => url.includes(pngOf(rotationMode, seed)));
 
 test('N1 a new trial records relative_pm90 explicitly with its generated stimulus', async () => {
   const { record } = await run({});
@@ -158,4 +158,99 @@ test('N9 participantReview rebuilds the scene from the recorded mode and refuses
   assert.deepEqual(participantReview(completed(undefined)).scene, scene);
   for (const options of [{ rotationMode: 'x' }, { rotationMode: null }, { rotationMode: undefined }, null, []])
     assert.throws(() => participantReview(completed(options)), { code: 'operation_failed' }, JSON.stringify(options));
+});
+
+// #269 relative_90_180_270. Its seed is chosen from the turns the seed realizes: 90, 180 and 270 all occur, and the AI board
+// differs from the AI boards of both earlier modes. (Seed 1701 above gives the same AI board as relative_pm90: no 180 occurs.)
+const NEW = 'relative_90_180_270';
+const turnsOf = (seed) => {
+  const layouts = scatter.createLayoutsV2({ seed, rotationMode: NEW });
+  return layouts.human.map((h) => (layouts.ai.find((a) => a.figureId === h.figureId).rotation - h.rotation + 360) % 360);
+};
+const NEW_SEED = (() => {
+  for (let seed = 0; ; seed++) {
+    if (![90, 180, 270].every((turn) => turnsOf(seed).includes(turn))) continue;
+    if (['relative_pm90', 'relative_0'].some((mode) => pngOf(mode, seed) === pngOf(NEW, seed))) continue;
+    return seed;
+  }
+})();
+
+test('N10 relative_90_180_270 records its mode, stimulus and trialId and gives the model its own board', async () => {
+  const { record, h } = await run({ rotationMode: NEW, seed: NEW_SEED });
+  const trial = createTrialV2({ seed: NEW_SEED, rotationMode: NEW });
+  assert.equal(record.options.rotationMode, NEW);
+  assert.deepEqual(record.stimulus, scatter.trialStimulusV2(trial));
+  assert.equal(record.trialId, trial.trialId);
+  assert.ok(sawImage(h, NEW, NEW_SEED));
+  assert.ok(!sawImage(h, 'relative_pm90', NEW_SEED) && !sawImage(h, 'relative_0', NEW_SEED));
+  // The recorded AI angles carry a 180° turn: the seed was chosen for it.
+  const turns = Object.entries(trial.key.ai).map(([slot, figureId]) => {
+    const humanSlot = Object.keys(trial.key.human).find((s) => trial.key.human[s] === figureId);
+    return (record.stimulus.angles.ai[slot] - record.stimulus.angles.human[humanSlot] + 360) % 360;
+  });
+  assert.ok(turns.includes(180) && turns.every((turn) => [90, 180, 270].includes(turn)));
+});
+
+test('N11 both strategies get the same relative_90_180_270 stimulus: trialId, board images and recorded stimulus', async () => {
+  const [a, b] = await Promise.all(['repair-first', 'bypass-enabled'].map((strategy) => run({ strategy, rotationMode: NEW, seed: NEW_SEED })));
+  assert.ok(a.h.images.length > 0);
+  assert.deepEqual([...new Set(a.h.images)], [...new Set(b.h.images)]);
+  assert.deepEqual(a.record.stimulus, b.record.stimulus);
+  assert.equal(a.record.trialId, b.record.trialId);
+});
+
+test('N12 the participant state of relative_90_180_270 shows neither the mode nor angles, and its scene is the human board of relative_pm90', async () => {
+  const { task } = await run({ rotationMode: NEW, seed: NEW_SEED });
+  const state = task.getState();
+  assert.doesNotMatch(JSON.stringify(state), /relative|rotation|angle|stimulus/iu);
+  assert.deepEqual(state.scene, participantView(createTrialV2({ seed: NEW_SEED })));
+});
+
+test('N13 save → JSON → restore keeps relative_90_180_270 whatever the caller passes and shows the same board', async () => {
+  for (const strategy of ['repair-first', 'bypass-enabled']) {
+    const first = await run({ strategy, rotationMode: NEW, seed: NEW_SEED });
+    const saved = JSON.parse(JSON.stringify(first.record));
+    for (const other of ['relative_pm90', 'relative_0', undefined]) {
+      const h = harness();
+      const { record } = await run({ strategy, rotationMode: other, seed: NEW_SEED, restore: saved }, h);
+      assert.equal(record.options.rotationMode, NEW);
+      assert.deepEqual(record.stimulus, saved.stimulus);
+      assert.equal(record.trialId, saved.trialId);
+      assert.ok(sawImage(h, NEW, NEW_SEED));
+      assert.ok(!sawImage(h, 'relative_pm90', NEW_SEED) && !sawImage(h, 'relative_0', NEW_SEED));
+    }
+  }
+});
+
+test('N14 records that disagree with relative_90_180_270 are refused before any call or persist', async () => {
+  const saved = JSON.parse(JSON.stringify((await run({ rotationMode: NEW, seed: NEW_SEED })).record));
+  const edit = (change) => { const copy = structuredClone(saved); change(copy); return copy; };
+  const slot = Object.keys(saved.stimulus.angles.ai)[0];
+  const cases = [
+    { restore: edit((r) => { r.stimulus.angles.ai[slot] = (r.stimulus.angles.ai[slot] + 90) % 360; }) },
+    { restore: edit((r) => { r.stimulus.rotationMode = 'relative_pm90'; }) },
+    { restore: edit((r) => { r.options.rotationMode = 'relative_pm90'; }) },
+    { restore: edit((r) => { r.options.rotationMode = 'relative_90_180_270 '; }) },
+    { restore: edit((r) => { delete r.stimulus; }) },
+    { restore: edit((r) => { r.trialId = createTrialV2({ seed: NEW_SEED }).trialId; }) },
+    { rotationMode: NEW, createTrial: ({ seed }) => createTrialV2({ seed }) },
+    { rotationMode: NEW, createTrial: ({ seed }) => createTrialV2({ seed, rotationMode: 'relative_0' }) },
+  ];
+  for (const extra of cases) {
+    const h = harness();
+    await assert.rejects(createNamingTaskV2({ client: h.client, judge: h.judge, strategy: 'repair-first', seed: NEW_SEED, runDir: null,
+      onPersist: h.onPersist, ...extra }), { code: 'invalid_options' }, JSON.stringify(Object.keys(extra)));
+    assert.equal(h.calls(), 0);
+    assert.equal(h.records.length, 0);
+  }
+});
+
+test('N15 the answer key of relative_90_180_270 is the one of relative_pm90, and participantReview rebuilds its scene from the recorded mode', async () => {
+  const { task } = await run({ rotationMode: NEW, seed: NEW_SEED });
+  assert.deepEqual(task.researcherView().key, createTrialV2({ seed: NEW_SEED }).key);
+  const completed = (options) => ({ recordId: '00000000-0000-4000-8000-000000000001', status: 'completed', seed: NEW_SEED,
+    startedAt: '2026-11-28T00:00:00.000Z', updatedAt: '2026-11-28T00:01:00.000Z', events: [], humanSubmission: {},
+    scoring: { result: { provisional: false, success: false, matchedCount: 0, total: 6, figures: [] } }, options });
+  assert.deepEqual(participantReview(completed({ rotationMode: NEW })).scene, participantView(createTrialV2({ seed: NEW_SEED, rotationMode: NEW })));
+  assert.deepEqual(participantReview(completed({ rotationMode: NEW })).scene, participantView(createTrialV2({ seed: NEW_SEED })));
 });
