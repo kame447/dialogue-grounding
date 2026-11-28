@@ -5,6 +5,7 @@ import { createNamingTaskV2 } from "../../../dialogue-model/runtime/v2/naming-ta
 import { createGroundingJudgeClient } from "../../../dialogue-model/runtime/grounding/client.ts";
 import { INITIAL_OBSERVATION_STRUCTURED_V2 } from "../../../dialogue-model/runtime/observation/initial-observation-generation.ts";
 import { workerTerraInitialKey, validateWorkerTerraCacheEntry } from "../../../dialogue-model/runtime/observation/worker-terra-observer.ts";
+import { allRecordedTrialsDeleted } from './reception-visibility.ts';
 import { NamingTaskError } from "../../../dialogue-model/runtime/naming-error.mjs";
 import { sessionCookie, sessionId } from "./session-cookie.ts";
 import { isExcessiveTraffic, type SoftLimitBindings } from "./soft-limits";
@@ -681,6 +682,25 @@ export class TangramSession extends DurableObject<Env> {
     return questionnaire ? { ...record, questionnaire } : record;
   }
 
+  // A null trial slot is not a stored log. Keep it visible only while its
+  // admission can still produce a record, or while its state is uncertain.
+  private async hasRecoverableUnrecordedAdmission(reception: Reception): Promise<boolean> {
+    if (reception.status !== 'in_progress' || !reception.trials.some(t => t.recordId === null)) return false;
+    const raw = await this.storage.get<BaseOwnerState>('base:owner:v1');
+    if (!raw) return true;
+    const owner = readOwner(raw, this.ctx.id.toString());
+    const entry = owner.activeKey && owner.admissions[owner.activeKey];
+    if (!entry || entry.assignment.source.kind === 'server_config_v1') return true;
+    const source = entry.assignment.source;
+    if (source.receptionId !== reception.receptionId || reception.trials[source.trialIndex]?.recordId !== null) return true;
+    return needsAssignmentPreparation(entry);
+  }
+
+  async adminHasRecoverableUnrecordedAdmission(receptionId: string): Promise<boolean> {
+    const reception = await this.readReception();
+    return !reception || reception.receptionId !== receptionId || await this.hasRecoverableUnrecordedAdmission(reception);
+  }
+
   async adminDeletedRecordIds(recordIds: string[]): Promise<string[]> {
     const deleted = new Set(await this.storage.get<string[]>('tombstones'));
     return recordIds.filter(id => deleted.has(id));
@@ -986,13 +1006,18 @@ export class TangramSession extends DurableObject<Env> {
   }
 
   /** Read only history metadata, leaving dialogue restoration and model calls to explicit routes. */
-  async tabHistorySummary(sessionId: string, createdAt: string | null, protocolAvailable: boolean): Promise<BrowserSessionSummary | null> {
+  async tabHistorySummary(sessionId: string, createdAt: string | null, protocolAvailable: boolean): Promise<BrowserSessionSummary | { deletedReception: true } | null> {
     await this.initialize();
     let reception: Reception | null = null, receptionUnreadable = false;
     try { reception = await this.readReception(); }
     catch (error) {
       if (!(error instanceof ReceptionError)) throw error;
       receptionUnreadable = true;
+    }
+    if (reception?.trials.some(t => t.recordId !== null)) {
+      const deleted = new Set(await this.storage.get<string[]>('tombstones') ?? []);
+      if (allRecordedTrialsDeleted(reception.trials, id => deleted.has(id)) &&
+          !await this.hasRecoverableUnrecordedAdmission(reception)) return { deletedReception: true };
     }
     const [active, ids] = await Promise.all([this.storage.get<StoredTrial>(ACTIVE_KEY), ledgerIds(this.storage)]);
     const records = [];
@@ -1010,7 +1035,7 @@ export class TangramSession extends DurableObject<Env> {
       activeRecordId: active?.recordId ?? null, records });
   }
 
-  async browserHistory(): Promise<{ receptionMode: ReceptionMode; sessions: BrowserSessionSummary[] }> {
+  async browserHistory(): Promise<{ receptionMode: ReceptionMode; sessions: BrowserSessionSummary[]; hadDeletedReception?: true }> {
     const [settings, entries] = await Promise.all([this.settings().catch(() => null), this.browserSessions()]);
     const protocolAvailable = Boolean(settings?.protocol);
     const results = await Promise.all([
@@ -1018,9 +1043,12 @@ export class TangramSession extends DurableObject<Env> {
       ...entries.map(({ sessionId, doName, createdAt }) =>
         this.tabObject(doName).tabHistorySummary(sessionId, createdAt, protocolAvailable)),
     ]);
-    const summaries = results.filter((summary): summary is BrowserSessionSummary => summary !== null);
+    const summaries = results.filter((summary): summary is BrowserSessionSummary => summary !== null && !('deletedReception' in summary));
     return { receptionMode: settings ? receptionOpen(settings.mode) ? 'on' : 'off' : 'unavailable',
-      sessions: sortBrowserSessions(summaries) };
+      sessions: sortBrowserSessions(summaries),
+      // A browser with deleted history is not a first-time visitor. No IDs or
+      // removed record content are returned, only this owned-history flag.
+      ...(results.some(summary => summary !== null && 'deletedReception' in summary) ? { hadDeletedReception: true } : {}) };
   }
   private async baseReadRecord(id: string): Promise<BaseRecord|null> {
     if (!RECORD_ID.test(id)) return null;

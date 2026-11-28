@@ -50,7 +50,7 @@ const completedTrial = (id = 'r1') => ({ version: 2, sessionId: id, status: 'com
   events: [{ id: 0, speaker: 'human', text: 'hello' }], humanSubmission: { s1: 'a' }, result: { provisional: true, success: true, matchedCount: 1, total: 1, figures: [{ human: { slot: 's1', rawName: 'a' }, ai: { rawName: 'a' }, matched: true }] } });
 const FORM = { version: 'v', notice: '', items: [{ id: 'q1', text: 'Q1', min: 1, max: 7, minLabel: 'a', maxLabel: 'b' }] };
 
-type Server = { historyGate?: Promise<void>; historyStatus?: number; mode?: string; sessions?: any[]; states?: Record<string, any>; reviews?: Record<string, any>; questionnaire?: any; saveStatus?: number; legacySessions404?: boolean; receptionStatus?: number; stateStatus?: Record<string, number>; local?: Map<string, string> };
+type Server = { hadDeletedReception?: boolean; historyGate?: Promise<void>; historyStatus?: number; mode?: string; sessions?: any[]; states?: Record<string, any>; reviews?: Record<string, any>; questionnaire?: any; saveStatus?: number; legacySessions404?: boolean; receptionStatus?: number; stateStatus?: Record<string, number>; local?: Map<string, string> };
 async function ui(resolved: any, server: Server = {}, hash = '') {
   const { root, e } = makeDOM();
   const calls: { path: string; method: string; body: any; session: string | null }[] = [], timers = new Map<number, { callback: Function; delay: number }>();
@@ -74,7 +74,7 @@ async function ui(resolved: any, server: Server = {}, hash = '') {
       const body = opts?.body ? JSON.parse(opts.body) : undefined, session = opts?.headers?.['X-Tab-Session'] ?? null, method = opts?.method ?? 'GET';
       calls.push({ path, method, body, session });
       if (path === '/api/sessions' && method === 'GET') {
-        const snapshot = { receptionMode: srv.mode, sessions: srv.sessions };
+        const snapshot = { receptionMode: srv.mode, sessions: srv.sessions, ...(srv.hadDeletedReception ? { hadDeletedReception: true } : {}) };
         if (srv.historyGate) await srv.historyGate;
         if (srv.historyStatus) return reply(srv.historyStatus, { error: 'trial_unavailable' });
         return srv.legacySessions404 ? reply(404, { error: 'not_found' }) : reply(200, snapshot);
@@ -183,6 +183,20 @@ test('the first visit of a clean browser starts a session and a reception withou
   const off = await ui(fresh, { sessions: [], mode: 'off' });
   assert.deepEqual(off.calls.filter(c => c.path !== '/api/records').map(c => `${c.method} ${c.path}`), ['GET /api/sessions', 'POST /api/sessions']);
   assert.equal(off.e['start-stage'].hidden, false); assert.equal(off.e['start-trial'].textContent, 'スタート');
+});
+
+test('a browser whose reception was deleted shows the entry screen without silently creating another reception', async () => {
+  const id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+  const restored = { kind: 'restored', reason: 'same_tab', sessionId: id, tabToken: 't' };
+  for (const binding of [fresh, restored]) {
+    const x = await ui(binding, { sessions: [], hadDeletedReception: true, stateStatus: { [id]: 401 } });
+    assert.equal(x.e['entry-stage'].hidden, false);
+    assert.equal(x.e['session-history'].hidden, true);
+    assert.equal(x.e['new-session'].disabled, false);
+    assert.equal(x.calls.some(c => c.method === 'POST'), false);
+    x.e['new-session'].fire('click'); await tick();
+    assert.match(x.text(x.e['start-stage']), /受付番号 042/u);
+  }
 });
 
 test('a reload of the same tab restores that session; an expired one is forgotten and the entry screen shows', async () => {
