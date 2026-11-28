@@ -1,6 +1,7 @@
 import { isSupportedFigureCount } from '../stimuli/figure-bank.ts';
 import { ROTATION_MODES } from '../stimuli/scatter-v2.mjs';
 import { modelPartGeometry, hasPartGeometry, PART_INDEX_INSTRUCTIONS } from '../observation/part-consumers.ts';
+import { ROTATION_MEMO_ABSENT, ROTATION_MEMO_COMPOSITION } from '../observation/rotation-memo.ts';
 import { hasRotationMemory, figureRotation, rotationMemoryLayer, rotationLegendEntry, rotationNameCandidates, rotationFeatureCandidates, ROTATION_LAYER_OF_CALL,
   COMMON_DIFFERENT_CONSTRUAL, COMMON_DIFFERENT_CONSTRUAL_ROTATION, ROTATION_MATCH_USE, ROTATION_ACCEPT_ANSWER, ROTATION_ACCEPT_BACKCHANNEL,
   ROTATION_REQUEST_OBSERVATION, ROTATION_CONFIRM, ROTATION_PROPOSE_NAME } from "./rotation-memory-guidance.ts";
@@ -894,7 +895,8 @@ function prepare(input: JevDecisionInput, layout: JevQuestionLayout = "two_stage
       ...(rotationOf.has(o.figureId) ? rotationNameCandidates(rotationOf.get(o.figureId)!) : [])].filter(n => n.length <= 80)),
     ...publicNames.filter(n => n.figureId === null || n.figureId === o.figureId).map(n => n.name)])),
   ...(agreeLive === undefined ? {} : { agreeNames: observations.map(o => unique(agreeLive.filter(n => n.figureId === null || n.figureId === o.figureId).map(n => n.name))) }),
-  features: observations.map(o => visualPurpose ? [] : unique([...o.analytic.shapes, o.analytic.composition, ...o.analytic.relations,
+  // A rotation-memo figure has a fixed filler line as its composition (its geometry is in the rotation memory; ROTATION_MEMO_ABSENT for a figure the bundle lacks). A filler is not a feature to ask about; the features come from the rotation memory.
+  features: observations.map(o => visualPurpose ? [] : unique([...o.analytic.shapes, ...(rotationOf.has(o.figureId) || o.analytic.composition === ROTATION_MEMO_COMPOSITION || o.analytic.composition === ROTATION_MEMO_ABSENT ? [] : [o.analytic.composition]), ...o.analytic.relations,
     ...(rotationOf.has(o.figureId) ? rotationFeatureCandidates(rotationOf.get(o.figureId)!) : []),
     ...o.reobservations.flatMap(r => r.supports)].filter(v => !!v.trim() && v.length <= 400))) };
   if (participantLedger) {

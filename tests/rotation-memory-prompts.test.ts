@@ -5,10 +5,11 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { JEV_VISUAL_PURPOSE_VERSION } from '../dialogue-model/runtime/decision/contract.ts';
 import type { JevDecisionInput } from '../dialogue-model/runtime/decision/contract.ts';
-import { ROTATION_V5, ROTATION_V5_90_180_270, buildHumanReferentPayload, buildJevDecisionPayload, buildJevTargetPayload } from '../dialogue-model/runtime/decision/jev-decision.ts';
+import { ROTATION_V5, ROTATION_V5_90_180_270, buildHumanReferentPayload, buildJevDecisionDetailPayload, buildJevDecisionPayload, buildJevTargetPayload } from '../dialogue-model/runtime/decision/jev-decision.ts';
 import { ISSUE_HANDLING_VERSION } from '../dialogue-model/runtime/decision/issue-handling.ts';
 import { JEV_REPAIR_QUALITY_VERSION } from '../dialogue-model/runtime/decision/repair-quality.ts';
 import { SHAPE_TERMINOLOGY_GENERATION } from '../dialogue-model/runtime/shape-terminology.ts';
+import { ROTATION_MEMO_ABSENT, ROTATION_MEMO_COMPOSITION } from '../dialogue-model/runtime/observation/rotation-memo.ts';
 import { ROTATION_MEMORY_ENTRIES } from '../dialogue-model/runtime/stimuli/rotation-memory-data.ts';
 import { projectOwnRotationMemory } from '../dialogue-model/runtime/stimuli/rotation-memory.ts';
 import { AI_EXTRACTION_ROTATION_USE, COMMON_DIFFERENT_CONSTRUAL, EXTRACTION_ROTATION_USE, GENERATION_ROTATION_EDITS, REOBSERVATION_ROTATION_USE, ROTATION_ACCEPT_ANSWER,
@@ -23,7 +24,7 @@ import { researchTrialProfileV3 } from '../dialogue-model/runtime/v2/research-pr
 
 const base = JSON.parse(readFileSync(new URL('./fixtures/bypass-acceptance/MINIMAL-INPUT.json', import.meta.url), 'utf8')) as JevDecisionInput;
 const context = { questionLayout: 'two_stage_v3' as const, dialoguePolicy: 'holistic_v5' as const };
-const COMPOSITION = '形・位置・接続は rotation を参照。';
+const COMPOSITION = ROTATION_MEMO_COMPOSITION;
 // The figures the audits use (F6@0 has no whole construal now, F9@90 none at all in that view, F1@270 and F15@270 have both); the figure order is the own-anchor order.
 const KEYS: [string, number][] = [['F6', 0], ['F9', 90], ['F1', 270], ['F15', 270], ['F19', 0], ['F23', 180]];
 const rotationOf = (i: number) => projectOwnRotationMemory({ figureKey: KEYS[i][0], rotation: KEYS[i][1] })!;
@@ -92,6 +93,24 @@ test('the rotation memory feeds the name catalog: a figure with no whole constru
   const plain = input(4, false), figure = plain.observations.figures[0] as unknown as { holistic: unknown[] };
   figure.holistic = [];
   assert.equal(Object.keys(buildJevTargetPayload(plain, 'propose_name').questions.target.criteria).includes('figure_0'), false);
+});
+
+test('the fixed composition line of a rotation figure is not offered as a feature; the geometry sentences of the rotation memory are, without a region id', () => {
+  const i = input(3, true, { visualPurposeVersion: undefined, issueHandlingVersion: undefined, judgmentMaterialVersion: undefined });
+  const detail = buildJevDecisionDetailPayload(i, { action: 'confirm', target: { kind: 'single', figureId: i.ownSlots[0] } }, { questionLayout: 'two_stage_v3' })!;
+  const values = Object.values(detail.questions).flatMap(q => Object.values(q.criteria));
+  assert.ok(values.length > 0 && !values.some(value => value.includes(COMPOSITION)));
+  assert.ok(values.some(value => value.includes('全体面積の')));
+  assert.ok(!values.some(value => /(?<![A-Za-z0-9])P[1-9][0-9]?(?![A-Za-z0-9])/u.test(value)));
+});
+
+test('a figure the bundle lacks keeps its filler line out of the feature catalog too, and the other figures stay confirmable', () => {
+  const i = input(3, true, { visualPurposeVersion: undefined, issueHandlingVersion: undefined, judgmentMaterialVersion: undefined });
+  const figures = i.observations.figures as unknown as { analytic: { composition: string }; rotation?: unknown }[];
+  delete figures[2].rotation;
+  figures[2].analytic = { ...figures[2].analytic, composition: ROTATION_MEMO_ABSENT };
+  const labels = Object.keys(buildJevTargetPayload(i, 'confirm').questions.target.criteria);
+  assert.ok(labels.includes('figure_0') && labels.includes('figure_1') && !labels.includes('figure_2'));
 });
 
 test('the three rotation modes differ only in their own task-condition sentence; the memo part is byte-identical', () => {
