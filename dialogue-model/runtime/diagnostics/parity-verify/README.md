@@ -141,3 +141,20 @@ The fixed-fixture tests also preserve these earlier independent boundaries:
 
 The cache-count and technical-coverage boundary tests examine their respective checks
 directly; their synthetic mutations do not claim that the entire altered run is valid.
+
+## Rotation memory (`p5_pilot012_rotation_memory_v1`)
+
+A turn whose starting observation memo has a well-formed `rotation` on one of its figures (the AI's own
+figure imagined turned, with whole and part construals) sends requests that say more than the earlier
+versions: the memory's legend and layer, a changed common sentence, the criteria of four actions, a usage
+sentence per call, the name candidates, six replacements of the generation instructions. `turned-view-records.ts`
+holds all of that written out, **never read from** `decision/rotation-memory-guidance.ts` or `stimuli/rotation-memory*.ts`,
+so a missing, added or changed character of a recorded request is a `replay` mismatch (the table is the evidence,
+not the producer). Only the registered rotation-memory version may carry the memory; an earlier version's record
+that does is a mismatch, and a request without the memory keeps every byte of the earlier text.
+
+The registered source fingerprints bind the runtime's texts to a version; this table is the second half of the same
+binding. When a text of the runtime changes, its fingerprint changes and the table changes with it:
+`tests/rotation-memory-s4.test.ts` compares every text, the generation replacements and the layers of all 120
+(figure, current rotation) projections with the runtime, and changes one character of each recorded text and layer
+line to see that only `replay` disagrees.

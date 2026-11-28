@@ -1,4 +1,5 @@
 import type { JevTarget } from "../../decision/contract.ts";
+import { ROTATION_FEATURE_SOURCES } from "./turned-view-records.ts";
 
 type Message = { role: string; content: unknown };
 type Execution = {
@@ -73,14 +74,15 @@ export function v23PlanMatches(messages: readonly Message[], execution: Executio
   return candidateMessages.length === Number(items.some(item => item.target.kind === "multiple"));
 }
 
-export function v23OutputMatches(messages: readonly Message[], multiple: boolean, visual: boolean, moveOn: boolean, checksOff = false): boolean {
+/** `rotation`: the turn's memo carries the rotation memory, so a request that asks for observation sources adds the line that names the memory's paths. */
+export function v23OutputMatches(messages: readonly Message[], multiple: boolean, visual: boolean, moveOn: boolean, checksOff = false, rotation = false): boolean {
   const lines = v23PlanMessage(messages)?.split("\n");
   if (!lines) return false;
   const main = multiple ? "parts" : "text";
   const output = !multiple && !visual && !moveOn ? [PLAIN] : [
     `【出力】${[main, ...(!checksOff && (multiple || visual) ? ["observationFeatures"] : []), ...(moveOn ? ["moveOn"] : [])].join("・")} のキーだけを持つ JSON オブジェクトを1個返してください。補足や Markdown は付けません。`,
     multiple ? PARTS : "text には自然な公開発話を書いてください。",
-    ...(checksOff ? [] : visual ? [VISUAL_SOURCES] : multiple ? ["observationFeatures は必ず空配列 [] にしてください。"] : []),
+    ...(checksOff ? [] : visual ? [VISUAL_SOURCES, ...(rotation ? [ROTATION_FEATURE_SOURCES] : [])] : multiple ? ["observationFeatures は必ず空配列 [] にしてください。"] : []),
     ...(moveOn ? [`相手が話題を移すことを求めています。${main} には今の命名への回答（未確定ならその旨）を書き、移行は述べないでください。moveOn には移行への自然な受け止めだけを書いてください。moveOn は最後に公開されます。`] : []),
   ];
   const first = lines.length - 3 - output.length;
