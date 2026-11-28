@@ -8,8 +8,11 @@ import type { AuditEntry, DeletionReason } from "./index-store.ts";
 import { OBJECT_ID, RECORD_ID } from "./summary.ts";
 import { formatReceptionNumber, receptionNumberDay } from '../../../../dialogue-model/runtime/v2/reception.ts';
 import type { ReceptionSummary } from '../../../../dialogue-model/runtime/v2/reception.ts';
-import { modeHistory, protocolHistory, readSettings, saveMode, saveProtocol } from './reception-settings.ts';
+import { modeHistory, protocolHistory, readSettings, saveMode, saveProtocol, saveProtocolFromForm } from './reception-settings.ts';
 import type { ModeEntry, ProtocolEntry, ReceptionSettings, SaveResult } from './reception-settings.ts';
+import { listFigurePresets, readFigurePreset, saveFigurePreset } from './figure-presets.ts';
+import type { FigurePresetMutation } from './figure-presets.ts';
+import type { ProtocolFormInput } from './reception-port.ts';
 
 /**
  * One global, researcher-only index of trial summaries keyed by recordId
@@ -32,6 +35,16 @@ export class AdminIndex extends DurableObject<ParticipantConfigurationEnv> {
     const result = await this.ctx.storage.transaction(tx => saveProtocol(tx, input, Date.now(), () => crypto.randomUUID()));
     if (result.ok) await this.observations.prepare({ expectedProtocolRevision: result.revision });
     return result;
+  }
+  async saveManagedReceptionProtocol(input: ProtocolFormInput): Promise<SaveResult> {
+    const result = await this.ctx.storage.transaction(tx => saveProtocolFromForm(tx, input, Date.now(), () => crypto.randomUUID()));
+    if (result.ok) await this.observations.prepare({ expectedProtocolRevision: result.revision });
+    return result;
+  }
+  async listFigurePresets() { return listFigurePresets(this.ctx.storage); }
+  async readFigurePreset(id: string) { return readFigurePreset(this.ctx.storage, id); }
+  async saveFigurePreset(input: FigurePresetMutation) {
+    return this.ctx.storage.transaction(tx => saveFigurePreset(tx, input, () => crypto.randomUUID()));
   }
   async saveReceptionMode(input: { expectedRevision: unknown; value: unknown }): Promise<SaveResult> {
     const result = await this.ctx.storage.transaction(tx => saveMode(tx, input, Date.now()));

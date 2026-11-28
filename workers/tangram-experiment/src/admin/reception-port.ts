@@ -5,6 +5,7 @@ import type { ParticipantRole, ParticipantRoleResult, ParticipantRoleView } from
 import type { PreobservationUsage } from '../participant-preobservation.ts';
 import type { participantStartTiming } from './latency.ts';
 import type { AdminTermination } from '../../../../dialogue-model/runtime/v2/admin-termination.ts';
+import type { FigurePresetPort, FigurePresetReference } from './figure-presets.ts';
 
 /** Researcher-only projections. These types are not the persisted reception or protocol schema. */
 export type ReceptionStrategy = 'repair-first' | 'bypass-enabled';
@@ -90,9 +91,14 @@ export type SettingsView = {
   modeHistory: { revision: number; value: 'on' | 'off'; savedAt: string; protocolRevision: number | null }[];
 };
 export type SettingsSaveResult = { ok: true } | { ok: false; error: string };
+export type ProtocolFormFields = Omit<ProtocolFields, 'figureSelection'> & {
+  figureSelection: ProtocolFigureSelection | ({ mode: 'managed_preset' } & FigurePresetReference);
+};
+export type ProtocolFormInput = { expectedRevision: number; fields: ProtocolFormFields };
 /** Researcher settings; every save is compare-and-swap on its own revision. */
 export type ReceptionSettingsPort = {
   read(): Promise<SettingsView>;
-  saveProtocol(input: { expectedRevision: number; fields: ProtocolFields }): Promise<SettingsSaveResult>;
+  saveProtocol(input: ProtocolFormInput): Promise<SettingsSaveResult>;
   saveMode(input: { expectedRevision: number; value: 'on' | 'off' }): Promise<SettingsSaveResult>;
+  figurePresets?: FigurePresetPort;
 };
