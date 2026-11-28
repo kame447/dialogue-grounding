@@ -1,7 +1,10 @@
 import { literalSpan } from "../judgment/public-evidence.mjs";
 import type { ObservationMemo } from "../observation/contract.ts";
 import { describePart } from "../observation/part-consumers.ts";
+import { rotationMemoryLayer } from "../decision/rotation-memory-guidance.ts";
+import type { RotationLayer } from "../decision/rotation-memory-guidance.ts";
 import { rotationSourceValue } from "../stimuli/rotation-memory-shape.ts";
+import type { OwnRotationMemory } from "../stimuli/rotation-memory-shape.ts";
 
 export type VisualFeatureSource = { figureId: string; path: (string | number)[] };
 export type ExtractedVisualFeature = { source: VisualFeatureSource; quote: string };
@@ -13,13 +16,35 @@ const exact = (value: unknown, keys: readonly string[]): value is Record<string,
   Object.keys(value).length === keys.length && keys.every(key => Object.hasOwn(value, key));
 const index = (value: unknown): value is number => Number.isSafeInteger(value) && (value as number) >= 0;
 
+const ROTATION_LAYERS: readonly RotationLayer[] = ["nouns", "roles", "full"];
+
+/**
+ * A source in the pre-made rotation memory is read the way the model saw it. The path may lead to a string in the stored projection
+ * (["rotation","turned",1,"whole",0,"noun"]) or in any layer a call shows (["rotation","turned",1,"view"], ["rotation","turned",1,"whole",0]),
+ * or be the unit itself. Every one of them means one unit, whichever layer showed it: a region, the current view or one turned view.
+ * The unit's path is the source's identity, so a declaration made on one layer and an extraction made on another compare equal.
+ * Null when the path is not a source of this memory.
+ */
+function rotationUnit(rotation: OwnRotationMemory, path: readonly (string | number)[]): { path: (string | number)[]; text: string } | null {
+  const [, area, k] = path;
+  let unit: (string | number)[];
+  if (area === "regions" && index(k) && k < rotation.regions.length) unit = ["rotation", "regions", k];
+  else if (area === "current") unit = ["rotation", "current"];
+  else if (area === "turned" && index(k) && k < rotation.turned.length) unit = ["rotation", "turned", k];
+  else return null;
+  const layers = ROTATION_LAYERS.map(layer => rotationMemoryLayer(rotation, layer) as unknown as OwnRotationMemory);
+  // The unit itself reads as its one-line description (the nouns layer); a deeper path must lead to a string of the stored projection or of a layer.
+  const text = path.length === unit.length
+    ? rotationSourceValue(layers[0], unit[1] === "turned" ? ["turned", unit[2] as number, "view"] : unit.slice(1))
+    : [rotation, ...layers].map(shape => rotationSourceValue(shape, path.slice(1))).find(value => value !== undefined && value.trim());
+  return text?.trim() ? { path: unit, text } : null;
+}
+
 function sourceValue(memo: ObservationMemo, source: VisualFeatureSource): string | undefined {
   const figure = memo.figures.find(candidate => candidate.id === source.figureId);
   if (!figure) return;
   const { path } = source;
   const [section, entry, field, item] = path;
-  // The pre-made rotation memory: ["rotation", ...path inside the projection], e.g. ["rotation","turned",1,"parts","P1",0,"noun"].
-  if (section === "rotation" && path.length > 1) return figure.rotation ? rotationSourceValue(figure.rotation, path.slice(1)) : undefined;
   if (section === "parts" && entry === "descriptions" && path.length === 3 && index(field)) {
     try { return describePart((figure as typeof figure & { parts?: unknown }).parts, field); }
     catch { return; }
@@ -42,6 +67,11 @@ function readSource(value: unknown, memo: ObservationMemo, targets: readonly str
   if (!exact(value, ["figureId", "path"]) || typeof value.figureId !== "string" ||
       !targets.includes(value.figureId) || !Array.isArray(value.path)) return null;
   const source = { figureId: value.figureId, path: [...value.path] };
+  if (source.path[0] === "rotation") {
+    const rotation = memo.figures.find(candidate => candidate.id === source.figureId)?.rotation;
+    const unit = rotation ? rotationUnit(rotation, source.path) : null;
+    return unit ? { figureId: source.figureId, path: unit.path } : null;
+  }
   return sourceValue(memo, source)?.trim() ? source : null;
 }
 
@@ -51,12 +81,16 @@ function sourceKey(source: VisualFeatureSource): string {
 
 export function readVisualFeatureSources(value: unknown, memo: ObservationMemo, targets: readonly string[]): VisualFeatureSource[] | null {
   if (!Array.isArray(value) || value.length > MAX_FEATURES) return null;
-  const sources: VisualFeatureSource[] = [], keys = new Set<string>();
+  const sources: VisualFeatureSource[] = [], keys = new Set<string>(), declared = new Set<string>();
   for (const entry of value) {
     const source = readSource(entry, memo, targets);
     if (!source) return null;
+    // Repeating the very same path is refused as before. Two paths that read as one rotation unit are one source.
+    const written = JSON.stringify([(entry as { figureId: string }).figureId, (entry as { path: unknown[] }).path]);
+    if (declared.has(written)) return null;
+    declared.add(written);
     const key = sourceKey(source);
-    if (keys.has(key)) return null;
+    if (keys.has(key)) continue;
     keys.add(key); sources.push(source);
   }
   return sources;
