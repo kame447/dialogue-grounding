@@ -19,6 +19,9 @@ import type { FigurePreset } from './figure-presets.ts';
 import { DEFAULT_ROTATION_MODE, ROTATION_CHOICES } from './rotation-choices.ts';
 import { usesThreeFigures } from './reception-settings.ts';
 import type { BankFigure } from '../../../../dialogue-model/runtime/stimuli/figure-bank.ts';
+import { ABSOLUTE_ROTATIONS, rotationMemoryEntry, rotationMemoryPin } from '../../../../dialogue-model/runtime/stimuli/rotation-memory.ts';
+import type { AbsoluteRotation, RotationMemoryEntry, RotationMemoryViewRecord, ReviewStatus } from '../../../../dialogue-model/runtime/stimuli/rotation-memory-shape.ts';
+import { PRIMARY_REGION_TEMPLATES, PRIMARY_REGION_CATALOG_REVISION } from '../../../../dialogue-model/runtime/stimuli/primary-regions-data.ts';
 
 export const ADMIN_CSS = `:root{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans JP",sans-serif;font-size:14px;line-height:1.5;color:#222;background:#f7f7f4;--line:#d8d8d2;--accent:#2a5d8f;--tint:#eaf1f8}
 *,*::before,*::after{box-sizing:border-box}
@@ -69,7 +72,8 @@ details.diag[open]>summary{border-bottom:1px solid var(--line)}details.diag>.bod
 details.danger>summary{color:#9b2c1f}
 .turn-sheet{max-height:72vh;overflow:auto;border:1px solid var(--line);background:#fff}.turn-sheet table{border-collapse:separate;border-spacing:0;min-width:1300px;table-layout:fixed;font-size:.85rem}.turn-sheet th,.turn-sheet td{border:0;border-right:1px solid #ddd;border-bottom:1px solid #ddd;padding:8px;overflow-wrap:anywhere;white-space:pre-wrap}.turn-sheet th{position:sticky;top:0;z-index:2;white-space:normal;background:#eee}.turn-sheet tr:nth-child(even) td{background:#fafafa}.turn-sheet th:nth-child(1){width:44px}.turn-sheet th:nth-child(2){width:54px}.turn-sheet th:nth-child(3){width:105px}.turn-sheet th:nth-child(4){width:300px}.turn-sheet th:nth-child(5){width:170px}.turn-sheet th:nth-child(6){width:195px}.turn-sheet th:nth-child(7){width:180px}.turn-sheet th:nth-child(8){width:195px}.turn-sheet th:nth-child(9){width:100px}.turn-sheet .seq,.turn-sheet .speaker{font-weight:600}.turn-sheet .utterance{font-size:.95rem}.turn-sheet td:first-child,.turn-sheet th:first-child{position:sticky;left:0;background:#eee;z-index:1}.turn-sheet th:first-child{z-index:3}.turn-sheet time{font-variant-numeric:tabular-nums}.turn-sheet .turn-open{min-height:30px;padding:3px 7px;font-size:.8rem;white-space:nowrap}.turn-popover{width:min(840px,92vw);max-height:85vh;overflow:auto;border:1px solid var(--line);border-radius:6px;padding:16px 20px;color:#222;background:#fff;box-shadow:0 8px 32px #0002;white-space:normal}.turn-popover::backdrop{background:#0003}.turn-popover-head{display:flex;justify-content:space-between;align-items:center;gap:12px}.turn-popover-head h3{margin:0}.turn-popover .utterance{white-space:pre-wrap;overflow-wrap:anywhere}.turn-popover .turn-entry pre{font-size:.85rem;max-height:48vh}.turn-sheet .turn-block+.turn-block{border-top:1px solid #ddd;margin-top:5px;padding-top:5px}.turn-sheet tr:target td{background:var(--tint)}.turn-detail summary,.turn-entry summary{cursor:pointer;overflow-wrap:anywhere;color:var(--accent)}.turn-entry{padding:5px 0;border-top:1px solid var(--line)}.turn-entry pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:32vh;overflow:auto;background:#f5f5f5;padding:6px}.unlinked{margin:10px 0}.record-detail{max-width:none}
 .figure-grid{display:flex;flex-wrap:wrap;gap:12px}.figure-grid figure{margin:0;text-align:center}.figure-art{display:flex;align-items:center;justify-content:center;min-width:112px;min-height:112px;padding:4px;background:#fff;border:1px solid var(--line);border-radius:4px}
-.figure-art svg{max-width:96px;height:auto;fill:#24476b;stroke:#24476b;stroke-width:1;stroke-linejoin:round}.figure-grid figcaption{font-weight:600}
+.figure-art svg{max-width:96px;height:auto;fill:#24476b;stroke:#24476b;stroke-width:1;stroke-linejoin:round}.figure-grid figcaption{font-weight:600}.figure-grid a.figure-link{display:block;text-decoration:none;color:inherit}.figure-grid a.figure-link:hover .figure-art{border-color:var(--accent)}.figure-grid a.figure-link figcaption{color:var(--accent);text-decoration:underline}
+.catalog-presets{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,370px),1fr));gap:12px}.catalog-preset{padding:12px;border:1px solid var(--line);border-radius:6px;background:#fff}.catalog-preset h3{margin:0 0 8px}.catalog-preset .figure-grid{gap:8px}.catalog-preset .figure-art{min-width:92px;min-height:92px}.catalog-preset .figure-art svg{max-width:80px;max-height:80px}.memo-nav{display:flex;flex-wrap:wrap;gap:10px 18px;align-items:center}.memo-rotations{display:grid;gap:16px}.memo-view{background:#fff;border:1px solid var(--line);border-radius:6px;padding:16px;scroll-margin-top:12px}.memo-view h2{margin:0 0 12px}.memo-view h3{margin:14px 0 6px}.memo-view p{margin:6px 0}.memo-columns{display:grid;grid-template-columns:minmax(220px,1fr) minmax(0,2fr);gap:16px;align-items:start}.memo-drawings{display:grid;grid-template-columns:1fr 1fr;gap:8px}.memo-drawings figure{margin:0;text-align:center;min-width:0}.memo-drawings svg{display:block;width:100%;height:160px;background:#fafafa;border:1px solid var(--line);border-radius:4px}.memo-drawings figcaption{font-size:.8rem;color:#666}.memo-silhouette polygon{fill:#24476b;stroke:#24476b;stroke-width:1;stroke-linejoin:round}.memo-partition polygon{fill:#e5ebf0;stroke:#24476b;stroke-width:2;stroke-linejoin:round}.memo-partition text{fill:#162c42;stroke:#fff;stroke-width:3px;paint-order:stroke;font-weight:600;text-anchor:middle;dominant-baseline:central}.memo-candidates{list-style:none;margin:0;padding:0}.memo-candidates>li{padding:8px 0;border-bottom:1px solid var(--line)}.memo-candidates>li:last-child{border-bottom:0}.memo-roles{display:flex;flex-wrap:wrap;gap:4px 12px;color:#555;font-size:.86rem}.memo-region-list{display:grid;gap:8px}.memo-region{border-top:1px solid var(--line);padding-top:8px}.memo-region h4{margin:0 0 4px}.memo-region p{margin:3px 0}.memo-region .muted{font-size:.86rem}@media(max-width:699px){.memo-columns{grid-template-columns:1fr}.memo-drawings svg{height:180px}}
 .preset-editor .figure-grid label{display:grid;justify-items:center;gap:4px;cursor:pointer}
 .preset-editor .figure-grid label:has(input:checked) .figure-art{border-color:var(--accent);background:var(--tint)}
 fieldset.figure-source{display:grid;gap:8px}.figure-source>div>label{display:block}.figure-source .sub{margin:4px 0 0 20px;display:flex;flex-wrap:wrap;gap:4px 12px}.figure-source input[type=text]{width:12em}
@@ -526,12 +530,75 @@ export function renderFigurePresetEditor(preset: FigurePreset | null): string {
 <p><button class="primary">保存</button></p></form>
 ${preset ? `<form method="post" action="${escapeHtml(action)}/hide">${revision}<button>プリセットを非表示</button></form>` : ''}`);
 }
-export function renderFigures(): string {
-  const cell = (figure: BankFigure) => `<figure><div class="figure-art">${figureSvg(figure)}</div><figcaption>${escapeHtml(figure.id)}</figcaption></figure>`;
+export function renderFigures(presets: readonly FigurePreset[] | null = null): string {
+  const cell = (figure: BankFigure) => `<a class="figure-link" href="/admin/figures/${escapeHtml(figure.id)}" aria-label="${escapeHtml(figure.id)} の観察メモ"><figure><div class="figure-art">${figureSvg(figure)}</div><figcaption>${escapeHtml(figure.id)}</figcaption></figure></a>`;
   const byId = new Map(FIGURE_BANK.map(f => [f.id, f]));
-  const sets = Object.entries(FIGURE_SETS).map(([id, ids]) => `<h3>${escapeHtml(id)}</h3><div class="figure-grid">${ids.map(fid => byId.get(fid)).filter((f): f is BankFigure => Boolean(f)).map(cell).join('')}</div>`).join('');
+  const sets = presets === null ? '<p class="muted">現在のプリセットを取得できませんでした。</p>' : presets.length
+    ? presets.map(preset => `<section class="catalog-preset"><h3><a href="/admin/figure-presets/${escapeHtml(preset.id)}">${escapeHtml(preset.name)}</a></h3><div class="figure-grid">${preset.figureIds.map(fid => byId.get(fid)).filter((f): f is BankFigure => Boolean(f)).map(cell).join('')}</div></section>`).join('')
+    : '<p class="muted">登録されたプリセットはありません。</p>';
   return page('図形一覧', `${adminNav('/admin/figures')}<h1>図形一覧</h1>
-<p class="muted">候補バンク（${escapeHtml(FIGURE_BANK_VERSION)}）と候補セットは予備検討用です。実験条件への採用は研究者が判断します。</p>
-<h2>全${FIGURE_BANK.length}図形</h2><div class="figure-grid">${FIGURE_BANK.map(cell).join('')}</div>
-<h2>候補セット</h2>${sets}`);
+<h2>全${FIGURE_BANK.length}図形</h2><p class="muted">図形を選択すると、4方向の観察メモを確認できます。</p><div class="figure-grid">${FIGURE_BANK.map(cell).join('')}</div>
+<h2>現在の3図形プリセット</h2><p><a href="/admin/figure-presets">プリセットを管理</a></p><div class="catalog-presets">${sets}</div>`);
+}
+
+type MemoPoint = readonly [number, number];
+type MemoGeometry = {
+  figureId: string; rotation: AbsoluteRotation; size: MemoPoint;
+  regions: readonly { id: string; members: readonly string[]; outlines: readonly (readonly MemoPoint[])[]; centroid: MemoPoint }[];
+};
+const memoGeometry = new Map((PRIMARY_REGION_TEMPLATES as unknown as readonly MemoGeometry[]).map(t => [t.figureId + ':' + t.rotation, t]));
+const MEMO_REVIEW_LABELS: Record<ReviewStatus, string> = {
+  ai_unreviewed: 'AI案・研究者未確認', researcher_confirmed: '研究者確認済み', researcher_edited: '研究者修正済み',
+};
+
+/** Render the very same reviewed outlines used by the immutable rotation-memory bundle. */
+function memoDrawings(geometry: MemoGeometry, entry: RotationMemoryEntry): string {
+  const [w, h] = geometry.size, pad = Math.max(w, h) * .06;
+  const svg = (partition: boolean) => {
+    const polygons = geometry.regions.flatMap(region => region.outlines.map(outline =>
+      `<polygon points="${outline.map(p => p.join(',')).join(' ')}"/>`)).join('');
+    const labels = partition ? geometry.regions.map(region => `<text x="${region.centroid[0]}" y="${region.centroid[1]}" font-size="${Math.max(w, h) * .055}">${escapeHtml(region.id)}</text>`).join('') : '';
+    return `<svg class="${partition ? 'memo-partition' : 'memo-silhouette'}" xmlns="http://www.w3.org/2000/svg" viewBox="${-pad} ${-pad} ${w + 2 * pad} ${h + 2 * pad}" role="img" aria-label="${escapeHtml(entry.figureKey)} ${geometry.rotation}度 ${partition ? '部分分割' : '全体'}">${polygons}${labels}</svg>`;
+  };
+  return `<div class="memo-drawings"><figure>${svg(false)}<figcaption>全体</figcaption></figure><figure>${svg(true)}<figcaption>確定した部分</figcaption></figure></div>`;
+}
+
+function memoWhole(view: RotationMemoryViewRecord): string {
+  return view.whole.length ? `<ol class="memo-candidates">${view.whole.map(candidate =>
+    `<li><strong>${escapeHtml(candidate.rank)}. ${escapeHtml(candidate.noun)}</strong> <span class="muted">確信度：${escapeHtml(candidate.confidence)}</span>
+<p>${escapeHtml(candidate.posture)} ／ ${escapeHtml(candidate.direction)}</p>
+<div class="memo-roles">${candidate.parts.map(part => `<span>${escapeHtml(part.id)}：${escapeHtml(part.role)}</span>`).join('')}</div></li>`).join('')}</ol>`
+    : '<p class="muted">全体の見立て候補なし</p>';
+}
+
+function memoRegions(entry: RotationMemoryEntry, view: RotationMemoryViewRecord): string {
+  return `<div class="memo-region-list">${entry.regions.map(region => {
+    const layout = view.layout.find(row => row.id === region.id);
+    const candidates = view.parts.find(row => row.id === region.id)?.candidates ?? [];
+    const description = [region.shapeName, `${region.areaPercent}%`, layout?.at, layout?.tipDirection ? `頂点：${layout.tipDirection}` : '', region.concave ? '輪郭にくぼみ' : ''].filter(Boolean).join(' ／ ');
+    return `<section class="memo-region" data-region="${escapeHtml(region.id)}"><h4>${escapeHtml(region.id)}（${escapeHtml(region.members.join('+'))}）</h4>
+<p class="muted">${escapeHtml(description)}${region.adjacent.length ? ' ／ 接触：' + escapeHtml(region.adjacent.join('、')) : ''}</p>
+${candidates.length ? `<p>${candidates.map(candidate => `<span>${escapeHtml(candidate.noun)}${candidate.owner ? '（' + escapeHtml(candidate.owner) + '）' : ''} <span class="muted">[${escapeHtml(candidate.confidence)}]</span></span>`).join('　／　')}</p>` : '<p class="muted">独立した部分の見立て候補なし</p>'}</section>`;
+  }).join('')}</div>`;
+}
+
+/** Read-only researcher page. Never expose the bank, absolute angles or the raw memo via participant APIs. */
+export function renderFigureMemo(figureId: string): string | null {
+  const figure = FIGURE_BANK.find(f => f.id === figureId);
+  if (!figure) return null;
+  const entry = rotationMemoryEntry(figureId), pin = rotationMemoryPin();
+  const title = figure.id + ' の観察メモ';
+  const back = `<p><a href="/admin/figures">図形一覧へ</a></p><h1>${escapeHtml(title)}</h1>`;
+  if (!entry) return page(title, back + '<p>観察メモは登録されていません。</p>');
+  const index = FIGURE_BANK.indexOf(figure);
+  const adjacentFigures = [FIGURE_BANK[index - 1], FIGURE_BANK[index + 1]].filter((f): f is BankFigure => Boolean(f));
+  const nav = `<div class="memo-nav">${adjacentFigures.map(f => `<a href="/admin/figures/${escapeHtml(f.id)}">${escapeHtml(f.id)}</a>`).join('')}${ABSOLUTE_ROTATIONS.map(rotation => `<a href="#rotation-${rotation}">${rotation}°</a>`).join('')}</div>`;
+  const views = ABSOLUTE_ROTATIONS.map(rotation => {
+    const view = entry.views[rotation], geometry = memoGeometry.get(figureId + ':' + rotation);
+    const matches = geometry && pin.catalogRevision === PRIMARY_REGION_CATALOG_REVISION && geometry.regions.length === entry.regions.length &&
+      entry.regions.every(region => geometry.regions.some(r => r.id === region.id && r.members.join('+') === region.members.join('+')));
+    return `<section class="memo-view" id="rotation-${rotation}"><h2>${rotation}° <span class="muted">${MEMO_REVIEW_LABELS[view.reviewStatus]}</span></h2>
+<div class="memo-columns"><div>${matches ? memoDrawings(geometry, entry) : '<p class="muted">対応する分割図を確認できません。</p>'}</div><div><h3>全体の見立て</h3>${memoWhole(view)}<h3>部分の見立て</h3>${memoRegions(entry, view)}</div></div></section>`;
+  }).join('');
+  return page(title, back + `<p class="muted">観察メモ ${escapeHtml(pin.version)} ／ ${escapeHtml(pin.catalogRevision)}。見立ては正解名称ではなく仮説です。</p>${nav}<div class="memo-rotations">${views}</div>`);
 }
