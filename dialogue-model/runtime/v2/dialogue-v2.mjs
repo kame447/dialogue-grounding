@@ -234,6 +234,7 @@ function abortIf(signal) {
 
 /**
  * @param {{ client, strategy, image: {mimeType, base64}, anchors: {id, bbox, centroid}[], judge?: import('../judgment/schema.mjs').DialogueJudge | null,
+ *   ownParts?: import('../observation/contract.ts').ObservationInput['ownParts'],
  *   memoryPruneVersion?: import("../memory/reference-graph.mjs").MemoryPruneVersion,
  *   referenceMemory?: boolean, decisionShadowClient?: {chooseAction(request: object): Promise<any>} | null,
  *   onResearchUpdate?: (() => void) | null, activeDecision?: {purpose: string, client: {chooseAction(request: object): Promise<any>}} | null,
@@ -344,7 +345,7 @@ export function createDialogueV2(options) {
     };
     if (!referenceMemory || !localGrounding) throw new Error("Jev decision mode requires local reference memory");
     if (activeDecision || decisionShadowClient || groundingShadow) throw new Error("Jev decision mode cannot combine legacy decision paths");
-    return createJevTurnRuntime({ client, ownImage, ownAnchors, observer, jevDecision, localGrounding, usagePolicy, memoryPruneVersion, ...(integrated?{intervention,decisionTimeoutMs}:{}),
+    return createJevTurnRuntime({ client, ownImage, ownAnchors, ...(options.ownParts !== undefined ? { ownParts: options.ownParts } : {}), observer, jevDecision, localGrounding, usagePolicy, memoryPruneVersion, ...(integrated?{intervention,decisionTimeoutMs}:{}),
       ...(Object.hasOwn(options,'technicalTrial')?{technicalTrial:options.technicalTrial}:{}),
       ...(Object.hasOwn(options,'questionLayout')?{questionLayout:options.questionLayout}:{}),
       ...(options.dialoguePolicy ? { dialoguePolicy: options.dialoguePolicy } : {}),

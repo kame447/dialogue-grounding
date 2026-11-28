@@ -52,6 +52,8 @@ import { ParticipantUsageLedger, type ParticipantUsageStore } from '../../../dia
 import { createWorkerParticipantRuntime, workerParticipantPolicy, matchesWorkerDialogueProfile,
   type ParticipantService } from "./participant-runtime.ts";
 import { ParticipantPreobservations } from './participant-preobservation.ts';
+import { createPartCatalogStorage } from './part-catalog-storage.ts';
+import { PART_GEOMETRY_VERSION, type PartObservationVersion } from '../../../dialogue-model/runtime/stimuli/part-geometry.ts';
 import { trialTerminationExpectation } from './admin/trial-termination.ts';
 import type { TrialTerminationExpectation, TrialTerminationResult } from './admin/trial-termination.ts';
 export { AdminIndex };
@@ -82,11 +84,12 @@ type NamingTask = {
   submitAI(): Promise<unknown>;
 };
 
-function participantTrialMaterial(seed: number, rotationMode: RotationMode, figureSelection?: unknown) {
+function participantTrialMaterial(seed: number, rotationMode: RotationMode, figureSelection?: unknown, partObservationVersion?: PartObservationVersion) {
   const figures = figureSelection === undefined ? {} : { figureSelection };
   const trial = createTrialV2({ seed, rotationMode, ...figures });
-  const model = modelView(trial);
-  return { trial, figures, own: { ownImage: { mimeType: model.mimeType, base64: model.png.toString('base64') }, ownAnchors: model.anchors } };
+  const model = modelView(trial, { partObservationVersion });
+  return { trial, figures, own: { ownImage: { mimeType: model.mimeType, base64: model.png.toString('base64') }, ownAnchors: model.anchors,
+    ...(model.parts ? { ownParts: model.parts } : {}) } };
 }
 
 export interface Env extends SoftLimitBindings {
@@ -183,7 +186,8 @@ export class TangramSession extends DurableObject<Env> {
   // Trials replaced by /api/start in this browser: their late writes go only to their own archive key.
   private retired = new Set<string>();
   private receptionQueue: Promise<unknown> = Promise.resolve();
-  private readonly preobservations = new ParticipantPreobservations(this.ctx.storage);
+  private readonly storage = createPartCatalogStorage(this.ctx.storage);
+  private readonly preobservations = new ParticipantPreobservations(this.storage);
   private browserQueue: Promise<unknown> = Promise.resolve();
   // The explicit intent of the admission in progress: a reception plan trial, or the configured legacy assignment.
   private admission: { kind: 'reception'; receptionId: string; expectedRevision: number; index: number;
@@ -206,15 +210,15 @@ export class TangramSession extends DurableObject<Env> {
   /** Classified from stored state only: a reception owner stays one even when the global mode is off. */
   private async ownerKind(): Promise<OwnerKind> {
     if (await this.readReception()) return 'reception';
-    const raw = await this.ctx.storage.get<BaseOwnerState>('base:owner:v1');
-    if (!raw) return await this.ctx.storage.get(ACTIVE_KEY) ? 'legacy_active' : 'absent';
+    const raw = await this.storage.get<BaseOwnerState>('base:owner:v1');
+    if (!raw) return await this.storage.get(ACTIVE_KEY) ? 'legacy_active' : 'absent';
     return readOwner(raw, this.ctx.id.toString()).activeKey === null ? 'unused' : 'legacy';
   }
   private receptionSerial<T>(fn: () => Promise<T>): Promise<T> {
     const result = this.receptionQueue.then(fn,fn); this.receptionQueue = result.catch(() => {}); return result;
   }
   private async readReception(): Promise<Reception | null> {
-    const raw = await this.ctx.storage.get('reception:v1');
+    const raw = await this.storage.get('reception:v1');
     if (raw === undefined) return null;
     const r = validateReception(raw);
     if (r.objectId !== this.ctx.id.toString()) throw new ReceptionError('reception_unavailable');
@@ -237,7 +241,7 @@ export class TangramSession extends DurableObject<Env> {
       try { number = await this.index()?.allocateReceptionNumber(settings.protocol?.protocol.receptionNumberFormat ?? 'daily_seq3',Date.now()) ?? null; }
       catch { /* An unavailable number counter still admits an unnumbered waiting reception. */ }
       const r = createReception({ receptionId:crypto.randomUUID(), objectId:this.ctx.id.toString(), createdAt:new Date().toISOString(), number });
-      const saved = await this.serialized(() => this.ctx.storage.transaction(async tx => {
+      const saved = await this.serialized(() => this.storage.transaction(async tx => {
         const old = await tx.get('reception:v1');
         if (old !== undefined) return validateReception(old);
         const owner = await tx.get<BaseOwnerState>('base:owner:v1');
@@ -250,7 +254,7 @@ export class TangramSession extends DurableObject<Env> {
   /** Researcher-only RPCs. The management adapter supplies authorization. */
   async adminReception(): Promise<Reception | null> { return this.readReception(); }
   async adminFailedStartUsage(receptionId: string): Promise<ReceptionFailedStartUsage | null> {
-    return this.ctx.storage.transaction(async tx => {
+    return this.storage.transaction(async tx => {
       const rawReception = await tx.get('reception:v1');
       if (rawReception === undefined) return null;
       const reception = validateReception(rawReception), plan = reception.plan;
@@ -327,10 +331,13 @@ export class TangramSession extends DurableObject<Env> {
           throw new ReceptionError('reception_unavailable');
         }
       }
-      const r = await this.serialized(() => this.ctx.storage.transaction(async tx => {
+      const r = await this.serialized(() => this.storage.transaction(async tx => {
         const raw = await tx.get('reception:v1'); if (!raw) throw new ReceptionError('reception_unavailable');
         const next = await approveReception(raw, { expectedRevision:input.expectedRevision, order:input.order, protocol, expected, approvedAt:new Date().toISOString(),
           randomSeed:() => crypto.getRandomValues(new Uint32Array(1))[0], ...participant,
+          ...(['reception_protocol_v2', 'reception_protocol_v3'].includes(protocol.schemaVersion) &&
+            participant.participantRuntimeProfile === PARTICIPANT_PRODUCTION_PROFILE && protocol.referenceMemory
+            ? { partObservationVersion: PART_GEOMETRY_VERSION } : {}),
           ...(['reception_protocol_v2', 'reception_protocol_v3'].includes(protocol.schemaVersion) ? { openingMode: SCRIPTED_OPENING_MODE } : {}),
           ...(protocol.referenceMemory ? { memoryPruneVersion: participantMemoryPruneVersion(participant.participantDialogueProfile) } : {}) });
         await tx.put({ 'reception:v1':next }); return next;
@@ -345,7 +352,7 @@ export class TangramSession extends DurableObject<Env> {
         plan.participantRuntimeProfile !== PARTICIPANT_PRODUCTION_PROFILE || !plan.participantModelPin || !proxy) return;
     const { participantModelPin: pin, initialObservationGeneration } = plan;
     const prepareBoard = async (seed: number, rotation: RotationMode, selection: unknown) => {
-      const { own } = participantTrialMaterial(seed, rotation, selection);
+      const { own } = participantTrialMaterial(seed, rotation, selection, plan.partObservationVersion);
       return { key: await workerTerraInitialKey(pin, own, initialObservationGeneration), own };
     };
     const shared = new Map<string, ReturnType<typeof prepareBoard>>();
@@ -373,7 +380,7 @@ export class TangramSession extends DurableObject<Env> {
   }
   async adminCancelReception(input: { expectedRevision: number }): Promise<Reception> {
     return this.receptionSerial(async () => {
-      const r = await this.serialized(() => this.ctx.storage.transaction(async tx => {
+      const r = await this.serialized(() => this.storage.transaction(async tx => {
         const raw = await tx.get('reception:v1'); if (!raw) throw new ReceptionError('reception_unavailable');
         const next = cancelReception(raw,input.expectedRevision); await tx.put({ 'reception:v1':next }); return next;
       }));
@@ -399,7 +406,7 @@ export class TangramSession extends DurableObject<Env> {
       return { ok: false, error: 'not_found' };
     }
     return this.receptionSerial(async () => {
-      const committed = await this.serialized(() => this.ctx.storage.transaction(async tx => {
+      const committed = await this.serialized(() => this.storage.transaction(async tx => {
         const termination: AdminTermination = { at: new Date().toISOString(), by: 'admin' };
         const missing = { ok: false, error: 'not_found' } as const;
         const conflict = { ok: false, error: 'conflict' } as const;
@@ -561,16 +568,16 @@ export class TangramSession extends DurableObject<Env> {
     } finally { this.admission = null; }
   }
   private async questionnaireSubmitted(recordId: string): Promise<boolean> {
-    try { return isSubmittedQuestionnaire(await readQuestionnaire(this.ctx.storage, recordId)); } catch { return false; }
+    try { return isSubmittedQuestionnaire(await readQuestionnaire(this.storage, recordId)); } catch { return false; }
   }
 
   /** Researcher-only read of one archived trial for /admin. It neither restores nor resumes a trial. */
   async adminRecord(recordId: string): Promise<StoredTrial | null> {
     let record = await this.readOwnedArchive(recordId);
     if (!record && RECORD_ID.test(recordId) && !(await this.adminDeletedRecordIds([recordId])).length) {
-      const active = await this.ctx.storage.get<StoredTrial>(ACTIVE_KEY);
+      const active = await this.storage.get<StoredTrial>(ACTIVE_KEY);
       if (active?.recordId === recordId && !Object.hasOwn(active, 'assignment') &&
-          await this.ctx.storage.get('base:owner:v1') === undefined) record = active;
+          await this.storage.get('base:owner:v1') === undefined) record = active;
     }
     if (record?.options?.participantRuntimeProfile === PARTICIPANT_PRODUCTION_PROFILE) {
       const saved = record as unknown as BaseRecord;
@@ -585,7 +592,7 @@ export class TangramSession extends DurableObject<Env> {
 
   /** A new assigned archive is authoritative only through its saved owner admission. */
   private async validateArchiveBinding(record: StoredTrial): Promise<void> {
-    const raw = await this.ctx.storage.get<BaseOwnerState>('base:owner:v1');
+    const raw = await this.storage.get<BaseOwnerState>('base:owner:v1');
     if (!raw) {
       // Legacy archive-only records remain readable without fabricating an assignment.
       if (Object.hasOwn(record, 'assignment')) throw new BaseAssignmentError('assignment_record_invalid');
@@ -597,7 +604,7 @@ export class TangramSession extends DurableObject<Env> {
   }
 
   private async readOwnedArchive(recordId: string): Promise<StoredTrial | null> {
-    const record = await readArchived(this.ctx.storage, recordId) as StoredTrial | null;
+    const record = await readArchived(this.storage, recordId) as StoredTrial | null;
     if (record === null) return null;
     if (typeof record !== 'object' || Array.isArray(record) || record.recordId !== recordId) throw new BaseAssignmentError('assignment_record_invalid');
     await this.validateArchiveBinding(record);
@@ -607,12 +614,12 @@ export class TangramSession extends DurableObject<Env> {
   /** The record with its stored questionnaire (kept under its own key, see archive.ts). */
   private async withQuestionnaire(record: StoredTrial | null): Promise<StoredTrial | null> {
     if (!record) return null;
-    const questionnaire = await readQuestionnaire(this.ctx.storage, record.recordId);
+    const questionnaire = await readQuestionnaire(this.storage, record.recordId);
     return questionnaire ? { ...record, questionnaire } : record;
   }
 
   async adminDeletedRecordIds(recordIds: string[]): Promise<string[]> {
-    const deleted = new Set(await this.ctx.storage.get<string[]>('tombstones'));
+    const deleted = new Set(await this.storage.get<string[]>('tombstones'));
     return recordIds.filter(id => deleted.has(id));
   }
 
@@ -623,7 +630,7 @@ export class TangramSession extends DurableObject<Env> {
     const interrupted: { recordId: string; at: string }[] = [];
     for (const { recordId, status } of records) {
       if (!isIncompleteTrialStatus(status) || !RECORD_ID.test(recordId) || deletedIds.has(recordId)) continue;
-      const record = await this.ctx.storage.get<StoredTrial>('record:' + recordId);
+      const record = await this.storage.get<StoredTrial>('record:' + recordId);
       if (record?.recordId === recordId && record.status === 'interrupted' && isAdminTermination(record.termination)) {
         interrupted.push({ recordId, at: record.termination.at });
       }
@@ -666,7 +673,7 @@ export class TangramSession extends DurableObject<Env> {
 
   /** Researcher deletion (authenticated /admin only): removes the record now and tombstones its id. */
   async adminDelete(recordId: string): Promise<boolean> {
-    const existed = await this.serialized(() => this.ctx.storage.transaction(async tx => {
+    const existed = await this.serialized(() => this.storage.transaction(async tx => {
       const raw = await tx.get<BaseOwnerState>('base:owner:v1');
       if (raw) {
         const owner = readOwner(raw, this.ctx.id.toString());
@@ -702,7 +709,7 @@ export class TangramSession extends DurableObject<Env> {
     await this.scheduleExpiry();
     const index = this.index();
     if (index) {
-      const tombstones = await this.ctx.storage.get<string[]>('tombstones') ?? [];
+      const tombstones = await this.storage.get<string[]>('tombstones') ?? [];
       const stale: string[] = [];
       for (const id of tombstones) {
         const summary = await index.get(id);
@@ -713,7 +720,7 @@ export class TangramSession extends DurableObject<Env> {
       if (stale.length) await index.remove(stale, 'admin');
     }
     // Re-register the remaining records, so a missed best-effort index write is repaired.
-    for (const id of await ledgerIds(this.ctx.storage)) {
+    for (const id of await ledgerIds(this.storage)) {
       const record = await this.readOwnedArchive(id);
       if (record) await this.registerSummary(record as StoredTrial);
     }
@@ -741,7 +748,7 @@ export class TangramSession extends DurableObject<Env> {
 
   /** Cancel legacy expiry alarms; saving or accessing a record never schedules deletion. */
   private async scheduleExpiry(): Promise<void> {
-    await this.ctx.storage.deleteAlarm();
+    await this.storage.deleteAlarm();
   }
 
   /** Best effort: an index failure never affects the participant's trial or its record. */
@@ -762,14 +769,14 @@ export class TangramSession extends DurableObject<Env> {
   private async initialize(): Promise<void> {
     if (this.initialized) return this.initialized;
     this.initialized = (async () => {
-      const active = await this.ctx.storage.get<StoredTrial>(ACTIVE_KEY);
+      const active = await this.storage.get<StoredTrial>(ACTIVE_KEY);
       if (active) await this.validateArchiveBinding(active);
       // Additive backfill keeps even old active-only evidence, with its original
       // update time. No record is expired during initialization.
-      await this.serialized(() => backfillActive(this.ctx.storage, Date.now()));
+      await this.serialized(() => backfillActive(this.storage, Date.now()));
       await this.scheduleExpiry();
       // Legacy active records may be archived/indexed but never restored into a task.
-      const record = await this.ctx.storage.get<StoredTrial>(ACTIVE_KEY);
+      const record = await this.storage.get<StoredTrial>(ACTIVE_KEY);
       if (record) { await this.validateArchiveBinding(record); this.ctx.waitUntil(this.registerSummary(record)); }
     })();
     return this.initialized;
@@ -777,13 +784,13 @@ export class TangramSession extends DurableObject<Env> {
 
   /** Narrow metadata RPCs; neither constructs tasks nor selects conditions. */
   async baseOwnerStatus(browserProfile = false): Promise<'absent'|'registered'|'expired'> {
-    if (browserProfile && await this.ctx.storage.get(TAB_OWNER_KEY)) return 'absent';
-    const owner = await this.ctx.storage.get<BaseOwnerState>('base:owner:v1');
+    if (browserProfile && await this.storage.get(TAB_OWNER_KEY)) return 'absent';
+    const owner = await this.storage.get<BaseOwnerState>('base:owner:v1');
     if (!owner) {
-      const active = await this.ctx.storage.get<StoredTrial>(ACTIVE_KEY);
+      const active = await this.storage.get<StoredTrial>(ACTIVE_KEY);
       if (active) await this.validateArchiveBinding(active);
-      return active || browserProfile && ((await this.ctx.storage.get('reception:v1')) !== undefined ||
-        (await ledgerIds(this.ctx.storage)).length > 0) ? 'registered' : 'absent';
+      return active || browserProfile && ((await this.storage.get('reception:v1')) !== undefined ||
+        (await ledgerIds(this.storage)).length > 0) ? 'registered' : 'absent';
     }
     readOwner(owner, this.ctx.id.toString());
     if (browserProfile) return 'registered';
@@ -793,7 +800,7 @@ export class TangramSession extends DurableObject<Env> {
     return r && !await this.baseReadRecord(r.recordId) ? 'expired' : 'registered';
   }
   async registerBaseOwner(tabOwner = false): Promise<boolean> {
-    return this.serialized(() => this.ctx.storage.transaction(async tx => {
+    return this.serialized(() => this.storage.transaction(async tx => {
       if (await tx.get('base:owner:v1') || await tx.get(ACTIVE_KEY)) return false;
       const owner: BaseOwnerState = {schemaVersion:'base_owner_v1',ownerId:this.ctx.id.toString(),revision:0,activeKey:null,admissions:{}};
       await tx.put({'base:owner:v1':owner, ...(tabOwner ? { [TAB_OWNER_KEY]: true } : {})}); return true;
@@ -801,7 +808,7 @@ export class TangramSession extends DurableObject<Env> {
   }
 
   private async browserSessions(): Promise<BrowserSession[]> {
-    return await this.ctx.storage.get<BrowserSession[]>(BROWSER_SESSIONS_KEY) ?? [];
+    return await this.storage.get<BrowserSession[]>(BROWSER_SESSIONS_KEY) ?? [];
   }
 
   async resolveTabSession(sessionId: string): Promise<string | null> {
@@ -821,8 +828,8 @@ export class TangramSession extends DurableObject<Env> {
       return (!owner || readOwner(owner, this.ctx.id.toString()).activeKey === null) &&
         !await storage.get('reception:v1') && !await storage.get(ACTIVE_KEY) && !Object.keys(ledger ?? {}).length;
     };
-    if (!reclaim) return empty(this.ctx.storage);
-    return this.serialized(() => this.ctx.storage.transaction(async tx => {
+    if (!reclaim) return empty(this.storage);
+    return this.serialized(() => this.storage.transaction(async tx => {
       if (!await empty(tx)) return false;
       await tx.delete(['base:owner:v1', TAB_OWNER_KEY]);
       return true;
@@ -842,7 +849,7 @@ export class TangramSession extends DurableObject<Env> {
         retained.push(saved);
       }
       if (empty >= MAX_EMPTY_TAB_SESSIONS) {
-        await this.ctx.storage.put({ [BROWSER_SESSIONS_KEY]: retained });
+        await this.storage.put({ [BROWSER_SESSIONS_KEY]: retained });
         return null;
       }
       const session = { sessionId: crypto.randomUUID(), doName: newSessionId(), createdAt: new Date(now).toISOString() };
@@ -852,7 +859,7 @@ export class TangramSession extends DurableObject<Env> {
         const initial = await child.fetch(new Request('https://session.internal/api/state', { headers: { [TAB_SESSION_HEADER]: session.sessionId } }));
         if (!initial.ok) throw new BaseSessionError('trial_unavailable');
         const state = await initial.json();
-        await this.ctx.storage.put({ [BROWSER_SESSIONS_KEY]: [...retained, session] });
+        await this.storage.put({ [BROWSER_SESSIONS_KEY]: [...retained, session] });
         return { sessionId: session.sessionId, state };
       } catch (error) {
         await child.inspectEmptyTabSession(true);
@@ -872,12 +879,12 @@ export class TangramSession extends DurableObject<Env> {
       if (!(error instanceof ReceptionError)) throw error;
       receptionUnreadable = true;
     }
-    const active = await this.ctx.storage.get<StoredTrial>(ACTIVE_KEY);
+    const active = await this.storage.get<StoredTrial>(ACTIVE_KEY);
     const records = [];
-    for (const id of await ledgerIds(this.ctx.storage)) {
+    for (const id of await ledgerIds(this.storage)) {
       const record = await this.readOwnedArchive(id);
       if (!record) continue;
-      const questionnaire = await readQuestionnaire<Questionnaire>(this.ctx.storage, id);
+      const questionnaire = await readQuestionnaire<Questionnaire>(this.storage, id);
       records.push({ entry: recordListEntry(record, id === active?.recordId, questionnaire), questionnaireUpdatedAt: questionnaire?.updatedAt });
     }
     return summarizeBrowserSession({ sessionId, createdAt, reception, receptionUnreadable, protocolAvailable,
@@ -899,8 +906,8 @@ export class TangramSession extends DurableObject<Env> {
   }
   private async baseReadRecord(id: string): Promise<BaseRecord|null> {
     if (!RECORD_ID.test(id)) return null;
-    const tombstones = await this.ctx.storage.get<string[]>('tombstones') ?? [];
-    const ledger = await this.ctx.storage.get<Record<string,number>>('ledger') ?? {};
+    const tombstones = await this.storage.get<string[]>('tombstones') ?? [];
+    const ledger = await this.storage.get<Record<string,number>>('ledger') ?? {};
     if (tombstones.includes(id) || !Object.hasOwn(ledger,id)) return null;
     return await this.readOwnedArchive(id) as BaseRecord | null;
   }
@@ -920,8 +927,8 @@ export class TangramSession extends DurableObject<Env> {
       makeTask:async binding=>this.createTrial(binding),
       store:{
         read:async():Promise<OwnerRead>=>{
-          const raw = await this.ctx.storage.get<BaseOwnerState>('base:owner:v1');
-          if (!raw) return await this.ctx.storage.get(ACTIVE_KEY) ? {kind:'legacy_active'} : {kind:'expired'};
+          const raw = await this.storage.get<BaseOwnerState>('base:owner:v1');
+          if (!raw) return await this.storage.get(ACTIVE_KEY) ? {kind:'legacy_active'} : {kind:'expired'};
           const owner = readOwner(raw,this.ctx.id.toString());
           const current = owner.activeKey && owner.admissions[owner.activeKey];
           if (current && current.errorCode === 'record_deleted') return {kind:'expired'};
@@ -941,7 +948,7 @@ export class TangramSession extends DurableObject<Env> {
         readRecord:id=>this.baseReadRecord(id),
         compareAndSwap:(revision,next,writes)=>{
           let indexed: Reception | null = null;
-          return this.serialized(()=>this.ctx.storage.transaction(async tx=>{
+          return this.serialized(()=>this.storage.transaction(async tx=>{
           const raw = await tx.get<BaseOwnerState>('base:owner:v1');
           if (!raw) throw new BaseSessionError('trial_unavailable');
           const old = readOwner(raw,this.ctx.id.toString()); if (old.revision !== revision) return false;
@@ -1022,8 +1029,8 @@ export class TangramSession extends DurableObject<Env> {
   private participantUsageStore(assignmentId: string): ParticipantUsageStore {
     const key = participantUsageKey(assignmentId);
     return {
-      read: () => this.ctx.storage.get(key),
-      update: (write, kind) => this.ctx.storage.transaction(async tx => {
+      read: () => this.storage.get(key),
+      update: (write, kind) => this.storage.transaction(async tx => {
         const owner = await tx.get<BaseOwnerState>('base:owner:v1');
         const entry = kind === 'settle'
           ? Object.values(owner?.admissions ?? {}).find(entry => entry?.assignment.assignmentId === assignmentId)
@@ -1042,7 +1049,7 @@ export class TangramSession extends DurableObject<Env> {
   }
 
   private async createTrial(binding: Parameters<MakeBaseTask>[0]): Promise<NamingTask> {
-    const {seed,strategy,referenceMemory,restore,participantRuntime,initialObservationGeneration,memoryPruneVersion,participantDialogueProfile,openingMode} = binding;
+    const {seed,strategy,referenceMemory,restore,participantRuntime,initialObservationGeneration,memoryPruneVersion,participantDialogueProfile,openingMode,partObservationVersion} = binding;
     if (restore && !matchesWorkerDialogueProfile(participantDialogueProfile, restore) ||
         participantDialogueProfile !== undefined &&
           (memoryPruneVersion !== participantMemoryPruneVersion(participantDialogueProfile) ||
@@ -1091,7 +1098,7 @@ export class TangramSession extends DurableObject<Env> {
       if (rotationMode !== 'relative_pm90' && rotationMode !== 'relative_0') throw new NamingTaskError('invalid_options');
       // The observer and dialogue must see the same board. A restore uses the validated record's selection.
       const figureSelection = restore ? restore.options.figureSelection : binding.figureSelection;
-      const { trial, figures, own } = participantTrialMaterial(seed, rotationMode, figureSelection);
+      const { trial, figures, own } = participantTrialMaterial(seed, rotationMode, figureSelection, partObservationVersion);
       const runtime = createWorkerParticipantRuntime({
         proxy: policy.proxy, pin, ...runtimeMode, initialObservationGeneration, participantDialogueProfile,
         own, cache: this.preobservations.startCache,
@@ -1109,7 +1116,7 @@ export class TangramSession extends DurableObject<Env> {
           },
         } };
       }
-      const task = await createNamingTaskV2(({ ...runtime, jevResearch, seed, strategy, referenceMemory, memoryPruneVersion, rotationMode, openingMode, ...figures,
+      const task = await createNamingTaskV2(({ ...runtime, jevResearch, seed, strategy, referenceMemory, memoryPruneVersion, rotationMode, openingMode, partObservationVersion, ...figures,
         utteranceStyle: runtime.jevResearch.profile.utteranceStyle, createTrial: () => trial, onPersist,
         runDir: null, ...(restore ? { restore } : {}),
       }) as unknown as Parameters<typeof createNamingTaskV2>[0]) as NamingTask;
@@ -1157,9 +1164,9 @@ export class TangramSession extends DurableObject<Env> {
   private async ownRecords() {
     const active = this.trial?.getState().sessionId;
     const entries = [];
-    for (const id of await ledgerIds(this.ctx.storage)) {
+    for (const id of await ledgerIds(this.storage)) {
       const record = await this.readOwnedArchive(id);
-      if (record) entries.push(recordListEntry(record, id === active, await readQuestionnaire(this.ctx.storage, id)));
+      if (record) entries.push(recordListEntry(record, id === active, await readQuestionnaire(this.storage, id)));
     }
     return sortRecordList(entries);
   }
@@ -1174,19 +1181,19 @@ export class TangramSession extends DurableObject<Env> {
     if (!record) throw new NamingTaskError("not_found");
     if (view === "review") {
       if (request.method !== "GET") throw new NamingTaskError("not_found");
-      return json(200, lockResult(participantReview(record), await readQuestionnaire(this.ctx.storage, recordId)));
+      return json(200, lockResult(participantReview(record), await readQuestionnaire(this.storage, recordId)));
     }
     if (request.method === "GET") {
-      return json(200, { recordId, form: QUESTIONNAIRE_FORM, questionnaire: await readQuestionnaire(this.ctx.storage, recordId) });
+      return json(200, { recordId, form: QUESTIONNAIRE_FORM, questionnaire: await readQuestionnaire(this.storage, recordId) });
     }
     if (request.method !== "POST") throw new NamingTaskError("not_found");
     const update = questionnaireUpdate(await readBody(request));
     if (record.status !== "completed") throw new NamingTaskError("trial_not_completed");
     // Read-modify-write inside the archive queue, so concurrent saves never interleave.
     const questionnaire = await this.serialized(async () => {
-      const previous = await readQuestionnaire<Questionnaire>(this.ctx.storage, recordId);
+      const previous = await readQuestionnaire<Questionnaire>(this.storage, recordId);
       const next = update(previous, Date.now());
-      if (next.changed && !await writeQuestionnaire(this.ctx.storage, recordId, next.questionnaire, Date.now(),
+      if (next.changed && !await writeQuestionnaire(this.storage, recordId, next.questionnaire, Date.now(),
         next.questionnaire.status === "submitted")) throw new NamingTaskError("not_found");
       return next.questionnaire;
     });
@@ -1199,14 +1206,14 @@ export class TangramSession extends DurableObject<Env> {
   private async state(): Promise<unknown> {
     const live = this.trial?.getState() ?? null;
     const trial = live && typeof live.sessionId === "string"
-      ? lockResult(live, await readQuestionnaire(this.ctx.storage, live.sessionId)) : live;
+      ? lockResult(live, await readQuestionnaire(this.storage, live.sessionId)) : live;
     return { trial, hideStrategy: true, busy: Boolean(live?.busy) };
   }
 
   private async interruptedState() {
     const reception = await this.readReception();
     const interrupted = reception ? reception.status === 'interrupted'
-      : (await this.ctx.storage.get<StoredTrial>(ACTIVE_KEY))?.status === 'interrupted';
+      : (await this.storage.get<StoredTrial>(ACTIVE_KEY))?.status === 'interrupted';
     return interrupted ? { trial: null, busy: false, hideStrategy: true, interrupted: true,
       ...(reception ? { reception: participantReception(reception) } : {}) } : null;
   }
@@ -1247,7 +1254,7 @@ export class TangramSession extends DurableObject<Env> {
         } else validateBaseStart(body);
       }
       const isolated = TAB_SESSION_ID.test(request.headers.get(TAB_SESSION_HEADER) ?? '');
-      if (!isolated && await this.ctx.storage.get(TAB_OWNER_KEY)) return json(404,{error:'not_found'});
+      if (!isolated && await this.storage.get(TAB_OWNER_KEY)) return json(404,{error:'not_found'});
       const ownerStatus = await this.baseOwnerStatus();
       const recordPath = pathname.match(/^\/api\/records\/([^/]+)\/(review|questionnaire)$/);
       const records = request.method === 'GET' && pathname === '/api/records';

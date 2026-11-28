@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { PART_GEOMETRY_VERSION, type PartObservationVersion } from '../stimuli/part-geometry.ts';
 import { isOpeningMode, type OpeningMode } from './opening-mode.ts';
 import { PARTICIPANT_PRODUCTION_PROFILE, type ParticipantProductionProfile } from '../web/participant-usage-policy.ts';
 import type { Strategy } from './base-assignment.ts';
@@ -64,6 +65,7 @@ export function participantMemoryPruneVersion(profile?: ParticipantDialogueProfi
   return isPilot012ParticipantDialogueProfile(profile) ? CLAIM_PRUNE_V3 : CLAIM_PRUNE_V2;
 }
 type ParticipantPlanSettings = {
+  partObservationVersion?: PartObservationVersion;
   openingMode?: OpeningMode;
   memoryPruneVersion?: MemoryPruneVersion;
   participantModelPin?: ParticipantModelPin;
@@ -200,17 +202,19 @@ function participantPlan(value: unknown) {
   const fields = value && typeof value === 'object' ? value : {};
   const hasPrune = Object.hasOwn(fields, 'memoryPruneVersion');
   const hasOpeningMode = Object.hasOwn(fields, 'openingMode');
+  const hasParts = Object.hasOwn(fields, 'partObservationVersion');
   const hasPin = Object.hasOwn(fields, 'participantModelPin');
   const hasLimits = Object.hasOwn(fields, 'participantLimits');
   const hasProfile = Object.hasOwn(fields, 'participantRuntimeProfile');
   const hasGeneration = Object.hasOwn(fields, 'initialObservationGeneration');
   const hasDialogueProfile = Object.hasOwn(fields, 'participantDialogueProfile');
   if ((hasLimits || hasProfile || hasGeneration) && !hasPin || hasLimits && hasProfile) return fail();
-  const p = object(value, [...PLAN_KEYS, ...(hasOpeningMode ? ['openingMode'] : []),
+  const p = object(value, [...PLAN_KEYS, ...(hasOpeningMode ? ['openingMode'] : []), ...(hasParts ? ['partObservationVersion'] : []),
     ...(hasPrune ? ['memoryPruneVersion'] : []), ...(hasPin ? ['participantModelPin'] : []), ...(hasLimits ? ['participantLimits'] : []),
     ...(hasProfile ? ['participantRuntimeProfile'] : []), ...(hasGeneration ? ['initialObservationGeneration'] : []),
     ...(hasDialogueProfile ? ['participantDialogueProfile'] : [])]);
   if (hasOpeningMode && !isOpeningMode(p.openingMode)) return fail();
+  if (hasParts && (p.partObservationVersion !== PART_GEOMETRY_VERSION || !hasPin || !hasProfile)) return fail();
   if (hasProfile && p.participantRuntimeProfile !== PARTICIPANT_PRODUCTION_PROFILE) return fail();
   const generation = isInitialObservationGeneration(p.initialObservationGeneration) ? p.initialObservationGeneration : undefined;
   if (hasGeneration && generation === undefined) return fail();
@@ -225,6 +229,7 @@ function participantPlan(value: unknown) {
       (!hasPrune || generation !== INITIAL_OBSERVATION_STRUCTURED_V2)) return fail();
   const limits = hasLimits ? validateParticipantLimits(p.participantLimits) : undefined;
   const participant: ParticipantPlanSettings = {
+    ...(hasParts ? { partObservationVersion: PART_GEOMETRY_VERSION } : {}),
     ...(hasOpeningMode ? { openingMode: p.openingMode as OpeningMode } : {}),
     ...(hasPrune ? { memoryPruneVersion } : {}),
     ...(pin ? { participantModelPin: pin } : {}),
@@ -350,6 +355,7 @@ export async function approveReception(value: unknown, options: ParticipantPlanS
 }): Promise<Reception> {
   const r = validateReception(value);
   const participant = {
+    ...(options.partObservationVersion !== undefined ? { partObservationVersion: options.partObservationVersion } : {}),
     ...(options.openingMode !== undefined ? { openingMode: options.openingMode } : {}),
     ...(options.memoryPruneVersion !== undefined ? { memoryPruneVersion: options.memoryPruneVersion } : {}),
     ...(options.participantModelPin !== undefined ? { participantModelPin: options.participantModelPin } : {}),

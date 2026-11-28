@@ -3,7 +3,7 @@ import { CLAIM_PRUNE_V2 } from '../memory/reference-graph.mjs';
 import { isP5ParticipantDialogueProfile, isPilot012ParticipantDialogueProfile, participantMemoryPruneVersion } from './reception.ts';
 import { validateBaseStart, validateBaseAssignmentConfig, canonicalBaseAssignmentConfig, validateBoundBaseRecord } from './base-assignment.ts';
 import { BaseAssignmentError, data, readAssignment, readOwner, UUID, OWNER, safeInt,
-  assignmentOpeningMode, assignmentRotationMode, assignmentMemoryPruneVersion, assignmentParticipantModelPin, assignmentParticipantDialogueProfile, assignmentFigureSelection } from './base-assignment-data.ts';
+  assignmentPartObservationVersion, assignmentOpeningMode, assignmentRotationMode, assignmentMemoryPruneVersion, assignmentParticipantModelPin, assignmentParticipantDialogueProfile, assignmentFigureSelection } from './base-assignment-data.ts';
 import type { BaseSessionOptions, BaseSession, BaseSessionErrorCode, BaseOwnerState, BaseAssignment,
   AdmissionKey, BaseRecord, RawBaseRecord, BaseTask, BaseArchiveWrite, FailureCode, FailureCause, RestoreResult } from './base-assignment.ts';
 /** Closed sub-reasons of a store/session rejection (code trial_unavailable). Diagnostics only: the HTTP mapping uses `code`, and the reason never carries text. */
@@ -164,6 +164,7 @@ export function createBaseAssignmentSession(options: BaseSessionOptions): BaseSe
       const profile = plan?.participantRuntimeProfile;
       const initialObservationGeneration = plan?.initialObservationGeneration;
       const openingMode = assignmentOpeningMode(a);
+      const partObservationVersion = assignmentPartObservationVersion(a);
       const memoryPruneVersion = assignmentMemoryPruneVersion(a);
       const participantDialogueProfile = assignmentParticipantDialogueProfile(a);
       try { task = await options.makeTask({ strategy: a.strategy, seed: a.seed, referenceMemory: a.referenceMemory,
@@ -173,6 +174,7 @@ export function createBaseAssignmentSession(options: BaseSessionOptions): BaseSe
         ...(limits ? { participantLimits: limits } : {}),
         ...(profile ? { participantRuntime: { profile, assignmentId: a.assignmentId } } : {}),
         ...(initialObservationGeneration ? { initialObservationGeneration } : {}),
+        ...(partObservationVersion ? { partObservationVersion } : {}),
         ...(openingMode ? { openingMode } : {}),
         ...(participantDialogueProfile ? { participantDialogueProfile } : {}),
         ...(restore ? {} : { rotationMode: assignmentRotationMode(a),
