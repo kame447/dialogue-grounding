@@ -1,3 +1,4 @@
+import { allRecordedTrialsDeleted } from '../reception-visibility.ts';
 import { PARTICIPANT_PRODUCTION_PROFILE } from '../../../../dialogue-model/runtime/web/participant-usage-policy.ts';
 import { ReceptionError, validateReception, effectiveRotationMode, effectiveBetweenTrials, effectiveFigureSelection } from '../../../../dialogue-model/runtime/v2/reception.ts';
 import { usesThreeFigures, validateReceptionSettings } from './reception-settings.ts';
@@ -15,6 +16,7 @@ type Owner = {
   adminCancelReception(input: { expectedRevision: number }): Promise<Reception>;
   adminForceEndReception?(id: string, expectedRevision: number): Promise<void>;
   adminDeletedRecordIds?(recordIds: string[]): Promise<string[]>;
+  adminHasRecoverableUnrecordedAdmission?(receptionId: string): Promise<boolean>;
   adminSetReceptionParticipantRole?(id: string, role: ParticipantRole, expectedRecordIds: string[] | null): Promise<ParticipantRoleResult>;
 };
 type Index = {
@@ -90,11 +92,13 @@ export function createReceptionAdminPort(options: Options): ReceptionAdminPort {
       const position = after ? summaries.findIndex(r => r.receptionId === after) : -1;
       const start = position + 1, page = summaries.slice(start,start+PAGE_SIZE), items: ReceptionAdminRow[] = [];
       const seen = new Set<string>(), liveRecords: string[] = [];
+      const owners = new Map<string, Owner>();
       for (const summary of page) {
         if (seen.has(summary.receptionId)) continue;
         const resolved = await resolve(summary,summary.receptionId);
         if (!resolved) continue;
         seen.add(resolved.reception.receptionId);
+        owners.set(resolved.reception.receptionId, resolved.owner);
         const item = project(resolved.reception);
         if (options.index.recordRoles) {
           const ids = item.trials.flatMap(trial => trial.recordId === null ? [] : [trial.recordId]);
@@ -116,10 +120,23 @@ export function createReceptionAdminPort(options: Options): ReceptionAdminPort {
           else trial.participantRole = participantRoleView(role);
         }
       }
-      // A reception with only deleted trials is no longer an experiment to manage.
-      // Preserve the owning reception and its trial IDs for admission/retry safety;
-      // an unstarted reception or an unrecorded admission is not a deleted trial.
-      const visible = items.filter(item => !item.trials.length || item.trials.some(trial => !trial.recordDeleted));
+      // Keep the durable reception, audit and admission identities. A terminal
+      // null slot does not keep an otherwise deleted reception in the list.
+      const visible: ReceptionAdminRow[] = [];
+      for (const item of items) {
+        const deleted = new Set(item.trials.filter(t => t.recordDeleted).map(t => t.recordId));
+        if (!allRecordedTrialsDeleted(item.trials, id => deleted.has(id))) {
+          visible.push(item);
+          continue;
+        }
+        if (item.status === 'in_progress' && item.trials.some(t => t.recordId === null)) {
+          const owner = owners.get(item.receptionId);
+          // If a recovery is still possible or the owner cannot be consulted,
+          // keep the row rather than hiding an active participant.
+          const recoverable = await owner?.adminHasRecoverableUnrecordedAdmission?.(item.receptionId).catch(() => true);
+          if (recoverable !== false) visible.push(item);
+        }
+      }
       return { items: visible, next:start+PAGE_SIZE < summaries.length ? page.at(-1)!.receptionId : null };
     },
     async version(since) {
