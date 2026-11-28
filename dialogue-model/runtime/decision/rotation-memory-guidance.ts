@@ -124,12 +124,12 @@ export function applyGenerationRotationEdits(instructions: string): string {
 }
 
 // ---- observation sources (postGenerationCheck: on only) ----
-/** Example paths into the saved rotation memory for a declared observation source: the first key is "rotation", the rest is the path inside the projection the memo carries (indexes count from 0 in the order the lines are written). */
+/** Example paths for a declared observation source into the rotation memory. A source is one unit, whichever layer showed it: the current view, one turned view (index 0-2) or one region (index in the order written); the checks of a declaration and of an extraction compare these units. */
 export const ROTATION_SOURCE_EXAMPLES: readonly (readonly (string | number)[])[] = Object.freeze([
-  ["rotation", "current", "whole", 0, "noun"], ["rotation", "current", "whole", 0, "roles", "P1"], ["rotation", "current", "parts", "P1", 0, "noun"], ["rotation", "turned", 1, "whole", 0, "noun"],
+  ["rotation", "current"], ["rotation", "turned", 1], ["rotation", "regions", 0],
 ]);
-export const ROTATION_FEATURE_SOURCES = "回転別メモを使った出所は、先頭を \"rotation\" にして、見立ての名詞・領域の役割・部分の見立てを指します。例は " +
-  ROTATION_SOURCE_EXAMPLES.map(path => JSON.stringify(path)).join("、") + " です。whole・parts の添字は各向きの行に並んだ順で0から数え、別の向きは current の代わりに turned と添字（0〜2）で指します。";
+export const ROTATION_FEATURE_SOURCES = "回転別メモを使った出所は、先頭を \"rotation\" にして、使った向きか領域の単位で指します。例は " +
+  ROTATION_SOURCE_EXAMPLES.map(path => JSON.stringify(path)).join("、") + " です。turned の添字は0〜2、regions の添字は並んだ順で0から数えます。";
 
 // ---- extraction and re-observation ----
 /** The re-observation request of a rotation-memo turn names only the topic (plus the public quote): how to read it (support, contradiction, unknown, no pandering) is said once, in the observer's system instruction. */
