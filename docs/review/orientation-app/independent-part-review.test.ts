@@ -12,7 +12,7 @@ type State = { revision: number; sourceSha256: string; currentId: string; result
 const candidate = (noun: string, extra: Partial<Candidate> = {}): Candidate => ({ noun, owner: '動物', basis: '両方', confidence: '低', evidence: '形の根拠', weaknesses: '', ...extra });
 // A save as the page sends it. Set independentParts to undefined for the save of a page that predates the layer.
 const save = (s: State, patch: Record<string, unknown> = {}) => ({ revision: s.revision, sourceSha256: s.sourceSha256, currentId: s.currentId, results: s.results, independentParts: s.independentParts, ...patch });
-const withoutLayer = ({ independentParts, ...rest }: State) => rest;
+const withoutLayer = ({ independentParts, wholeConstruals, ...rest }: State & { wholeConstruals?: unknown }) => rest;
 
 test('a state file from before the independent layer loads unchanged, gains an empty layer in memory only, and keeps the layer across an old-style save', async () => {
   const a = await reviewServer(), b = await reviewServer(), c = await reviewServer();
@@ -22,7 +22,7 @@ test('a state file from before the independent layer loads unchanged, gains an e
     const rows = structuredClone(s.results);
     rows[0].status = '確認済み'; rows[1].whole = '研究者の見立て'; rows[2].note = 'メモ'; rows[3].parts[0].description = '研究者の説明'; rows[4].status = '要修正';
     s = await a.post('/api/state', save(s, { currentId: 'F2@90', results: rows, independentParts: undefined }));
-    const legacy = JSON.parse(readFileSync(a.statePath, 'utf8')); delete legacy.independentParts;
+    const legacy = JSON.parse(readFileSync(a.statePath, 'utf8')); delete legacy.independentParts; delete legacy.wholeConstruals;
     assert.equal(legacy.revision, s.revision);
     const text = JSON.stringify(legacy, null, 2) + '\n';
     writeFileSync(b.statePath, text);
