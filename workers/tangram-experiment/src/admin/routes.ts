@@ -168,6 +168,7 @@ const RECEPTION_MESSAGES: Readonly<Record<string, string>> = Object.freeze({
   invalid_order: '条件順序を選んでください。',
   protocol_unconfigured: 'プロトコルが未設定のため、許可できません。',
   protocol_changed: '設定が変わりました。開き直してから許可してください。',
+  protocol_legacy_figures: '現在の設定は3図形ではないため、許可できません。受付の設定で3図形を選んで保存してください。',
   reception_closed: '受付を使わない設定のため、許可できません。',
   reception_unavailable: '受付を確認できませんでした。開き直してから操作してください。',
   prepared_observations_unavailable: '初回観察メモの準備が完了していません。設定画面で観察メモを準備してください。',
@@ -175,7 +176,7 @@ const RECEPTION_MESSAGES: Readonly<Record<string, string>> = Object.freeze({
 /** The same status either way; the page names only the closed code's message, never the submitted or backend values. */
 function receptionFailure(request: Request, title: string, status: number, error: string, message = RECEPTION_MESSAGES[error]): Response {
   if (!wantsHtml(request)) return receptionError(status, error);
-  const back = error === 'prepared_observations_unavailable'
+  const back = error === 'prepared_observations_unavailable' || error === 'protocol_legacy_figures'
     ? { href: '/admin/reception-settings', label: '受付の設定へ' } : { href: '/admin/receptions', label: '受付一覧へ' };
   return respond(status, renderMessage(title, message ?? RECEPTION_MESSAGES.reception_unavailable, back));
 }
@@ -214,6 +215,8 @@ async function receptionMutation(request: Request, port: ReceptionAdminPort, id:
       if (!protocol.configured) return fail(409, 'protocol_unconfigured');
       if (protocol.mode === 'off') return fail(409, 'reception_closed');
       if (protocol.protocolId !== shown.protocolId || protocol.revision !== shown.revision || protocol.sha256 !== shown.sha256) return fail(409, 'protocol_changed');
+      // The owner compares the same protocol identity again, so the plan can only come from the setting checked here.
+      if (protocol.legacyFigures) return fail(409, 'protocol_legacy_figures');
       const order = unsigned(form.get('order'));
       if (order === null || order >= protocol.allowedOrders.length) return fail(400, 'invalid_order');
       if (entry.status !== 'pending' || entry.trials.some(trial => trial.recordId !== null)) return fail(409, 'conflict');
@@ -322,6 +325,7 @@ async function settingsMutation(request: Request, port: ReceptionSettingsPort, k
     case 'conflict': return respond(409, renderMessage(NOT_SAVED, '他の画面で設定が変わりました。開き直してから保存してください。'));
     case 'invalid': return respond(400, renderMessage(NOT_SAVED, 'すべての項目を選んでください。'));
     case 'protocol_unconfigured': return respond(409, renderMessage(NOT_SAVED, 'プロトコルを保存してから、受付を使ってください。'));
+    case 'three_figures_required': return respond(400, renderMessage(NOT_SAVED, '図形セットは3図形にしてください。設定画面を開き直して、3図形を選んでから保存してください。'));
     default: return respond(503, renderMessage(NOT_SAVED, '設定を保存できませんでした。'));
   }
 }

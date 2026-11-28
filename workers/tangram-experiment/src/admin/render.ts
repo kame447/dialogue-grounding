@@ -14,9 +14,10 @@ import type { TrialTerminationExpectation } from './trial-termination.ts';
 import { isAdminTermination, isIncompleteTrialStatus } from '../../../../dialogue-model/runtime/v2/admin-termination.ts';
 import { renderQrSvg } from './qr.ts';
 import { createTrialV2, participantView, ROTATION_MODES } from '../../../../dialogue-model/runtime/stimuli/scatter-v2.mjs';
-import { FIGURE_BANK, FIGURE_BANK_VERSION, FIGURE_SETS, FIGURE_SET_SIZE, SUPPORTED_FIGURE_COUNTS, validateResolvedFigureSelection } from '../../../../dialogue-model/runtime/stimuli/figure-bank.ts';
+import { FIGURE_BANK, FIGURE_BANK_VERSION, FIGURE_SETS, FIGURE_SET_SIZE, validateResolvedFigureSelection } from '../../../../dialogue-model/runtime/stimuli/figure-bank.ts';
 import type { FigurePreset } from './figure-presets.ts';
 import { DEFAULT_ROTATION_MODE, ROTATION_CHOICES } from './rotation-choices.ts';
+import { usesThreeFigures } from './reception-settings.ts';
 import type { BankFigure } from '../../../../dialogue-model/runtime/stimuli/figure-bank.ts';
 
 export const ADMIN_CSS = `:root{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans JP",sans-serif;font-size:14px;line-height:1.5;color:#222;background:#f7f7f4;--line:#d8d8d2;--accent:#2a5d8f;--tint:#eaf1f8}
@@ -345,6 +346,8 @@ export function renderReceptions(items: ReceptionAdminRow[], next: string | null
   };
   // A row is redrawn by the live update only when this key changes, so it covers everything its forms carry.
   const protocolKey = protocol.configured ? `${protocol.mode}:${protocol.protocolId}:${protocol.revision}:${protocol.sha256}` : `${protocol.mode}:none`;
+  // A setting that is not three figures cannot make new receptions (#268); approved receptions are unaffected.
+  const approvable = protocol.configured && protocol.mode !== 'off' && !protocol.legacyFigures;
   const td = (label: string, content: string, extra = '') => `<td data-label="${escapeHtml(label)}"${extra}>${content}</td>`;
   const rows = [...items].sort((a, b) => Number(b.status === 'pending') - Number(a.status === 'pending')).map(entry => {
     const unstarted = !entry.trials.some(trial => trial.recordId !== null || trial.recordDeleted);
@@ -371,12 +374,13 @@ ${participantRoleForm(`/admin/reception/${entry.receptionId}/participant-role`, 
 ${td('状態', receptionBadge(entry.status) + (entry.termination ? ' ' + timeTag(entry.termination.at) : ''))}${td('条件順序', escapeHtml(entry.plan?.order.join(' → ') ?? ''))}
 ${td('図形セット', escapeHtml(figureSetSummary(entry.plan?.figureSets ?? [])))}${td('回転', escapeHtml(entry.plan ? ROTATION_LABELS[entry.plan.rotationMode] ?? '' : ''))}${td('試行の間', escapeHtml(entry.plan ? BETWEEN_LABELS[entry.plan.betweenTrials] ?? '' : ''))}
 ${td('試行記録', trialLinks ? `<div class="reception-trials">${trialLinks}</div>${bulk}` : '')}
-${td('操作', `${entry.status === 'pending' && unstarted && protocol.configured && protocol.mode !== 'off' ? form(entry, 'approve') : ''}${cancel ? form(entry, 'cancel') : ''}${end}${open}${usage}`, ' class="ops"')}</tr>`;
+${td('操作', `${entry.status === 'pending' && unstarted && approvable ? form(entry, 'approve') : ''}${cancel ? form(entry, 'cancel') : ''}${end}${open}${usage}`, ' class="ops"')}</tr>`;
   }).join('');
   const names = ['受付番号', '受付時刻', '状態', '条件順序', '図形セット', '回転', '試行の間', '試行記録', '操作'];
   const list = `<div id="reception-list"${live ? ` data-version="${escapeHtml(live.version)}" data-since="${escapeHtml(live.since)}"` : ''}>
 <div data-part="status">${protocol.configured ? `<p>プロトコル設定済み: ${escapeHtml(protocol.protocolId)} / revision ${escapeHtml(protocol.revision)}</p>`
     : '<p class="bad">プロトコルが未設定のため、許可できません（<a href="/admin/reception-settings">受付の設定</a>）</p>'}
+${protocol.configured && protocol.legacyFigures ? '<p class="bad">現在の設定は3図形ではないため、許可できません（<a href="/admin/reception-settings">受付の設定</a>）</p>' : ''}
 ${protocol.mode === 'off' ? '<p>受付を使わない設定です。許可済みの受付は、計画どおり続けられます。</p>' : ''}</div>
 ${items.length ? `<div class="wrap cards" data-part="table"><table><thead>${head(names)}</thead><tbody>${rows}</tbody></table></div>` : '<p data-part="empty">受付はありません</p>'}
 ${next ? `<p data-part="more"><a href="/admin/receptions?${escapeHtml(new URLSearchParams({ after: next }).toString())}">次のページ →</a></p>` : ''}</div>`;
@@ -420,8 +424,6 @@ const SETTING_CHOICES: [string, string, [string, string][]][] = [
   ['rotationMode', '回転', ROTATION_CHOICES.map(choice => [choice.value, choice.form])],
   ['receptionNumberFormat', '受付番号', [['daily_seq3', '日ごとの3桁の連番']]],
 ];
-const FIGURE_SET_LABELS: Record<string, string> = { 'pilot-four-v1': '4図形（F1–F4）', 'legacy-v1': 'legacy-v1（従来 F1–F6）', 'bank-set-a': 'bank-set-a（F7–F12）', 'bank-set-b': 'bank-set-b（F13–F18）',
-  'bank-set-c': 'bank-set-c（F19–F24）', 'bank-set-d': 'bank-set-d（F25–F30）' };
 const MODE_LABELS: Record<string, string> = { on: '現在：使う', off: '現在：使わない', unset: '既定（使う）' };
 
 function renderPreparedObservations(view: SettingsView, status: PreparedObservationPoolStatus | null | undefined): string {
@@ -451,26 +453,24 @@ export function renderSettings(view: SettingsView, observations?: PreparedObserv
   const current: Record<string, string> = p ? { figureSetPolicy: p.figureSetPolicy ?? '', seedPolicy: p.seedPolicy, referenceMemory: p.referenceMemory ? 'on' : 'off', betweenTrials: p.betweenTrials,
     rotationMode: p.rotationMode, receptionNumberFormat: p.receptionNumberFormat } : { rotationMode: DEFAULT_ROTATION_MODE };
   const orders = new Set(p ? p.allowedOrders.map(o => o.join(',')) : []);
-  // The source and allocation are explicit. A saved random selection without a count denotes the legacy size.
-  const selection = p?.figureSelection, policy = p?.figureSetPolicy;
+  // New settings are three figures only (#268). A saved four- or six-figure setting (or a v2 one) is shown as a notice
+  // and never preselected: the researcher chooses the three figures to keep, and nothing is chosen on their behalf.
+  const selection = p && usesThreeFigures(p) ? p.figureSelection : undefined;
   const customIds = new Set(selection?.mode === 'custom' ? selection.figureIds : []);
-  const randomCount = selection?.mode === 'seeded_random' ? selection.figureCount ?? FIGURE_SET_SIZE : undefined;
-  const currentPreset = selection?.mode === 'preset' ? selection.setId : undefined;
-  const savedPreset = currentPreset && Object.hasOwn(FIGURE_SETS, currentPreset)
-    ? `<label><input type="radio" name="figureSetId" value="${escapeHtml(currentPreset)}" checked> ${escapeHtml(FIGURE_SET_LABELS[currentPreset] ?? currentPreset)}</label>` : '';
-  const presetChoices = savedPreset + (presets ?? []).map(preset =>
+  const presetChoices = (presets ?? []).map(preset =>
     `<label><input type="radio" name="figureSetId" value="${escapeHtml(`${preset.id}:${preset.revision}`)}"> ${escapeHtml(preset.name)} ・ ${escapeHtml(preset.figureIds.join('、'))}</label>`).join('');
-  const presetSource = presetChoices ? `<div><label><input type="radio" name="figureMode" value="preset" required${currentPreset ? ' checked' : ''}> プリセット</label>
+  const presetSource = presetChoices ? `<div><label><input type="radio" name="figureMode" value="preset" required> プリセット</label>
 <div class="sub">${presetChoices}</div></div>` : '';
-  const counts = presets === undefined ? SUPPORTED_FIGURE_COUNTS : SUPPORTED_FIGURE_COUNTS.filter(count => count === 3 || count === randomCount);
-  const customLabel = presets === undefined ? '3個・4個・6個' : '3個';
-  const legacyCustom = presets !== undefined && customIds.size > 3
-    ? `<p class="muted">現在は${customIds.size}個で保存されています。選び直す場合は3個を選んでください。</p>` : '';
+  const saved = p?.figureSelection;
+  const savedCount = !saved ? FIGURE_SET_SIZE : saved.mode === 'custom' ? saved.figureIds.length
+    : saved.mode === 'seeded_random' ? saved.figureCount ?? FIGURE_SET_SIZE : FIGURE_SETS[saved.setId]?.length;
+  const legacyNotice = p && !usesThreeFigures(p)
+    ? `<p class="bad">現在の設定は${savedCount ? savedCount + '図形' : '3図形以外'}のため、新しい受付を許可できません。図形セットで3図形を選んで保存してください。</p>` : '';
   const figureSource = `<fieldset class="figure-source"><legend>図形セット</legend>
 ${presets === undefined ? '' : '<p><a href="/admin/figure-presets">図形プリセットを管理</a></p>'}${presetSource}
 <div><label><input type="radio" name="figureMode" value="seeded_random" required${selection?.mode === 'seeded_random' ? ' checked' : ''}> シード乱数</label>
-<div class="sub"><label>図形数 <select name="figureCount">${counts.map(count => `<option value="${count}"${randomCount === count ? ' selected' : ''}>${count}</option>`).join('')}</select></label><label>シード <input type="text" name="selectionSeed" inputmode="numeric" autocomplete="off" placeholder="空欄で自動"${selection?.mode === 'seeded_random' && selection.selectionSeed !== null ? ` value="${escapeHtml(selection.selectionSeed)}"` : ''}></label></div></div>
-<div><label><input type="radio" name="figureMode" value="custom" required${selection?.mode === 'custom' ? ' checked' : ''}> 図形を選ぶ（${customLabel}）</label>${legacyCustom}
+<div class="sub"><label>図形数 <select name="figureCount"><option value="3">3</option></select></label><label>シード <input type="text" name="selectionSeed" inputmode="numeric" autocomplete="off" placeholder="空欄で自動"${selection?.mode === 'seeded_random' && selection.selectionSeed !== null ? ` value="${escapeHtml(selection.selectionSeed)}"` : ''}></label></div></div>
+<div><label><input type="radio" name="figureMode" value="custom" required${selection?.mode === 'custom' ? ' checked' : ''}> 図形を選ぶ（3個）</label>
 <div class="sub">${FIGURE_BANK.map(f => `<label><input type="checkbox" name="figureIds" value="${escapeHtml(f.id)}"${customIds.has(f.id) ? ' checked' : ''}> ${escapeHtml(f.id)}</label>`).join('')}</div></div></fieldset>`;
   const mark = (on: boolean) => on ? ' checked' : '';
   const fieldset = (name: string, legend: string, choices: [string, string][]) => `<fieldset><legend>${escapeHtml(legend)}</legend>${choices.map(([value, label]) =>
@@ -485,7 +485,7 @@ ${presets === undefined ? '' : '<p><a href="/admin/figure-presets">図形プリ�
 <p>v24 の受付をこれから許可するときに使う設定です。許可済みの受付の設定は変わりません。</p>
 <form method="post" action="/admin/reception-settings/post-generation-check" class="actions"><input type="hidden" name="expectedRevision" value="${escapeHtml(view.postGenerationCheck?.revision ?? 0)}">
 <button name="value" value="on">ON にする</button> <button name="value" value="off">OFF にする</button></form>
-<h2>プロトコル</h2>${status}
+<h2>プロトコル</h2>${status}${legacyNotice}
 <form method="post" action="/admin/reception-settings/protocol"><input type="hidden" name="expectedRevision" value="${escapeHtml(view.protocol?.revision ?? 0)}">
 <div class="fields"><fieldset><legend>条件順序</legend>${ORDER_CHOICES.map(([token, key, label]) =>
     `<label><input type="checkbox" name="orders" value="${token}"${mark(orders.has(key))}> ${escapeHtml(label)}</label>`).join('')}</fieldset>

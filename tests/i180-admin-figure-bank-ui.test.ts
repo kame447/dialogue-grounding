@@ -92,32 +92,44 @@ const PROTOCOL_V2 = { schemaVersion: 'reception_protocol_v2', protocolId: ID, re
 const settingsView = (protocol: any) => ({ protocol: { revision: protocol.revision, savedAt: '2026-11-24T00:00:00.000Z', sha256: 'c'.repeat(64), protocol },
   mode: { value: 'unset' as const, revision: 0 as const }, protocolHistory: [], modeHistory: [] });
 
-test('settings form: a saved v2 protocol keeps its fields preselected but leaves the figure fields for an explicit choice; a v3 protocol preselects its own', () => {
+test('settings form: only three figures are offered; a saved v2, four- or six-figure setting is a notice and never preselected, and a three-figure one preselects its own', () => {
+  const choices = (html: string) => [...html.matchAll(/name="figureMode" value="(\w+)" required( checked)?/gu)].map(match => [match[1], Boolean(match[2])]);
+  const notice = (html: string) => html.match(/<p class="bad">現在の設定は([^<]*)のため、新しい受付を許可できません。図形セットで3図形を選んで保存してください。<\/p>/u)?.[1];
+  const v3 = (figureSetPolicy: string, figureSelection: unknown) => renderSettings(settingsView({ ...PROTOCOL_V2, schemaVersion: 'reception_protocol_v3', figureSetPolicy, figureSelection }) as any);
   const v2 = renderSettings(settingsView(PROTOCOL_V2) as any);
   assert.match(v2, /name="rotationMode" value="relative_pm90" required checked/u);
+  assert.equal(notice(v2), '6図形');
   assert.equal((v2.match(/name="figureMode"[^>]*checked/gu) ?? []).length, 0); assert.equal((v2.match(/name="figureSetPolicy"[^>]*checked/gu) ?? []).length, 0);
   assert.equal((v2.match(/type="checkbox" name="figureIds"/gu) ?? []).length, 30);
   assert.match(v2, /保存しても、許可済みの受付の計画は変わりません。/u);
-  const custom = renderSettings(settingsView({ ...PROTOCOL_V2, schemaVersion: 'reception_protocol_v3', figureSetPolicy: 'shared',
-    figureSelection: { mode: 'custom', figureIds: ['F3', 'F9', 'F12', 'F20', 'F21', 'F29'] } }) as any);
-  assert.match(custom, /name="figureMode" value="custom" required checked/u); assert.match(custom, /name="figureSetPolicy" value="shared" required checked/u);
-  assert.equal((custom.match(/name="figureIds" value="F\d+" checked/gu) ?? []).length, 6);
-  const seeded = renderSettings(settingsView({ ...PROTOCOL_V2, schemaVersion: 'reception_protocol_v3', figureSetPolicy: 'per_trial',
-    figureSelection: { mode: 'seeded_random', selectionSeed: 41 } }) as any);
+  // A saved four- or six-figure setting keeps its policy and other fields, but its figures are neither preselected nor offered again.
+  for (const [html, count] of [[v3('shared', { mode: 'custom', figureIds: ['F3', 'F9', 'F12', 'F20', 'F21', 'F29'] }), '6図形'],
+    [v3('shared', { mode: 'custom', figureIds: ['F1', 'F2', 'F3', 'F4'] }), '4図形'], [v3('per_trial', { mode: 'seeded_random', selectionSeed: 41 }), '6図形'],
+    [v3('per_trial', { mode: 'seeded_random', selectionSeed: 41, figureCount: 4 }), '4図形'], [v3('shared', { mode: 'preset', setId: 'pilot-four-v1' }), '4図形'],
+    [v3('shared', { mode: 'preset', setId: 'bank-set-d' }), '6図形'], [v3('shared', { mode: 'preset', setId: 'legacy-v1' }), '6図形']] as const) {
+    assert.equal(notice(html), count);
+    assert.ok(choices(html).every(([, checked]) => checked === false), 'no figure source is preselected: ' + count);
+    assert.equal((html.match(/name="figureIds" value="F\d+" checked/gu) ?? []).length, 0);
+    assert.doesNotMatch(html, /name="selectionSeed"[^>]*value=|name="figureSetId"|<option value="[46]"|3個・4個・6個|現在は\d+個で保存/u);
+    assert.match(html, /<select name="figureCount"><option value="3">3<\/option><\/select>/u); assert.match(html, /図形を選ぶ（3個）/u);
+  }
+  assert.match(v3('per_trial', { mode: 'seeded_random', selectionSeed: 41 }), /name="figureSetPolicy" value="per_trial" required checked/u);
+  // A three-figure setting preselects its own source and shows no notice.
+  const custom = v3('shared', { mode: 'custom', figureIds: ['F3', 'F9', 'F12'] });
+  assert.equal(notice(custom), undefined); assert.doesNotMatch(custom, /新しい受付を許可できません/u);
+  assert.deepEqual(choices(custom), [['seeded_random', false], ['custom', true]]);
+  assert.deepEqual([...custom.matchAll(/name="figureIds" value="(F\d+)" checked/gu)].map(match => match[1]), ['F3', 'F9', 'F12']);
+  assert.match(custom, /name="figureSetPolicy" value="shared" required checked/u);
+  const seeded = v3('per_trial', { mode: 'seeded_random', selectionSeed: 41, figureCount: 3 });
+  assert.equal(notice(seeded), undefined); assert.deepEqual(choices(seeded), [['seeded_random', true], ['custom', false]]);
   assert.match(seeded, /name="selectionSeed"[^>]*value="41"/u); assert.match(seeded, /name="figureSetPolicy" value="per_trial" required checked/u);
   const unsaved = renderSettings({ protocol: null, mode: { value: 'unset', revision: 0 }, protocolHistory: [], modeHistory: [] });
   assert.deepEqual([...unsaved.matchAll(/name="(\w+)" value="([^"]*)" required checked/gu)].map(match => match.slice(1)), [['rotationMode', 'relative_90_180_270']],
     'before the first save only the default rotation is preselected');
-  assert.equal((unsaved.match(/ checked/gu) ?? []).length, 1);
+  assert.equal((unsaved.match(/ checked/gu) ?? []).length, 1); assert.equal(notice(unsaved), undefined);
   assert.doesNotMatch(unsaved, /name="figureSetId"/u);
-  assert.match(unsaved, /<select name="figureCount"><option value="3">3<\/option><option value="4">4<\/option><option value="6">6<\/option>/u);
-  assert.match(unsaved, /図形を選ぶ（3個・4個・6個）/u);
-  for (const [id, label] of [['pilot-four-v1', '4図形（F1–F4）'], ['bank-set-d', 'bank-set-d（F25–F30）']]) {
-    const preset = renderSettings(settingsView({ ...PROTOCOL_V2, schemaVersion: 'reception_protocol_v3', figureSetPolicy: 'shared',
-      figureSelection: { mode: 'preset', setId: id } }) as any);
-    assert.deepEqual([...preset.matchAll(/name="figureSetId" value="([^"]+)" checked> ([^<]+)/gu)].map(match => match.slice(1)), [[id, label]]);
-    assert.equal((preset.match(/name="figureSetId"/gu) ?? []).length, 1);
-  }
+  assert.match(unsaved, /<select name="figureCount"><option value="3">3<\/option><\/select>/u);
+  assert.match(unsaved, /図形を選ぶ（3個）/u);
 });
 
 function memory(): SettingsStorage & { values: Map<string, unknown> } {
@@ -194,7 +206,8 @@ test('three-figure protocol form accepts explicit random and arbitrary custom ch
   }
 });
 
-test('four-figure protocol form saves preset, random and custom choices without changing the six-figure form', async () => {
+// The form parser still reads four- and six-figure shapes (an old page can send them); refusing them is the saving side's job (#268).
+test('protocol form parsing reads four-figure preset, random and custom shapes and rejects counts that are not figure counts', async () => {
   const preset = await saved([['figureMode', 'preset'], ['figureSetId', 'pilot-four-v1'], ['figureSetPolicy', 'shared']]);
   assert.equal(preset.status, 303);
   assert.deepEqual(preset.fields.figureSelection, { mode: 'preset', setId: 'pilot-four-v1' });
@@ -211,11 +224,6 @@ test('four-figure protocol form saves preset, random and custom choices without 
   }
   const repeated = await saved([['figureMode', 'seeded_random'], ['figureCount', '4'], ['figureCount', '6'], ['figureSetPolicy', 'shared']]);
   assert.equal(repeated.status, 400); assert.equal(repeated.writes, 0);
-  for (const count of [4, 6]) {
-    const html = renderSettings(settingsView({ ...PROTOCOL_V2, schemaVersion: 'reception_protocol_v3', figureSetPolicy: 'per_trial',
-      figureSelection: { mode: 'seeded_random', selectionSeed: 41, ...(count === 4 ? { figureCount: 4 } : {}) } }) as any);
-    assert.ok(html.includes(`<option value="${count}" selected>${count}</option>`));
-  }
 });
 
 test('saving a four-figure revision preserves the previous six-figure protocol and all other settings', async () => {
