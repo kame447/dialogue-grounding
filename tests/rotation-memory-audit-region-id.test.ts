@@ -46,3 +46,30 @@ test('Jev の detail 問いの特徴の候補（生成へ渡る値）に領域ID
   }
   assert.ok(checkedValues > 200);
 });
+
+// 特徴の候補（Jev の detail 問い）に、メモの定型の1行（analytic.composition のプレースホルダ）が「選べる特徴」として並ばない。
+// 並ぶと、選ばれた特徴として「形・位置・接続は rotation を参照。」が生成へ渡り、内部の語 rotation を含む意味のない文が公開発話の材料になる。
+test('detail 問いの特徴の候補に、メモの定型のプレースホルダ（形・位置・接続は rotation を参照 など）が無い', {
+  skip: !existsSync(builderRoot + 'dialogue-model/runtime/observation/rotation-memo.ts') && process.env.AUDIT_REQUIRE_ROTATION_MEMORY !== '1' ? 'B2 の rotation-memo.ts が無い木' : skip }, async () => {
+  const memory: any = await import(pathToFileURL(memoryFile).href);
+  const memoModule: any = await import(pathToFileURL(builderRoot + 'dialogue-model/runtime/observation/rotation-memo.ts').href);
+  const decision: any = await import(pathToFileURL(builderRoot + 'dialogue-model/runtime/decision/jev-decision.ts').href);
+  const harness = await makeHarness(builderRoot);
+  const placeholders = [memoModule.ROTATION_MEMO_COMPOSITION, memoModule.ROTATION_MEMO_ABSENT];
+  let checked = 0;
+  for (let start = 0; start < FIGURES.length; start += 3) {
+    const input = harness.syntheticInput(3, 7);
+    const anchors = input.observations.figures.map((figure: any) => ({ id: figure.id, bbox: figure.region }));
+    const projections = new Map<string, unknown>();
+    anchors.forEach((anchor: any, i: number) => projections.set(anchor.id, memory.projectOwnRotationMemory({ figureKey: FIGURES[start + i], rotation: 90 })));
+    input.observations = memoModule.rotationInitialMemo(anchors, projections, '2026-01-01T00:00:00.000Z');
+    const payload = decision.buildJevDecisionDetailPayload(input, { action: 'confirm', target: { kind: 'single', figureId: input.ownSlots[0] } }, { questionLayout: 'two_stage_v3' });
+    for (const question of Object.values<any>(payload.questions)) for (const criterion of Object.values<string>(question.criteria)) {
+      let value: unknown = criterion;
+      try { value = JSON.parse(criterion).value; } catch { /* 値でない基準文はそのまま */ }
+      for (const placeholder of placeholders) assert.ok(!String(value).includes(placeholder), `${FIGURES[start]}…: 特徴の候補に定型のプレースホルダ「${placeholder}」`);
+      checked++;
+    }
+  }
+  assert.ok(checked > 50);
+});
