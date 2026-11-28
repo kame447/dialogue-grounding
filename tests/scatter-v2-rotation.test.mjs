@@ -51,8 +51,8 @@ test('R1 relative_pm90 (implicit and explicit) equals the fixed c3a871e values',
   for (let seed = 0; seed < 200; seed++) assert.deepEqual(createLayoutsV2({ seed, rotationMode: 'relative_pm90' }), createLayoutsV2({ seed }));
 });
 
-test('R2 ROTATION_MODES is a frozen list of the two modes', () => {
-  assert.deepEqual(scatter.ROTATION_MODES, ['relative_pm90', 'relative_0']);
+test('R2 ROTATION_MODES is a frozen list of the three modes; the earlier two keep their place', () => {
+  assert.deepEqual(scatter.ROTATION_MODES, ['relative_pm90', 'relative_0', 'relative_90_180_270']);
   assert.ok(Object.isFrozen(scatter.ROTATION_MODES));
 });
 
@@ -125,7 +125,7 @@ test('R5 trialStimulusV2 returns the generated angles of that exact trial only',
     for (const [slot, figureId] of Object.entries(trial.key.ai)) {
       const humanSlot = Object.keys(trial.key.human).find(s => trial.key.human[s] === figureId);
       const relative = (stimulus.angles.ai[slot] - stimulus.angles.human[humanSlot] + 360) % 360;
-      assert.ok(rotationMode === 'relative_0' ? relative === 0 : [90, 270].includes(relative));
+      assert.ok(rotationMode === 'relative_0' ? relative === 0 : [90, ...(rotationMode === 'relative_90_180_270' ? [180] : []), 270].includes(relative));
     }
     stimulus.angles.ai[Object.keys(stimulus.angles.ai)[0]] = 45;
     assert.deepEqual(scatter.trialStimulusV2(trial), scatter.trialStimulusV2(trial));

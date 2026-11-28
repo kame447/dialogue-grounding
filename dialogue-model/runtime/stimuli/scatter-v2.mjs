@@ -13,7 +13,9 @@ const GAP = 28;
 const AXIS_SEPARATION = 36;
 // relative_pm90: the AI side turns each figure a further ±90° (the original, and legacy-record, mode).
 // relative_0: the AI side shows each figure at the same angle as the human side's same figure.
-export const ROTATION_MODES = Object.freeze(['relative_pm90', 'relative_0']);
+// relative_90_180_270: the AI side turns each figure a further 90°, 180° or 270°, equally likely and never 0°.
+// New modes are appended: the order and the meaning of the earlier ones never change.
+export const ROTATION_MODES = Object.freeze(['relative_pm90', 'relative_0', 'relative_90_180_270']);
 
 function digest(seed, scope) {
   if (!Number.isSafeInteger(seed)) throw new TypeError('seed must be a safe integer');
@@ -189,8 +191,11 @@ export function createLayoutsV2({ seed, rotationMode = 'relative_pm90', figureSe
   };
 }
 
-// The ±90° draw is consumed in both modes so every later draw keeps its position.
-const aiRotation = (human, draw, mode) => mode === 'relative_0' ? human : (human + (draw < 0.5 ? 90 : 270)) % 360;
+// The AI-side draw is consumed in every mode (once, at the same position) so every later draw keeps its position.
+const TURNS_90_180_270 = Object.freeze([90, 180, 270]);
+const aiRotation = (human, draw, mode) => mode === 'relative_0' ? human
+  : mode === 'relative_90_180_270' ? (human + TURNS_90_180_270[Math.floor(draw * 3)]) % 360
+    : (human + (draw < 0.5 ? 90 : 270)) % 360;
 
 const pathOf = outlines => outlines.map(p => `M${p.map(([x, y]) => `${x},${y}`).join('L')}Z`).join('');
 const sceneOf = layout => ({
