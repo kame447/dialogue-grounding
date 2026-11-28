@@ -118,9 +118,11 @@ function mutationSites(segments: { profile: string; phase: string; path: string;
       const at = [...window].findIndex((c, i) => i >= Math.floor(window.length / 2) && CONTENT_CHAR.test(c));
       if (at < 0) continue;
       const chars = [...window]; chars[at] = chars[at] === '〇' ? '々' : '〇';
-      const holders = files.filter(file => file.text.includes(window));
-      if (holders.length !== 1 || holders[0].text.indexOf(window) !== holders[0].text.lastIndexOf(window)) continue;
-      const suffix = holders[0].path.slice(runtimeDir.length), key = suffix + '#' + holders[0].text.indexOf(window);
+      // 従来の文（jev-decision.ts など）と同じ書き出しの文は、回転別メモの module（rotation-memory*）の側の1か所を変える。
+      const holders = files.filter(file => file.text.includes(window)), own = holders.filter(file => /rotation-memory/u.test(file.path));
+      const holder = holders.length === 1 ? holders[0] : own.length === 1 ? own[0] : null;
+      if (!holder || holder.text.indexOf(window) !== holder.text.lastIndexOf(window)) continue;
+      const suffix = holder.path.slice(runtimeDir.length), key = suffix + '#' + holder.text.indexOf(window);
       if (!sites.has(key)) sites.set(key, { kind: 'text', suffix, from: window, to: chars.join(''), profile, note: `${phase} ${path}` });
     }
   }
