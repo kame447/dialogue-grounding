@@ -98,6 +98,30 @@ Jev の state には名詞の層だけ（最悪の組で 3/4/6図形 ≤ 約 0.9
 - **既存の S4 の測定（重要な背景）**: 回転別メモなしの従来の記録でも、runtime の文を1字変えると S4 が通す箇所が多い（試走で 14 か所中 13）。S4 が `extract-ai.ts`（`memoAiExtractionPrompt`）・`judgment-material-v5.ts`・`human-led-move-on.ts`・`shape-terminology.ts` などの runtime の helper を import して期待値の一部を作るため。ただし文の変更は指示の出所の指紋を変えるので、登録した版のままでは起きず、実際の防御は「26ファイルの指紋の pin」。独立の写しが足すのは、登録どおりの runtime が実際に送った文面が、登録時に確かめた文面と同じことの照合。AI 抽出・局所抽出・生成の rotation の文を既存の helper 経由で作る箇所は、S2 が「通した」と報告する見込みで、その扱い（helper 経由を許すか、写しを持つか）は統括の判断。
 - **全件の試験（68131eb）の回帰1 `participant-terra-worker-integration.test.ts:3873`（`ai_busy`）の切り分け**: c5388d8 でも失敗し、3c8fa0e（試験を足した commit）では合格。3c8fa0e..c5388d8 の 56 commit の二分で、最初の失敗は `6346e61`（Merge '5db4084'）。両親は単独で合格する組合せ。`4ebe975` → `6346e61` の runtime の差は `audit.ts` の指紋の一覧の4行だけで、**試験が変わっている**（冷復元の後に足された `h.complete(...)`〜第2条件の確認。失敗するのはこの `complete`）。原因は、`complete` が `assertSettled()` で `deferredAiExtraction = {state: "failed", error: "extraction_failed"}` に当たること。遅延 AI 抽出が失敗するのは、模擬の上流（`v12Transport`）が局所抽出・AI 抽出の要求を `memoExtractionPrompt(true, false)` などの文字列一致で認識するのに、回転別メモを持つ memo の要求は指示の末尾に回転別メモの文が付く（`withRotation`。送った 1680 字・期待 1423 字で、差は 1423 字目から）ため `generation` と誤分類して平文で答えること。runtime の欠陥でも新しい停止の経路でもなく（失敗した遅延抽出が `complete` を止めるのは従来の設計で、再試行は `failVisualExtraction` の試験が保護）、試験の模擬の前提の不整合。B2 が模擬の分類を直す（新しい表明は弱めない）。回帰2・3（ソースの文字列の検査）は B2。
 
+## 8. 最終の判定（2026-11-28 20:55、統合 head `8bb74c5`）
+
+**ブロッカー 0 件。** 統合 head `8bb74c5` = B2 の `cadebb6`（全件の試験の回帰3件の修正）＋ B1 の `81d0b62`（S4 の独立の写し）。私の scratch merge（`148d8fc`）と差分が空で、以下はその木で確認した。登録した26ファイルの確定のソース（036a8a8）から、`dialogue-model`・`workers`・`scripts` の差は `parity-verify/`（B1）だけ（runtime と指示の出所は不変）。
+
+| 項目 | 結果 |
+|---|---|
+| S4 の登録（07d4fcb） | 26/26 の指紋を `shasum` で独立に再計算して一致。`s4-register-prompt-version.ts --check` 一致。旧版の行・`fixed`/`native`・旧 fixture は不変（追加だけ） |
+| S4 の独立の写し（B1: `turned-view-records.ts`、`intervention-records.ts` は `generatedReplayProof` に接続） | 差分を読んだ: 回転別メモのない記録の挙動は変わらない（書き換えた9行は、回転別メモなしでは元の式と同じ値）。回転別メモ付きは新版だけが載せられ、旧版は拒否 |
+| 私の S0（検証器が runtime の回転系 module を import しない） | 合格 |
+| 私の S1（4場面×3回転方式×3/4/6図形×両方略×検査 off/on。全 120 の現在方向〈40組〉は 81d0b62 で、S4 の中身は 8bb74c5 と同一） | 合格・誤警報 0 |
+| 私の S2（runtime の文 41 か所と描画の code 16 か所〈区切り・括弧・面積・名前の候補の順・内容、層の欠落・内部項目の漏れ・凡例の欠落・生の rotation の漏れ・層の取り違え〉を読み込み時に1字／1か所だけ変える） | **57/57 で replay だけが mismatch**（通した 0、他の検査の不合格 0、判定できず 0） |
+| S4 関連の全試験（`s4-*`・`parity-*`・`holistic-v5-*`・`four-figure-*`・`v24-three-figure-s4`・`rotation-*`・`jev-decision-legacy-freeze`、B1 の `rotation-memory-s4`〈53件〉と私の監査 10 ファイルを含む 51 ファイル、`AUDIT_REQUIRE_ROTATION_MEMORY=1`） | 924 件中 **922 合格・失敗 0**（skip 2 は私の opt-in の S1 全120・S2） |
+| 全件の試験の回帰3件（68131eb） | `cadebb6` で解消（3ファイル＋`part-catalog-storage` で 200 件合格）。回帰1は試験の模擬の前提（回転別メモ付きの抽出の指示を認識しない）で runtime の欠陥でも新しい停止の経路でもない。検査は弱まっていない |
+| 型検査 | `tsc -p tsconfig.runtime.json`・`tsc -p workers/tangram-experiment/tsconfig.json` ともに成功 |
+| CI の Node 22 | 私の監査 10 ファイルを Node 22.23.4 で流し、33 件中 26 合格・失敗 0・skip 7（opt-in 分）。test-shards の計画は私の新規ファイルを受け付ける |
+
+**非ブロッキングの所見（L×S < 15。Issue か研究者の確認事項）**
+- `postGenerationCheck: 'on'` の独立抽出が、観察として主張していない語まで出所に挙げて不一致になり、再生成になる（実 API の追試2回。Issue #275。既定は off）。`'on'` を使うかは研究者の判断。
+- 「見立て」の語が発話に写る（N-1）、「こちらでも向きを変えて見ると〜」が図形の一致を匂わせ得る（N-3）。名前の候補（`catalog.names`）に別の向きの名詞が入る。
+- 実 API の試験は `gpt-6-luna` 18 回、評価者は実装担当と同系統（Sonnet 5.5）。研究条件の確定ではない。
+- 既存の S4 は、runtime の helper を import して期待値を作る箇所（`extract-ai.ts` など）の文を1字変えても通す（回転別メモなしの従来の記録で 14 か所中 13）。登録した版の実際の防御は指示の出所26ファイルの指紋の pin で、今回の変更で悪化していない。回転別メモの文は独立の写しで防御される（S2 の 57/57）。
+
+**実施していないこと**: `deploy:*:dry`（wrangler なし）、全件の `npm test`（統括が一度だけ）、取消2件（i184 のタイムアウト。統括が切り分け中）、Node 22 での監査以外の試験。
+
 ## 5. 再現手順
 - S4 の独立の写し: `AUDIT_S4=1 node --test tests/rotation-memory-audit-s4.test.ts`（S0・S1、約1分）、`AUDIT_S4_MUTATION=1 node --test --test-name-pattern=S2 tests/rotation-memory-audit-s4.test.ts`（S2、約1.5分）、`AUDIT_S4_FULL=1`（全 120 の現在方向と全箇所）。他の木は `AUDIT_REPO_ROOT=<worktree>`。混んだマシンでは子プロセスの並列を 3 に絞っている。
 - 旧鍵・旧受付の記録: `node --test tests/rotation-memory-audit-old-keys.test.ts tests/rotation-memory-audit-old-plans.test.ts`（他の木は `AUDIT_REPO_ROOT=<worktree>`、読み取りだけ）。
