@@ -24,3 +24,7 @@ node --test docs/review/orientation-app/orientation-review.test.ts
 ```sh
 node --test docs/review/orientation-app/independent-part-review.test.ts docs/review/part-construal-20261128/apply-part-construal-to-review.test.ts
 ```
+実ブラウザでの確認は `browser-independent-parts.ts`（headless Chromium・使い捨てプロファイル・空きポートの `server.ts`。稼働中のページには触れない）。`PART_CONSTRUAL` に `part-construal-468.json`、`REVIEW_STATE_COPY` に状態ファイルの**写し**（任意）、`EVIDENCE_DIR` に新しい出力先を指定する。確認の前に `ps` で他の担当のブラウザが動いていないことを確かめ、一系列で実行する。
+```sh
+PLAYWRIGHT_CORE_PATH=<playwright-core> CHROMIUM_PATH=<chromium> PART_CONSTRUAL=<part-construal-468.json> node docs/review/orientation-app/browser-independent-parts.ts
+```
