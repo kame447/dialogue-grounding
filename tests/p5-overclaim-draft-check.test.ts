@@ -17,7 +17,7 @@ const hook = registerHooks({
   load(url, context, nextLoad) {
     const result = nextLoad(url, context);
     if (url !== supportUrl) return result;
-    const old = "classifyDraftAct: (i: any, o: any) => native.classifyDraftAct!(i, o)";
+    const old = "classifyDraftAct: (i: any, o: any) => { plan.onDraftCheck?.(); return native.classifyDraftAct!(i, o); }";
     const source = String(result.source);
     assert.equal(source.split(old).length, 2);
     return { ...result, source: source.replace(old,
