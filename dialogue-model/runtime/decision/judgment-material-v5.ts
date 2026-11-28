@@ -85,7 +85,7 @@ export function encodeMaterialV5(material: any, { actions, nameLedger, answers: 
   return {
     view: JUDGMENT_VIEW_V5, ...(rotationMode ? { rotationMode } : {}), ...(notationV6 ? { notationV6: true } : {}), ...(notationV11 ? { notationV11: true } : {}), turn: material.turn, ownSlots: slots,
     publicTurns: material.publicTurns.map(line),
-    observations: material.observations, ...compactIssues(material.issueSummary, slots, new Set(material.priorClaims.map((c: any) => c.id))),
+    ...(material.rotationLegend ? { rotationLegend: material.rotationLegend } : {}), observations: material.observations, ...compactIssues(material.issueSummary, slots, new Set(material.priorClaims.map((c: any) => c.id))),
     claims: material.priorClaims.map((c: any) => [c.id, c.sourceTurn, c.act, c.aspect, al(c.targets), c.name, c.respondsTo, c.proposition, c.issueId]),
     repairHistory: material.repairHistory.map((r: any) => [r.turn, r.issueId, r.action, r.question,
       r.partnerClaims.map((c: any) => [c.id, c.act, al(c.targets), c.proposition]), al(r.candidatesBefore), al(r.candidatesAfter),
