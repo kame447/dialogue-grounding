@@ -169,8 +169,8 @@ test('generation instructions: the contradicting lines are replaced for v23 and 
     assert.ok(text.includes('自然な見立てがなければ全体の形でかまいません。') && !text.includes('見る角度によっては'));
     assert.ok(!next.includes('自然な見立てがなければ全体の形でかまいません。') && next.includes('見る角度によっては') && next.includes('自分側の想像で、相手の画面の向き'));
     assert.ok(next.includes('領域のid（P1など）'));
-    // A direct answer is not given a shape question to ask: the viewpoint mark is asked of, a question only when the chosen action is one.
-    assert.ok(text.includes('相手には形の対応を尋ねてください') && !next.includes('相手には形の対応を尋ねてください') && next.includes('質問は、選んだ行動が質問のときだけにします'));
+    // A direct answer is not given a shape question to ask: only the viewpoint mark is asked of (no new general rule about questions: a place-only reference may still be answered with a shape question under #172).
+    assert.ok(text.includes('相手には形の対応を尋ねてください') && !next.includes('相手には形の対応を尋ねてください') && next.includes('自分側の見え方を示してください。') && !next.includes('質問は、選んだ行動が'));
     assert.ok(!/[0-9]+度/u.test(GENERATION_ROTATION_EDITS.map(([, to]) => to).join('')));
   }
   assert.throws(() => applyGenerationRotationEdits('別の文面'), /out_of_sync/u);
