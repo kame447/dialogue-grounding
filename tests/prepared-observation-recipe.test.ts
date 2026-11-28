@@ -142,7 +142,7 @@ test('recipes detach caller data and reject unrecognized or inconsistent setting
   const input = structuredClone({ ...recipeInput(), randomSeed: undefined });
   const recipe = await createPreparedObservationRecipe({ ...input, randomSeed: () => 42 });
   input.protocol.allowedOrders[0].reverse();
-  input.participant.participantModelPin!.terraModelId = 'gpt-6.1-terra-2026-11-02';
+  input.participant.participantModelPin = { ...input.participant.participantModelPin!, terraModelId: 'gpt-6.1-terra-2026-11-02' };
   assert.deepEqual(recipe.plan.order, ['repair-first', 'bypass-enabled']);
   assert.equal(recipe.participant.participantModelPin!.terraModelId, pin.terraModelId);
   for (const changed of [
