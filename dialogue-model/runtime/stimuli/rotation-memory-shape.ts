@@ -303,12 +303,21 @@ export function rotationNameCandidates(rotation: OwnRotationMemory): string[] {
 }
 
 /**
- * Plain geometric statements about the figure as it is on the AI's screen now, without any construal word: one per
- * region and one per touching pair (region order). The catalog of features a statement may be built on.
+ * Plain geometric statements about the figure as it is on the AI's screen now, without any construal word and without
+ * a region ID (an internal reference that must not reach a public utterance): one per region, then one per touching
+ * pair, in region order, each statement once. Regions are called by position, shape and area. A pair whose members
+ * cannot be told apart that way (the same position, shape and area on another region too) gets no statement.
+ * The catalog of features a statement may be built on.
  */
 export function rotationFeatureCandidates(rotation: OwnRotationMemory): string[] {
-  const shapes = rotation.regions.map(r => `${r.id}: ${r.at}の${r.shapeName}（全体面積の${r.areaPercent}%）`
+  const label = (r: OwnRotationRegion) => `${r.at}の${r.shapeName}（${r.areaPercent}%）`;
+  const uses = new Map<string, number>();
+  for (const r of rotation.regions) uses.set(label(r), (uses.get(label(r)) ?? 0) + 1);
+  const shapes = rotation.regions.map(r => `${r.at}の${r.shapeName}（全体面積の${r.areaPercent}%）`
     + (r.tip === undefined ? '' : `。頂点は${r.tip}向き`) + (r.concave === true ? '。輪郭にくぼみがある' : '') + '。');
-  const relations = rotation.regions.flatMap(r => r.adjacent.filter(a => regionNumber(a) > regionNumber(r.id)).map(a => `${r.id}と${a}は辺で接する。`));
-  return [...shapes, ...relations];
+  const relations = rotation.regions.flatMap(r => r.adjacent.filter(a => regionNumber(a) > regionNumber(r.id)).flatMap(a => {
+    const other = rotation.regions.find(x => x.id === a)!;
+    return uses.get(label(r)) === 1 && uses.get(label(other)) === 1 ? [`${label(r)}と${label(other)}は辺で接する。`] : [];
+  }));
+  return [...new Set([...shapes, ...relations])];
 }

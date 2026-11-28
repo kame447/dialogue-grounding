@@ -40,9 +40,12 @@ test('bundle: version, hash, catalog revision and provenance are consistent and 
   assert.deepEqual(validateRotationMemoryPin(rotationMemoryPin()), rotationMemoryPin());
   assert.equal(validateRotationMemoryBundle(ROTATION_MEMORY_ENTRIES).length, 30);
   assert.deepEqual(validateRotationMemoryBundle(clone(ROTATION_MEMORY_ENTRIES)), clone(ROTATION_MEMORY_ENTRIES));
-  for (const source of [ROTATION_MEMORY_SOURCES.whole, ROTATION_MEMORY_SOURCES.parts]) assert.match(source.status, /研究者の確認前/u);
-  assert.equal(ROTATION_MEMORY_SOURCES.geometry.catalogRevision, ROTATION_MEMORY_CATALOG_REVISION);
-  assert.ok(Object.values(ROTATION_MEMORY_SOURCES).every(source => /^[a-f0-9]{64}$/u.test(source.sha256)));
+  // Provenance is either the two AI proposal files or the review page's export; each input is recorded with its SHA-256.
+  const sources = ROTATION_MEMORY_SOURCES;
+  assert.equal(sources.geometry.catalogRevision, ROTATION_MEMORY_CATALOG_REVISION);
+  assert.ok(Object.values(sources).every(source => /^[a-f0-9]{64}$/u.test(String(source.sha256))));
+  if (sources.export) assert.equal(sources.export.wholeConstrualSchemaVersion, 'tangram_whole_construal_review_v1');
+  else for (const source of [sources.whole, sources.parts]) assert.match(String(source.status), /研究者の確認前/u);
   assert.throws(() => validateRotationMemoryPin({ ...rotationMemoryPin(), extra: 1 }), TypeError);
   assert.throws(() => validateRotationMemoryPin({ ...rotationMemoryPin(), dataSha256: 'abc' }), TypeError);
 });
@@ -312,11 +315,38 @@ test('readers: rotationSourceValue, rotationNameCandidates and rotationFeatureCa
   for (const path of [['turned', 9], ['current', 'whole', 7, 'noun'], ['current', 'wholeAnywhere'], ['wholeAnywhere'], ['turned', 0, 'rel'], ['__proto__'], ['constructor'], ['current', 'whole', '0', 'noun'], ['current', 'whole', 0.5, 'noun'], []])
     assert.equal(rotationSourceValue(p, path as (string | number)[]), undefined, JSON.stringify(path));
   const features = rotationFeatureCandidates(p);
-  const pairs = p.regions.reduce((n, r) => n + r.adjacent.length, 0) / 2;
-  assert.equal(features.length, p.regions.length + pairs);
   assert.ok(features.every(f => f.endsWith('。') && f.length <= 400));
   for (const noun of rotationNameCandidates(p)) assert.ok(features.every(f => !f.includes(noun)), 'features carry no construal word');
-  assert.deepEqual(features.slice(0, p.regions.length).map(f => f.slice(0, 3)), p.regions.map(r => r.id + ':'));
+});
+
+test('rotationFeatureCandidates: region IDs never appear; regions are called by position, shape and area', () => {
+  for (const { memory } of allProjections()) {
+    const features = rotationFeatureCandidates(memory);
+    assert.ok(features.every(f => !/P\d/u.test(f)), 'an internal region ID in a feature');
+    assert.equal(new Set(features).size, features.length, 'each statement once');
+    const labels = memory.regions.map(r => `${r.at}の${r.shapeName}（${r.areaPercent}%）`);
+    const pairs = memory.regions.reduce((n, r) => n + r.adjacent.length, 0) / 2;
+    if (new Set(labels).size === labels.length) assert.equal(features.length, memory.regions.length + pairs);
+    else assert.ok(features.length <= memory.regions.length + pairs);
+  }
+  const first = rotationFeatureCandidates(project('F1', 0));
+  assert.match(first[0], /^[^P]*の[^P]*（全体面積の[\d.]+%）/u);
+  // Regions that cannot be told apart by position, shape and area get no relation statement and one shape statement.
+  const region = (id: string, shapeName: string, areaPercent: number, at: OwnRotationMemory['regions'][number]['at'], adjacent: string[]) => ({ id, shapeName, areaPercent, at, adjacent });
+  const emptyView = { whole: [], parts: {} };
+  const synthetic: OwnRotationMemory = validateOwnRotationMemory({
+    regions: [region('P1', '正方形', 25, '上寄り', ['P2', 'P3']), region('P2', '正方形', 25, '上寄り', ['P1', 'P3']), region('P3', '台形', 50, '下寄り', ['P1', 'P2'])],
+    current: emptyView, turned: RELATIVE_ROTATIONS.map(rel => ({ rel, ...emptyView })), wholeAnywhere: false,
+  });
+  assert.deepEqual(rotationFeatureCandidates(synthetic), ['上寄りの正方形（全体面積の25%）。', '下寄りの台形（全体面積の50%）。']);
+  const distinct = validateOwnRotationMemory({
+    regions: [{ ...region('P1', '直角二等辺三角形', 12.5, '上寄り', ['P2']), tip: '上' }, { ...region('P2', '五角形', 87.5, '中央付近', ['P1']), concave: true }],
+    current: emptyView, turned: RELATIVE_ROTATIONS.map(rel => ({ rel, ...emptyView })), wholeAnywhere: false,
+  });
+  assert.deepEqual(rotationFeatureCandidates(distinct), [
+    '上寄りの直角二等辺三角形（全体面積の12.5%）。頂点は上向き。', '中央付近の五角形（全体面積の87.5%）。輪郭にくぼみがある。',
+    '上寄りの直角二等辺三角形（12.5%）と中央付近の五角形（87.5%）は辺で接する。',
+  ]);
 });
 
 // ---- size guard ----
