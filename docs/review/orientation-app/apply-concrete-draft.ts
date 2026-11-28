@@ -1,12 +1,11 @@
-import {readFileSync,writeFileSync} from 'node:fs';
+import {readFileSync} from 'node:fs';
 import assert from 'node:assert/strict';
 const url=process.env.REVIEW_URL||'http://127.0.0.1:5498';
 const get=async(path:string)=>{const r=await fetch(url+path);if(!r.ok)throw Error('GET '+path+': '+r.status);return r.json()};
 const data=await get('/api/data'), state=await get('/api/state');
 assert.equal(data.schemaVersion,'tangram_orientation_review_v1');assert.equal(data.catalogRevision,'review-final-dae9359580d64a83');assert.equal(data.templates.length,120);
-const raw=readFileSync(new URL('concrete-construal-draft.tsv',import.meta.url),'utf8').trim().split('\n');
-const drafts=new Map(raw.map(line=>{const [id,first,second,parts]=line.split('\t');return [id,{first,second,roles:parts.split('/')}]}));
-assert.equal(raw.length,120);assert.equal(drafts.size,120);
+const drafts=new Map(Object.entries(JSON.parse(readFileSync(new URL('concrete-construal-draft.json',import.meta.url),'utf8')) as Record<string,{first:string;second:string;roles:string[]}>));
+assert.equal(drafts.size,120);
 const equal=(a:any,b:any)=>JSON.stringify(a)===JSON.stringify(b);
 let updated=0;const skipped:string[]=[];
 const results=state.results.map((r:any)=>{
