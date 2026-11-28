@@ -6,6 +6,7 @@ import { summarizeLatency } from "../dialogue-model/runtime/v2/latency.ts";
 import { createNamingTaskV2 } from "../dialogue-model/runtime/v2/naming-task-v2.mjs";
 import { SAFE_JUDGMENT } from "../dialogue-model/runtime/judgment/schema.mjs";
 import { DECISION_ACTIONS } from "../workers/research-ai-proxy/src/decisions.mjs";
+import { manualRecoveryTimers } from "./helpers/recovery-timers.ts";
 
 type Options = { phase?: string };
 const at = (ms: number) => new Date(ms).toISOString();
@@ -95,9 +96,10 @@ function harness({ decisions = false } = {}) {
   return { options, failNext, record: () => latest!, setGate(value: Promise<void> | null) { gate = value; }, tick(ms: number) { clock += ms; } };
 }
 
-test("naming task records linked timings; a superseded attempt and a retry are counted, not leaked", async () => {
+test("naming task records linked timings for superseded attempts and automatic recovery without leaking content", async () => {
   const h = harness();
-  const task = await createNamingTaskV2(h.options);
+  const recovery = manualRecoveryTimers();
+  const task = await createNamingTaskV2({ ...h.options, recoveryTimers: recovery.timers });
   let release!: () => void;
   h.setGate(new Promise<void>((resolve) => { release = resolve; }));
   task.message("HUMAN-ONE", "c-1");
@@ -107,10 +109,18 @@ test("naming task records linked timings; a superseded attempt and a retry are c
   h.setGate(null); release();
   await task.whenIdle();
   h.failNext.judgment = 1;
-  task.message("HUMAN-THREE", "c-3");
+  const { eventId } = task.message("HUMAN-THREE", "c-3");
   await task.whenIdle();
-  assert.equal(task.getState().aiStatus, "error");
-  await task.retry();
+  const waiting = task.getState();
+  assert.equal(waiting.aiStatus, "thinking");
+  assert.equal(waiting.recovering, true);
+  assert.equal(waiting.events.at(-1)?.id, eventId);
+  assert.equal(waiting.events.at(-1)?.speaker, "human");
+  h.tick(2000);
+  recovery.runNext();
+  await task.whenIdle();
+  assert.deepEqual(task.getState().events.slice(0, -1), waiting.events);
+  assert.equal(task.getState().events.at(-1)?.speaker, "ai");
   const record = h.record();
   const timings = record.turnTimings as { outcome: string; requestSeq: number; errorCode: string | null }[];
   assert.deepEqual(timings.map((t) => t.outcome), ["superseded", "returned", "error", "returned"]);

@@ -14,6 +14,7 @@ import {
   stableOptions, assertSameBudget, type Request, type Step,
 } from "./helpers/memory-harness.ts";
 import { SCRIPT } from "./helpers/memory-script.ts";
+import { manualRecoveryTimers } from "./helpers/recovery-timers.ts";
 
 type Rec = Record<string, any>;
 const MEMORY_SUMMARY_PREFIX = "AI自身の参照メモと公開発話の出典番号";
@@ -239,7 +240,7 @@ test("memory ON: an invalid memory interpretation keeps a valid non-agree act (m
   perTurn.forEach((record, i) => assertGraphInvariants(record, "memory fallback turn " + i));
 });
 
-test("memory ON: generation timeouts retry once; a failed turn commits no memory and a retry commits it exactly once", async () => {
+test("memory ON: generation timeouts retry once; a failed turn commits memory exactly once on automatic recovery", async () => {
   const once = await runScript(SCRIPT.slice(0, 2).map((step, i) => i === 1 ? { ...step, generationReplies: [{ error: "timeout" }] } : step));
   assert.equal(once.perTurn[1].judgments.at(-1).generationRetried, true);
   assert.equal(once.perTurn[1].queueState.privateState.graph.revision, 2);
@@ -247,16 +248,28 @@ test("memory ON: generation timeouts retry once; a failed turn commits no memory
   for (const request of once.requests.filter((r) => r.phase === "generation")) assert.equal(request.options.timeoutMs, GENERATION_TIMEOUT_MS);
 
   const steps = SCRIPT.map((step) => ({ ...step }));
-  const harness = await createScriptedTrial({ steps, referenceMemory: true });
+  const recovery = manualRecoveryTimers();
+  const harness = await createScriptedTrial({ steps, referenceMemory: true, extra: { recoveryTimers: recovery.timers } });
   await harness.say(0);
   const before = harness.records.at(-1)!;
   steps[1].generationReplies = [{ error: "timeout" }, { error: "timeout" }];
   const failed = await harness.say(1);
-  assert.equal(harness.task.getState().aiStatus, "error");
+  const waiting = harness.task.getState();
+  assert.equal(waiting.aiStatus, "thinking");
+  assert.equal(waiting.recovering, true);
+  assert.equal(waiting.events.at(-1)?.text, steps[1].human);
+  assert.equal(waiting.events.at(-1)?.speaker, "human");
+  assert.deepEqual(failed.queueState.pendingHumanEventIds, [waiting.events.at(-1)?.id]);
   assert.deepEqual(failed.queueState.privateState, before.queueState.privateState, "nothing is staged into memory on a failed turn");
   assert.equal(failed.turnTimings.at(-1).errorCode, "timeout");
-  const retried = await harness.retry(1);
-  assertGraphInvariants(retried, "after retry");
+  recovery.runNext();
+  await harness.task.whenIdle();
+  const retried = harness.records.at(-1)!;
+  assertGraphInvariants(retried, "after automatic recovery");
+  assert.deepEqual(harness.task.getState().events.slice(0, -1), waiting.events);
+  assert.equal(harness.task.getState().events.at(-1)?.text, steps[1].reply);
+  assert.equal(retried.judgments.length, before.judgments.length + 1);
+  assert.deepEqual(retried.queueState.pendingHumanEventIds, []);
   assert.equal(retried.queueState.privateState.graph.revision, 2);
   const turn = retried.judgments.at(-1).turnIndex;
   assert.equal(retried.queueState.privateState.graph.records.filter((r: Rec) => r.kind === "mention" && r.sourceTurn === turn).length, 1);

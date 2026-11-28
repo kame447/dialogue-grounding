@@ -145,7 +145,9 @@ test('audit: shadow failures remain private in persisted research records and do
   assert.doesNotMatch(JSON.stringify(record), /PRIVATE-PROVIDER-ERROR/);
   assert.equal(received.length, 2); assert.equal(scored.length, 0);
   await task.submitHuman({ names: Object.fromEntries(Object.keys(trial.key.human).map(id => [id, '同じ名前'])) });
-  assert.equal(scored.length, 0); await task.submitAI(); assert.equal(scored.length, 1);
+  await task.whenIdle({ signal: AbortSignal.timeout(5_000) });
+  assert.equal(task.getState().status, 'completed');
+  assert.equal(scored.length, 1);
   assert.deepEqual(scored[0].key, trial.key);
   assert.deepEqual(scored[0].humanSubmission, Object.fromEntries(Object.keys(trial.key.human).map(id => [id, '同じ名前'])));
   assert.deepEqual(scored[0].aiSubmission, Object.fromEntries(model.anchors.map(a => [a.id, '同じ名前'])));

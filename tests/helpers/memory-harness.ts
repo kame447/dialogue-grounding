@@ -121,13 +121,5 @@ export async function createScriptedTrial({ steps, referenceMemory, strategy = "
       await task.whenIdle();
       return records.at(-1)!;
     },
-    /** Retry after an error, with the given replacement replies. */
-    async retry(index: number, overrides: { judgeReplies?: Reply[]; generationReplies?: Reply[] } = {}) {
-      stepIndex = index;
-      pending.judge = [...(overrides.judgeReplies ?? [])];
-      pending.generation = [...(overrides.generationReplies ?? [])];
-      await task.retry();
-      return records.at(-1)!;
-    },
   };
 }

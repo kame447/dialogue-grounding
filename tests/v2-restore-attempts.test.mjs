@@ -4,6 +4,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createNamingTaskV2 } from '../dialogue-model/runtime/v2/naming-task-v2.mjs';
 import { createTrialV2, modelView } from '../dialogue-model/runtime/stimuli/scatter-v2.mjs';
+import { manualRecoveryTimers } from './helpers/recovery-timers.ts';
 
 const SEED = 35;
 const FINAL = JSON.stringify(Object.fromEntries(modelView(createTrialV2({ seed: SEED })).anchors.map((a) => [a.id, null])));
@@ -71,13 +72,23 @@ test('A2 a completed restore keeps attempts, judgments, scoring and events witho
   assert.doesNotMatch(JSON.stringify(restored.getState()), /"attempts"|"validation"/u);
 });
 
-test('A6 a failure → retry history is kept whole across JSON round trips', async () => {
+test('A6 failure and automatic recovery history are kept whole across JSON round trips', async () => {
   const h = harness({ failFirstGeneration: true });
-  const task = await make(h);
-  task.message('鳥に見える', 'm-1'); await task.whenIdle();
-  assert.equal(task.getState().aiStatus, 'error');
-  await task.retry(); await task.whenIdle();
+  const recovery = manualRecoveryTimers();
+  const task = await make(h, { recoveryTimers: recovery.timers });
+  const { eventId } = task.message('鳥に見える', 'm-1'); await task.whenIdle();
+  const waiting = task.getState();
+  assert.equal(waiting.aiStatus, 'thinking');
+  assert.equal(waiting.recovering, true);
+  assert.equal(waiting.events.at(-1)?.speaker, 'human');
+  assert.deepEqual(h.records.at(-1).queueState.pendingHumanEventIds, [eventId]);
+  assert.equal(h.records.at(-1).judgments.length, 0);
+  recovery.runNext(); await task.whenIdle();
   const saved = roundTrip(h.records.at(-1));
+  assert.deepEqual(task.getState().events.slice(0, -1), waiting.events);
+  assert.equal(task.getState().events.at(-1)?.speaker, 'ai');
+  assert.deepEqual(saved.queueState.pendingHumanEventIds, []);
+  assert.equal(saved.judgments.length, 1);
   assert.ok(saved.attempts.length >= 2, 'the failed attempt and its retry are both recorded');
   const { h: h2, task: restored, first } = await restoreOnly(saved);
   assert.deepEqual(first.attempts, saved.attempts);
