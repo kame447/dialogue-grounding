@@ -1,0 +1,1119 @@
+{
+  "observer": "BreezyCopernicus",
+  "model": "claude-opus-5-5",
+  "effort": "max",
+  "viewedImages": true,
+  "items": [
+    {
+      "item": "item-01",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [
+            {"rank": 1, "noun": "尾びれ", "owner": "魚", "basis": "両方", "confidence": "中",
+             "evidence": "右端で縦に長い辺を外側に向け、直角の頂点を左の胴側（P2）へ向けた三角形で、扇形に広がる尾びれの形と位置に合う。", "weaknesses": "図形の半分を占めるほど大きく、胴にあたるP2より大きい。"},
+            {"rank": 2, "noun": "翼", "owner": "鳥", "basis": "全体との関係", "confidence": "低",
+             "evidence": "P2の右上から上方へ高く広がる大きな三角形で、持ち上げた翼のように見える。", "weaknesses": "下半分がP2の横に垂れ下がり、付け根が一点に絞られない。"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P2",
+          "candidates": [
+            {"rank": 1, "noun": "胴", "owner": "魚", "basis": "全体との関係", "confidence": "低",
+             "evidence": "右端の尾びれ状のP1と上に立つP3をつなぐ中間の塊で、左端が鋭く尖り、魚の胴から鼻先にかけての形に近い。", "weaknesses": "一般的な語で、下へ尖るV字の下辺は魚の腹の形としては不自然。"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P3",
+          "candidates": [
+            {"rank": 1, "noun": "背びれ", "owner": "魚", "basis": "全体との関係", "confidence": "低",
+             "evidence": "胴にあたるP2の上辺から上へ立ち上がる小さな塊で、背びれの位置にある。", "weaknesses": "正方形で尖りや後ろへの傾きがなく、ひれらしくない。"},
+            {"rank": 2, "noun": "煙突", "owner": "家・船", "basis": "両方", "confidence": "低",
+             "evidence": "横に広い塊の上辺から垂直に立つ小さな正方形で、煙突の典型的な形と位置。", "weaknesses": "下のP2が屋根や船体の形ではない。"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-02",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "図形の過半を占める中心の大きな直角三角形で、特定の部分としての見立てが成り立ちにくい。"
+        },
+        {
+          "id": "P2",
+          "candidates": [
+            {"rank": 1, "noun": "耳", "owner": "猫などの動物", "basis": "両方", "confidence": "中",
+             "evidence": "大きな塊P1の上辺に載る、頂点が上を向いた小さな三角形で、立った耳の形と位置に合う。", "weaknesses": "対になるもう一方の耳がない（右のP3の上端を耳と見る余地はある）。"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P3",
+          "candidates": [
+            {"rank": 1, "noun": "尾", "owner": "猫・犬などの動物", "basis": "全体との関係", "confidence": "低",
+             "evidence": "大きな塊P1の右側から斜め右上へ細長く伸び、持ち上げた尾のように見える。", "weaknesses": "幅が太く先が細くならず、上端が縦にまっすぐ切れている。"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P4",
+          "candidates": [
+            {"rank": 1, "noun": "前足", "owner": "座った動物", "basis": "全体との関係", "confidence": "低",
+             "evidence": "大きな塊P1の左下端から左へ張り出す小さな四角で、地面に着いた前足の位置にある。", "weaknesses": "下へ伸びずP1の左辺に横付けされており、足らしい細長さがない。"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-03",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "図形の中央を占める大きな台形で、単独の形からも位置からも特定の部分に見えない。"
+        },
+        {
+          "id": "P2",
+          "candidates": [
+            {"rank": 1, "noun": "尾びれ", "owner": "魚", "basis": "両方", "confidence": "低",
+             "evidence": "左下端で長い斜辺を外側（左下）に向け、直角の角を胴側のP1に付けた三角形で、尾びれの広がりに合う。", "weaknesses": "図形全体が斜めに傾き、魚の胴として見られる部分がはっきりしない。"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P3",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "階段状の縁の途中にある小さな正方形で、特徴的な形も端の位置もなく部分に見立てにくい。"
+        },
+        {
+          "id": "P4",
+          "candidates": [
+            {"rank": 1, "noun": "くちばし", "owner": "鳥", "basis": "全体との関係", "confidence": "低",
+             "evidence": "斜めに伸びる図形の右上端に付く細い平行四辺形で、鋭い角が右上へ突き出し、伸ばした首の先のくちばしのように見える。", "weaknesses": "下のP3が頭としては角ばっており、平行四辺形で先端が一点に尖りきらない。"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-04",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "家形の大きな中心領域で、図形の大半を占め特定の部分に見立てにくい。"
+        },
+        {
+          "id": "P2",
+          "candidates": [
+            {"rank": 1, "noun": "鼻づら", "owner": "犬などの動物", "basis": "全体との関係", "confidence": "低",
+             "evidence": "大きな塊P1の右上から水平に突き出す小さな四角で、横向きの頭から突き出た鼻先の位置にある。", "weaknesses": "角ばった正方形で先細りがない。"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P3",
+          "candidates": [
+            {"rank": 1, "noun": "首", "owner": "動物", "basis": "全体との関係", "confidence": "低",
+             "evidence": "大きな塊P1の下に、それより細く付く四角で、上の塊を支える首の位置にある。", "weaknesses": "P1の左半分の下に偏って付き、首らしい長さがない。"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P4",
+          "candidates": [
+            {"rank": 1, "noun": "尾", "owner": "動物", "basis": "全体との関係", "confidence": "低",
+             "evidence": "下端の四角P3の左から斜め左上へ伸びる細長い帯で、持ち上げた尾のように見える。", "weaknesses": "根元が細くならず、胴にあたる部分から離れた下端に付いている。"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-05",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [
+            {"rank": 1, "noun": "尾びれ", "owner": "魚", "basis": "両方", "confidence": "低",
+             "evidence": "左端で縦の辺を外側に向け、頂点を右の大きな三角形P2に向けた三角形で、尾びれの形と位置に合う。", "weaknesses": "上の角が鋭く立ち上がって上縁がギザギザになり、魚の輪郭としてまとまりにくい。"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P2",
+          "candidates": [
+            {"rank": 1, "noun": "屋根", "owner": "家", "basis": "単独", "confidence": "低",
+             "evidence": "水平な底辺と上向きの頂点を持つ大きな二等辺三角形で、屋根の典型的な形。", "weaknesses": "図形の下部に位置し、下に壁にあたる領域がない。"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P3",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "大きな三角形P2と右上の正方形P4の間を埋める三角形で、単独でも位置からも特定の部分に見えない。"
+        },
+        {
+          "id": "P4",
+          "candidates": [
+            {"rank": 1, "noun": "頭", "owner": "動物", "basis": "全体との関係", "confidence": "低",
+             "evidence": "図形の右上端から突き出た小さな塊で、横向きの動物の頭の位置にある。", "weaknesses": "正方形で、耳や鼻先にあたる形の手がかりがない。"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P5",
+          "candidates": [
+            {"rank": 1, "noun": "脚", "owner": "動物", "basis": "両方", "confidence": "低",
+             "evidence": "上の塊P2の下辺から斜め右下へ伸びる細長い帯で、踏み出した脚のように見える。", "weaknesses": "1本だけで、足先にあたる形がない。"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-06",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [
+            {"rank": 1, "noun": "船体", "owner": "船", "basis": "両方", "confidence": "中",
+             "evidence": "平らな上辺と下辺を持つ横長の形で、右端が斜めに張り出して尖り、舳先のある船体の輪郭に合う。", "weaknesses": "左上も斜めに切れており、船尾の形としては不自然。"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P2",
+          "candidates": [
+            {"rank": 1, "noun": "尾", "owner": "鳥・動物", "basis": "全体との関係", "confidence": "低",
+             "evidence": "横長の塊P1の後端（左上）から斜め左上へ立ち上がる細長い帯で、持ち上げた尾のように見える。", "weaknesses": "根元が広く先が細くならず、上端が縦に切れている。"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P3",
+          "candidates": [
+            {"rank": 1, "noun": "船室", "owner": "船", "basis": "全体との関係", "confidence": "低",
+             "evidence": "船体のようなP1の上辺の中ほどに載る小さな四角で、甲板上の船室（操舵室）の位置にある。", "weaknesses": "正方形一つだけで、船室としては小さい。"},
+            {"rank": 2, "noun": "煙突", "owner": "船・家", "basis": "両方", "confidence": "低",
+             "evidence": "横長の塊の上辺から垂直に立つ小さな正方形。", "weaknesses": "煙突としては太く短い。"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-07",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "図形の中心を占める大きな五角形で、左へ尖る形はあるが特定の部分に見立てにくい。"
+        },
+        {
+          "id": "P2",
+          "candidates": [
+            {"rank": 1, "noun": "耳", "owner": "ウサギなど", "basis": "全体との関係", "confidence": "低",
+             "evidence": "大きな塊P1の上辺から縦に長く立ち上がり、先が斜めに尖る帯で、立った耳のように見える。", "weaknesses": "1本だけで、P1の右端に寄っている。"},
+            {"rank": 2, "noun": "尾", "owner": "鳥", "basis": "全体との関係", "confidence": "低",
+             "evidence": "左へ尖るP1の反対側（右上）で上へ立ち上がる帯で、ぴんと立てた尾のように見える。", "weaknesses": "幅が太く、塊の上辺から真上に立つ。"},
+            {"rank": 3, "noun": "背びれ", "owner": "魚", "basis": "全体との関係", "confidence": "低",
+             "evidence": "胴にあたる塊の上辺から立ち上がる帯。", "weaknesses": "縦に長すぎ、後ろへ倒れていない。"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P3",
+          "candidates": [
+            {"rank": 1, "noun": "尾びれ", "owner": "魚", "basis": "全体との関係", "confidence": "低",
+             "evidence": "左へ尖るP1の反対側（右端）に付く小さな三角形で、尾びれの位置にある。", "weaknesses": "小さく、下辺が水平で上側にしか広がらない。"},
+            {"rank": 2, "noun": "尾", "owner": "鳥", "basis": "全体との関係", "confidence": "低",
+             "evidence": "左へ尖る塊の後ろ側（右）へ突き出す小さな三角形。", "weaknesses": "小さく、塊の右辺の上寄りに付く。"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P4",
+          "candidates": [
+            {"rank": 1, "noun": "脚", "owner": "鳥など", "basis": "全体との関係", "confidence": "低",
+             "evidence": "大きな塊P1の下辺から下へ突き出す四角で、脚の位置にある。", "weaknesses": "1本だけで太く短い。"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-08",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [
+            {"rank": 1, "noun": "頭", "owner": "鳥・人", "basis": "全体との関係", "confidence": "低",
+             "evidence": "斜めの大きな塊P2の左上端に付き、左へ尖る角を持つ塊で、頭の位置にある。", "weaknesses": "P2に対して大きく張り出し、目や口にあたる手がかりがない。"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P2",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "図形の中心を斜めに貫く大きな平行四辺形で、特定の部分に見立てにくい。"
+        },
+        {
+          "id": "P3",
+          "candidates": [
+            {"rank": 1, "noun": "足", "owner": "鳥・人", "basis": "全体との関係", "confidence": "低",
+             "evidence": "斜めの塊P2の下端から左へ張り出す小さな三角形で、下辺が水平で地面に着く足先の位置にある。", "weaknesses": "三角形で足の形として単純すぎる。"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P4",
+          "candidates": [
+            {"rank": 1, "noun": "尾", "owner": "動物・鳥", "basis": "全体との関係", "confidence": "低",
+             "evidence": "P2の右上端から斜め右下へ垂れる細長い帯で、尾のように見える。", "weaknesses": "太さが均一で、根元が胴の最上部にある。"},
+            {"rank": 2, "noun": "翼", "owner": "鳥", "basis": "全体との関係", "confidence": "低",
+             "evidence": "胴の上端から後ろへ張り出す帯で、たたんだ翼のように見える。", "weaknesses": "小さく細い。"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-09",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [
+            {"rank": 1, "noun": "帆", "owner": "帆船", "basis": "両方", "confidence": "中",
+             "evidence": "上向きに尖る大きな三角形が、船体のような下すぼまりの台形P2の上に載る。", "weaknesses": "底辺がP2より左へはみ出し、マストにあたる部分がない。"},
+            {"rank": 2, "noun": "屋根", "owner": "家", "basis": "両方", "confidence": "低",
+             "evidence": "水平な底辺を持つ上向きの三角形が最上部に載る、屋根の典型的な形。", "weaknesses": "下のP2が下すぼまりで壁の形ではない。"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P2",
+          "candidates": [
+            {"rank": 1, "noun": "船体", "owner": "船", "basis": "両方", "confidence": "中",
+             "evidence": "上辺が長く下辺が短い下すぼまりの台形で、船体の典型的な形。", "weaknesses": "上の三角形P1に対して右へずれ、右端が大きく張り出す。"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P3",
+          "candidates": [
+            {"rank": 1, "noun": "幹", "owner": "木", "basis": "全体との関係", "confidence": "低",
+             "evidence": "上の幅広い塊（P1・P2）の下、図形の左右中央から下へ伸びる四角で、木の幹の位置にある。", "weaknesses": "上の塊が木の葉の形としては横に平たく、幹としては短い。"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-10",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "図形の4分の3を占める大きな台形で、特定の部分に見立てにくい。"
+        },
+        {
+          "id": "P2",
+          "candidates": [
+            {"rank": 1, "noun": "翼", "owner": "鳥", "basis": "両方", "confidence": "低",
+             "evidence": "大きな塊P1の右上から横へ張り出す三角形で、広げた翼のように見える。", "weaknesses": "片側だけで、下向きに尖る。"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P3",
+          "candidates": [
+            {"rank": 1, "noun": "頭", "owner": "鳥", "basis": "全体との関係", "confidence": "低",
+             "evidence": "図形の最上端の左に付く小さな塊で、頭の位置にある。", "weaknesses": "正方形で、P1の左上に横付けされている。"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-11",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "図形の過半を占める中心領域で、右端の切れ込みは二股の尾を思わせるが、領域全体としては特定の部分に見立てにくい。"
+        },
+        {
+          "id": "P2",
+          "candidates": [
+            {"rank": 1, "noun": "耳", "owner": "動物", "basis": "全体との関係", "confidence": "低",
+             "evidence": "左寄りの上端で鋭い角が上へ立ち上がる三角形で、立った耳のように見える。", "weaknesses": "縦の辺を持つ幅広い三角形で、耳としては大きく、対になる耳もない。"},
+            {"rank": 2, "noun": "翼", "owner": "鳥", "basis": "全体との関係", "confidence": "低",
+             "evidence": "右へ長く伸びる塊P1の左上に、斜めに立ち上がる三角形で、持ち上げた翼のように見える。", "weaknesses": "付け根がP1の端にあり、翼としては短い。"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P3",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "P2と左下の正方形P4の間を埋める小さな三角形で、単独でも位置からも特定の部分に見えない。"
+        },
+        {
+          "id": "P4",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "左下端の小さな正方形で、頭・足などのどれにも位置と形の決め手がない。"
+        },
+        {
+          "id": "P5",
+          "candidates": [
+            {"rank": 1, "noun": "胸びれ", "owner": "魚", "basis": "全体との関係", "confidence": "低",
+             "evidence": "横長の塊P1の下辺の前寄り（左）から下へ垂れる小さな三角形で、胸びれの位置と形に近い。", "weaknesses": "左隣の正方形P4と並んで下に出ており、脚のようにも見える。"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-12",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "図形の中心を占める大きな逆三角形で、下の頂点もP2・P4に隠れ、特定の部分に見立てにくい。"
+        },
+        {
+          "id": "P2",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "逆三角形P1の左下の斜辺に沿って隙間を埋める小さな三角形で、部分としての決め手がない。"
+        },
+        {
+          "id": "P3",
+          "candidates": [
+            {"rank": 1, "noun": "ふた", "owner": "鍋・壺などの容器", "basis": "両方", "confidence": "低",
+             "evidence": "上辺が短く下辺が長い台形が、幅の広いP1の上辺に載り、容器のふたのように見える。", "weaknesses": "下のP1が逆三角形で、容器の胴の形としては不自然。"},
+            {"rank": 2, "noun": "屋根", "owner": "家", "basis": "単独", "confidence": "低",
+             "evidence": "上が狭く下が広い台形で、寄棟屋根の形に近い。", "weaknesses": "下に壁にあたる領域がなく、逆三角形の上に載っている。"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P4",
+          "candidates": [
+            {"rank": 1, "noun": "脚", "owner": "鳥・家具など", "basis": "全体との関係", "confidence": "低",
+             "evidence": "上の塊P1の右下から下へ伸びる縦長の帯で、支える脚の位置にある。", "weaknesses": "1本だけで、上端が斜めに切れている。"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-13",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [
+            {"rank": 1, "noun": "頭", "owner": "鳥", "basis": "全体との関係", "confidence": "低",
+             "evidence": "最上部の台形が右へずれて右端の鋭い角が胴より突き出し、くちばしのある頭のように見える。", "weaknesses": "一般的な語で、台形の上辺が平らで頭の丸みがない。"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P2",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "図形の中心を占める大きな逆三角形で、下の頂点もP3・P4に隠れ、特定の部分に見立てにくい。"
+        },
+        {
+          "id": "P3",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "逆三角形P2の左下の斜辺に沿って隙間を埋める小さな三角形で、部分としての決め手がない。"
+        },
+        {
+          "id": "P4",
+          "candidates": [
+            {"rank": 1, "noun": "脚", "owner": "鳥", "basis": "全体との関係", "confidence": "低",
+             "evidence": "上の塊P2の右下から下へ伸びる縦長の帯で、体を支える脚の位置にある。", "weaknesses": "1本だけで太く、上端が斜めに切れている。"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-14",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "図形の8割を占める家形の大きな領域で、特定の部分に見立てにくい。"
+        },
+        {
+          "id": "P2",
+          "candidates": [
+            {"rank": 1, "noun": "柄", "owner": "スコップ・フライパンなどの道具", "basis": "両方", "confidence": "中",
+             "evidence": "大きな塊P1の右下角から斜め右下へまっすぐ伸びる細長い帯で、道具の柄のように見える。", "weaknesses": "先端が縦に切れ、根元が塊の中心ではなく角に付く。"},
+            {"rank": 2, "noun": "尾", "owner": "動物・鳥", "basis": "全体との関係", "confidence": "低",
+             "evidence": "大きな塊から斜め下へ垂れる細長い帯で、垂らした尾のように見える。", "weaknesses": "太さが均一で先が細くならない。"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-15",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [
+            {"rank": 1, "noun": "耳", "owner": "動物", "basis": "両方", "confidence": "低",
+             "evidence": "頭のような五角形P2の上辺の左寄りに載る、頂点が上を向いた三角形で、立った耳の形と位置に合う。", "weaknesses": "1つだけで、底辺の左端がP2の左上からはみ出している。"},
+            {"rank": 2, "noun": "とさか", "owner": "ニワトリ", "basis": "全体との関係", "confidence": "低",
+             "evidence": "頭のような塊の上に立つ尖った三角形で、とさかの位置にある。", "weaknesses": "とさかのギザギザがなく単純な三角形。"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P2",
+          "candidates": [
+            {"rank": 1, "noun": "頭", "owner": "動物", "basis": "全体との関係", "confidence": "低",
+             "evidence": "図形の上部を占め、左へ尖る先端を鼻先とし、上にP1を耳のように載せた塊で、横向きの頭に見える。", "weaknesses": "図形の過半を占める大きさで、一般的な語。"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P3",
+          "candidates": [
+            {"rank": 1, "noun": "首", "owner": "動物", "basis": "全体との関係", "confidence": "低",
+             "evidence": "頭のようなP2の右下から下へ続く細い四角で、首の位置にある。", "weaknesses": "短く、P2の右端に寄って付く。"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P4",
+          "candidates": [
+            {"rank": 1, "noun": "尾", "owner": "タツノオトシゴ・動物", "basis": "全体との関係", "confidence": "低",
+             "evidence": "縦に続くP3の下端から斜め左下へ曲がって伸びる細長い帯で、巻いた尾の先のように見える。", "weaknesses": "太さが均一で、曲がりが一度だけ。"},
+            {"rank": 2, "noun": "足", "owner": "動物・人", "basis": "全体との関係", "confidence": "低",
+             "evidence": "図形の最下端で前（左）へ斜めに張り出す帯で、踏み出した足先の位置にある。", "weaknesses": "足先としては細長く斜めすぎる。"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-16",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [
+            {"rank": 1, "noun": "帆", "owner": "帆船", "basis": "単独", "confidence": "低",
+             "evidence": "縦の右辺と水平な底辺を持ち、斜辺が左下へ流れる直角三角形で、マストに張った帆の形に合う。", "weaknesses": "下に船体にあたる領域がなく、図形の中心を占める。"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P2",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "上の正方形P3と大きな三角形P1の継ぎ目にある小さな三角形で、部分としての決め手がない。"
+        },
+        {
+          "id": "P3",
+          "candidates": [
+            {"rank": 1, "noun": "頭", "owner": "人・動物", "basis": "全体との関係", "confidence": "低",
+             "evidence": "図形の最上端に載る小さな正方形で、頭の位置にある。", "weaknesses": "一般的な語で、正方形の角ばった形。"},
+            {"rank": 2, "noun": "煙突", "owner": "家", "basis": "全体との関係", "confidence": "低",
+             "evidence": "左下へ下る斜面（P1の斜辺）の上端に垂直に立つ小さな四角で、屋根の上の煙突のように見える。", "weaknesses": "斜面の頂上に載っており、屋根の途中から立つ煙突の典型とずれる。"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P4",
+          "candidates": [
+            {"rank": 1, "noun": "脚", "owner": "人・動物", "basis": "両方", "confidence": "低",
+             "evidence": "大きな塊P1の右辺から斜め右下へ地面まで伸びる細長い帯で、踏み出した脚のように見える。", "weaknesses": "根元がP1の右辺の中ほどにあり、先端が水平に切れている。"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P5",
+          "candidates": [
+            {"rank": 1, "noun": "足", "owner": "人・動物", "basis": "全体との関係", "confidence": "低",
+             "evidence": "大きな塊P1の下辺から下へ尖って出る小さな三角形で、足先の位置にある。", "weaknesses": "三角形で足の形として単純すぎ、P4と離れている。"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-17",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [
+            {"rank": 1, "noun": "船体", "owner": "船", "basis": "両方", "confidence": "低",
+             "evidence": "平らな下辺と上辺を持つ横長の形で、左端が尖って舳先のように突き出し、船体の輪郭に近い。", "weaknesses": "舳先が上下対称に尖り、右上も斜めに切れていて、背が高い。"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P2",
+          "candidates": [
+            {"rank": 1, "noun": "煙突", "owner": "船", "basis": "両方", "confidence": "低",
+             "evidence": "船体のようなP1の上辺から縦に立ち、上端が斜めに切れた帯で、船の煙突の形と位置に合う。", "weaknesses": "P1に比べて背が高い。"},
+            {"rank": 2, "noun": "耳", "owner": "ウサギ", "basis": "全体との関係", "confidence": "低",
+             "evidence": "大きな塊の上辺から縦に長く立ち上がり、先が尖る帯で、立った耳のように見える。", "weaknesses": "1本だけで、塊の右寄りに立つ。"},
+            {"rank": 3, "noun": "帆", "owner": "帆船", "basis": "全体との関係", "confidence": "低",
+             "evidence": "船体のようなP1の上に、縦の辺を持って立ち上がる。", "weaknesses": "三角形ではなく四角形で、帆としては幅が狭い。"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-18",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "図形の過半を占める大きな直角三角形で、特定の部分に見立てにくい。"
+        },
+        {
+          "id": "P2",
+          "candidates": [
+            {"rank": 1, "noun": "首", "owner": "鳥・人", "basis": "両方", "confidence": "中",
+             "evidence": "最上部の正方形P3と大きな塊P1の間を斜めにつなぐ細長い平行四辺形で、首の形と位置に合う。", "weaknesses": "首としては太く短い。"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P3",
+          "candidates": [
+            {"rank": 1, "noun": "頭", "owner": "鳥・人", "basis": "全体との関係", "confidence": "低",
+             "evidence": "図形の最上端にあり、首のようなP2の先に載る小さな正方形で、頭の位置にある。", "weaknesses": "一般的な語で、正方形の角ばった形。"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P4",
+          "candidates": [
+            {"rank": 1, "noun": "脚", "owner": "人・動物", "basis": "両方", "confidence": "低",
+             "evidence": "大きな塊P1の右辺から斜め右下へ伸びる細長い帯で、踏み出した脚のように見える。", "weaknesses": "根元がP1の右辺の上寄りにあり、先端が水平に切れている。"},
+            {"rank": 2, "noun": "尾", "owner": "鳥", "basis": "全体との関係", "confidence": "低",
+             "evidence": "胴の後ろ側から斜め下へ伸びる帯で、尾のように見える。", "weaknesses": "太さが均一で、頭のようなP3と同じ右側にある。"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-19",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [
+            {"rank": 1, "noun": "腕", "owner": "人", "basis": "全体との関係", "confidence": "低",
+             "evidence": "斜めの大きな塊P2の上部から左へ水平に突き出す帯で、横に伸ばした腕のように見える。", "weaknesses": "幅が太く、先端が縦にまっすぐ切れている。"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P2",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "図形の過半を占める斜めの大きな台形で、特定の部分に見立てにくい。"
+        },
+        {
+          "id": "P3",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "P2の下端の角を埋める小さな三角形で、部分としての決め手がない。"
+        },
+        {
+          "id": "P4",
+          "candidates": [
+            {"rank": 1, "noun": "脚", "owner": "人・動物", "basis": "両方", "confidence": "低",
+             "evidence": "図形の下端から斜め右下へ伸びる細長い平行四辺形で、踏み出した脚のように見える。", "weaknesses": "1本だけで、先端が縦に切れている。"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-20",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "図形の中心を占める大きな三角形で、頂点にP2・P3が付いて山形が見えず、特定の部分に見立てにくい。"
+        },
+        {
+          "id": "P2",
+          "candidates": [
+            {"rank": 1, "noun": "翼", "owner": "鳥", "basis": "両方", "confidence": "低",
+             "evidence": "中央の塊P1の上端から右へ張り出す下向きの三角形で、広げた翼のように見える。", "weaknesses": "片側だけで、下向きに尖る。"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P3",
+          "candidates": [
+            {"rank": 1, "noun": "翼", "owner": "鳥", "basis": "全体との関係", "confidence": "低",
+             "evidence": "右のP2と対になるように中央の塊の上端から左上へ立ち上がる三角形で、持ち上げた翼のように見える。", "weaknesses": "P2と向きも形もそろっておらず、縦の辺を外側に持つ。"},
+            {"rank": 2, "noun": "帆", "owner": "帆船", "basis": "単独", "confidence": "低",
+             "evidence": "縦の左辺から右へ尖る三角形で、マストに張った帆の形に近い。", "weaknesses": "下に船体がなく、図形の上端に付いている。"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P4",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "中央の塊P1の下に付く小さな正方形で、下のP5とのつなぎ目にあたり、部分としての決め手がない。"
+        },
+        {
+          "id": "P5",
+          "candidates": [
+            {"rank": 1, "noun": "尾", "owner": "流れ星・彗星", "basis": "全体との関係", "confidence": "低",
+             "evidence": "上部の尖った塊から離れる向き（左下）へ斜めに伸びる細長い帯で、流れ星の尾のように見える。", "weaknesses": "細長いのは1本だけで、尾らしく先細りしない。"},
+            {"rank": 2, "noun": "脚", "owner": "人・動物", "basis": "全体との関係", "confidence": "低",
+             "evidence": "図形の下端から斜め左下へ伸びる帯で、踏み出した脚のように見える。", "weaknesses": "1本だけで、先端が縦に切れている。"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-21",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "図形の過半を占める斜めの大きな台形で、特定の部分に見立てにくい。"
+        },
+        {
+          "id": "P2",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "右上の正方形P3とP1の間にある下向きの三角形で、部分としての決め手がない。"
+        },
+        {
+          "id": "P3",
+          "candidates": [
+            {"rank": 1, "noun": "頭", "owner": "動物・人", "basis": "全体との関係", "confidence": "低",
+             "evidence": "図形の右上端に載る小さな正方形で、頭の位置にある。", "weaknesses": "一般的な語で、角ばった形のほか手がかりがない。"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P4",
+          "candidates": [
+            {"rank": 1, "noun": "脚", "owner": "動物", "basis": "両方", "confidence": "低",
+             "evidence": "大きな塊P1の右辺上部から斜め右下へ伸びる細長い平行四辺形で、脚のように見える。", "weaknesses": "1本だけで、P1と同じ向きに傾き体の続きにも見える。"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-22",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "最上部を占める大きな逆三角形で、特定の部分に見立てにくい。"
+        },
+        {
+          "id": "P2",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "P1の下から左へ突き出す横長の台形で、腕や枝などと見る決め手がない。"
+        },
+        {
+          "id": "P3",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "P1の下で右へ張り出す横長の台形で、部分としての決め手がない。"
+        },
+        {
+          "id": "P4",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "最下端で斜め左下へ伸びる平行四辺形だが、つながる胴にあたる部分がなく、脚・尾などの決め手がない。"
+        }
+      ]
+    },
+    {
+      "item": "item-23",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [
+            {"rank": 1, "noun": "帆", "owner": "帆船", "basis": "両方", "confidence": "低",
+             "evidence": "縦の左辺から右へ尖る大きな三角形が、縦長のP2の上部に横付けされ、マストに張った帆のように見える。", "weaknesses": "下に船体にあたる領域がなく、P2はマストとしては太い。"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P2",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "左側の縦長の台形で、P1を帆とすればマストの位置だが太すぎ、特定の部分に見立てにくい。"
+        },
+        {
+          "id": "P3",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "縦長のP2の下部の右に付く小さな正方形で、部分としての決め手がない。"
+        }
+      ]
+    },
+    {
+      "item": "item-24",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "図形の9割近くを占める大きな八角形で、特定の部分に見立てにくい。"
+        },
+        {
+          "id": "P2",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "大きな塊の右下角から下へ出る小さな三角形で、右のP3と組んで突起を作るが単独では部分に見立てにくい。"
+        },
+        {
+          "id": "P3",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "大きな塊の右下から右へ出る小さな三角形で、下のP2と組んで突起を作るが単独では部分に見立てにくい。"
+        }
+      ]
+    },
+    {
+      "item": "item-25",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "図形の中心を占める大きな逆三角形で、特定の部分に見立てにくい。"
+        },
+        {
+          "id": "P2",
+          "candidates": [
+            {"rank": 1, "noun": "耳", "owner": "キツネ・猫", "basis": "全体との関係", "confidence": "低",
+             "evidence": "逆三角形P1の上辺に立つ台形で、左上のP3と並んで逆三角形の顔の上の耳のように見える。", "weaknesses": "上端が平らで尖っていない。"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P3",
+          "candidates": [
+            {"rank": 1, "noun": "耳", "owner": "キツネ・猫", "basis": "全体との関係", "confidence": "低",
+             "evidence": "逆三角形P1の上辺の左端から斜め左上へ伸びる帯で、P2と対になって外へ傾いた耳のように見える。", "weaknesses": "細長い平行四辺形で、耳としては傾きが大きい。"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P4",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "P1の右下に付く上向きの三角形で、P1の右角と二股を作るが単独では部分に見立てにくい。"
+        },
+        {
+          "id": "P5",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "最下端の小さな三角形で、部分としての決め手がない。"
+        }
+      ]
+    },
+    {
+      "item": "item-26",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "図形の中心を占める大きな平行四辺形で、特定の部分に見立てにくい。"
+        },
+        {
+          "id": "P2",
+          "candidates": [
+            {"rank": 1, "noun": "翼", "owner": "鳥", "basis": "両方", "confidence": "低",
+             "evidence": "中央の塊P1の左から横へ張り出す下向きの三角形で、広げた翼のように見える。", "weaknesses": "片側だけで、下向きに尖る。"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P3",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "左上の正方形P4と中央の塊P1をつなぐ三角形で、部分としての決め手がない。"
+        },
+        {
+          "id": "P4",
+          "candidates": [
+            {"rank": 1, "noun": "頭", "owner": "鳥・動物", "basis": "全体との関係", "confidence": "低",
+             "evidence": "図形の左上端に付く小さな正方形で、頭の位置にある。", "weaknesses": "一般的な語で、角ばった形のほか手がかりがない。"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P5",
+          "candidates": [
+            {"rank": 1, "noun": "脚", "owner": "鳥・動物", "basis": "両方", "confidence": "低",
+             "evidence": "中央の塊P1の下辺から斜め右下へ伸びる細長い帯で、脚のように見える。", "weaknesses": "1本だけで、先端に足先の形がない。"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-27",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [
+            {"rank": 1, "noun": "尾びれ", "owner": "魚", "basis": "両方", "confidence": "低",
+             "evidence": "左端で縦の辺を外側に向け、頂点を右の大きな三角形P2に向けた三角形で、尾びれの形と位置に合う。", "weaknesses": "上の角が鋭く立ち上がって上縁がギザギザになり、魚の輪郭としてまとまりにくい。"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P2",
+          "candidates": [
+            {"rank": 1, "noun": "屋根", "owner": "家", "basis": "単独", "confidence": "低",
+             "evidence": "水平な底辺と上向きの頂点を持つ大きな二等辺三角形で、屋根の典型的な形。", "weaknesses": "図形の下部に位置し、下に壁にあたる領域がない。"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P3",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "大きな三角形P2の右斜辺の下を埋める小さな三角形で、部分としての決め手がない。"
+        },
+        {
+          "id": "P4",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "斜め右上へせり上がる中くらいの三角形で、単独でも位置からも特定の部分に見えない。"
+        },
+        {
+          "id": "P5",
+          "candidates": [
+            {"rank": 1, "noun": "くちばし", "owner": "鳥", "basis": "全体との関係", "confidence": "低",
+             "evidence": "斜めにせり上がるP4の右上端から右へ鋭く突き出す小さな三角形で、伸ばした首の先のくちばしのように見える。", "weaknesses": "P4が首としては幅広く、頭にあたる塊がない。"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-28",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "図形の中心を占める大きな逆三角形で、特定の部分に見立てにくい。"
+        },
+        {
+          "id": "P2",
+          "candidates": [
+            {"rank": 1, "noun": "耳", "owner": "猫などの動物", "basis": "全体との関係", "confidence": "低",
+             "evidence": "逆三角形P1の上辺の左寄りに立つ小さな四角で、右のP3と対になって顔の上の耳のように見える。", "weaknesses": "正方形で尖っておらず、耳の形ではない。"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P3",
+          "candidates": [
+            {"rank": 1, "noun": "耳", "owner": "猫などの動物", "basis": "両方", "confidence": "低",
+             "evidence": "逆三角形P1の上辺の右端に立ち、角が上へ尖る小さな三角形で、立った耳の形と位置に合う。", "weaknesses": "左のP2と形がそろっていない。"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P4",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "P1の右下に付く上向きの三角形で、部分としての決め手がない。"
+        },
+        {
+          "id": "P5",
+          "candidates": [
+            {"rank": 1, "noun": "尾", "owner": "動物", "basis": "全体との関係", "confidence": "低",
+             "evidence": "図形の下端から斜め右下へ伸びる細長い帯で、垂らした尾のように見える。", "weaknesses": "太さが均一で先が細くならず、先端が縦に切れている。"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-29",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "家形の大きな中心領域で、図形の大半を占め特定の部分に見立てにくい。"
+        },
+        {
+          "id": "P2",
+          "candidates": [
+            {"rank": 1, "noun": "頭", "owner": "犬・猫などの動物", "basis": "全体との関係", "confidence": "低",
+             "evidence": "大きな塊P1の右上から横へ突き出す小さな四角で、左上の尾のようなP4と反対側にあり、横向きの動物の頭の位置にある。", "weaknesses": "一般的な語で、正方形で耳や鼻の手がかりがない。"},
+            {"rank": 2, "noun": "鼻づら", "owner": "犬などの動物", "basis": "全体との関係", "confidence": "低",
+             "evidence": "大きな塊の右上から水平に突き出す四角で、鼻先の位置にある。", "weaknesses": "角ばった正方形で先細りがない。"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P3",
+          "candidates": [
+            {"rank": 1, "noun": "脚", "owner": "動物", "basis": "全体との関係", "confidence": "低",
+             "evidence": "大きな塊P1の下辺の左半分から下へ出る四角で、体を支える脚の位置にある。", "weaknesses": "1本だけで太く短い。"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P4",
+          "candidates": [
+            {"rank": 1, "noun": "尾", "owner": "猫・犬などの動物", "basis": "両方", "confidence": "中",
+             "evidence": "大きな塊P1の左辺上部から斜め左上へ立ち上がる細長い帯で、持ち上げた尾の形と位置に合う。", "weaknesses": "根元が細くならず、太さが均一。"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-30",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "図形の4分の3を占める大きな台形で、特定の部分に見立てにくい。"
+        },
+        {
+          "id": "P2",
+          "candidates": [
+            {"rank": 1, "noun": "上あご", "owner": "ワニ・オオカミなどの動物", "basis": "全体との関係", "confidence": "低",
+             "evidence": "大きな塊P1の右上から右へ張り出す三角形で、下の正方形P3との間にV字の隙間があり、開いた口の上あごのように見える。", "weaknesses": "下向きに尖る三角形で、あごとしては短い。"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P3",
+          "candidates": [
+            {"rank": 1, "noun": "下あご", "owner": "ワニ・オオカミなどの動物", "basis": "全体との関係", "confidence": "低",
+             "evidence": "P1の右辺から右へ突き出す四角で、上のP2との間にV字の隙間があり、開いた口の下あごのように見える。", "weaknesses": "正方形で厚く、あごとしては短い。"}
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    }
+  ]
+}

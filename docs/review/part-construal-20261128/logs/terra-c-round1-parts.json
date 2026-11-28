@@ -1,0 +1,1460 @@
+{
+  "observer": "SunnyBell",
+  "model": "gpt-6.1-terra",
+  "effort": "ultra",
+  "viewedImages": true,
+  "items": [
+    {
+      "item": "item-01",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "ひれ",
+              "owner": "魚",
+              "basis": "両方",
+              "confidence": "中",
+              "evidence": "右端の広い付け根から右へ尖る。",
+              "weaknesses": "ひれの曲線や筋はない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P2",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "広い中心領域で、具体的な部分の形を特定しにくい。"
+        },
+        {
+          "id": "P3",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "輪郭と接続だけでは、具体的な部分を十分に絞り込めない。"
+        },
+        {
+          "id": "P4",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "尾羽",
+              "owner": "鳥",
+              "basis": "両方",
+              "confidence": "低",
+              "evidence": "左端から斜め上へ細長く伸びる。",
+              "weaknesses": "羽先が角張り羽毛は見えない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-02",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "帆",
+              "owner": "帆船",
+              "basis": "単独",
+              "confidence": "中",
+              "evidence": "垂直な辺と水平な底辺を持つ三角形である。",
+              "weaknesses": "帆柱や曲面は見えない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P2",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "輪郭と接続だけでは、具体的な部分を十分に絞り込めない。"
+        },
+        {
+          "id": "P3",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "輪郭と接続だけでは、具体的な部分を十分に絞り込めない。"
+        },
+        {
+          "id": "P4",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "脚",
+              "owner": "動物",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "中央から左下へ細長く伸びる。",
+              "weaknesses": "関節や足先は見えない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-03",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "脚",
+              "owner": "動物",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "下端が二股に分かれ下へ伸びる。",
+              "weaknesses": "二股が一領域で関節や足先は明確でない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P2",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "くちばし",
+              "owner": "鳥",
+              "basis": "両方",
+              "confidence": "低",
+              "evidence": "上部の接点から右へ三角形が伸びる。",
+              "weaknesses": "上下の分かれ目はない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P3",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "輪郭と接続だけでは、具体的な部分を十分に絞り込めない。"
+        },
+        {
+          "id": "P4",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "輪郭と接続だけでは、具体的な部分を十分に絞り込めない。"
+        },
+        {
+          "id": "P5",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "くちばし",
+              "owner": "鳥",
+              "basis": "両方",
+              "confidence": "低",
+              "evidence": "上部の接点から左へ小三角形が尖る。",
+              "weaknesses": "幅広く上下の分かれ目はない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-04",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "広い中心領域で、具体的な部分の形を特定しにくい。"
+        },
+        {
+          "id": "P2",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "屋根",
+              "owner": "建物",
+              "basis": "単独",
+              "confidence": "中",
+              "evidence": "平らな頂辺から左右に斜めに広がる。",
+              "weaknesses": "屋根材などの細部はない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P3",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "柱",
+              "owner": "建物",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "水平に広がる領域の下に垂直に付く。",
+              "weaknesses": "高さと幅が同じで柱としては短い。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-05",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "広い中心領域で、具体的な部分の形を特定しにくい。"
+        },
+        {
+          "id": "P2",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "帆",
+              "owner": "帆船",
+              "basis": "単独",
+              "confidence": "中",
+              "evidence": "水平な底辺と垂直な辺のある三角形である。",
+              "weaknesses": "帆柱や布の曲がりは見えない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P3",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "輪郭と接続だけでは、具体的な部分を十分に絞り込めない。"
+        },
+        {
+          "id": "P4",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "尾羽",
+              "owner": "鳥",
+              "basis": "両方",
+              "confidence": "低",
+              "evidence": "右下端に細長く斜めに伸びる。",
+              "weaknesses": "先が平らで羽毛の細部はない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-06",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "広い中心領域で、具体的な部分の形を特定しにくい。"
+        },
+        {
+          "id": "P2",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "脚",
+              "owner": "動物",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "中央の右下から下へ尖って伸びる。",
+              "weaknesses": "足先や関節が分かれない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P3",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "翼",
+              "owner": "鳥",
+              "basis": "両方",
+              "confidence": "低",
+              "evidence": "右上側に広がり下へ尖る三角形である。",
+              "weaknesses": "羽毛や湾曲は見えない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P4",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "輪郭と接続だけでは、具体的な部分を十分に絞り込めない。"
+        },
+        {
+          "id": "P5",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "尾羽",
+              "owner": "鳥",
+              "basis": "両方",
+              "confidence": "低",
+              "evidence": "左上へ斜めに細長く伸びる。",
+              "weaknesses": "両端が平らで羽毛は見えない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-07",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "刃",
+              "owner": "刃物",
+              "basis": "単独",
+              "confidence": "低",
+              "evidence": "斜めに長く伸びて一端が尖る。",
+              "weaknesses": "刃の縁や柄は示されない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P2",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "輪郭と接続だけでは、具体的な部分を十分に絞り込めない。"
+        },
+        {
+          "id": "P3",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "足",
+              "owner": "動物",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "右下端に位置する四角い領域である。",
+              "weaknesses": "足首やつま先は区別できない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P4",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "脚",
+              "owner": "動物",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "中央から左下へ斜めに細長く伸びる。",
+              "weaknesses": "関節や足先が見えない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-08",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "広い中心領域で、具体的な部分の形を特定しにくい。"
+        },
+        {
+          "id": "P2",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "翼",
+              "owner": "鳥",
+              "basis": "両方",
+              "confidence": "低",
+              "evidence": "右側へ張り出し先へ斜めに細くなる。",
+              "weaknesses": "先が平らで羽毛は見えない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-09",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "広い中心領域で、具体的な部分の形を特定しにくい。"
+        },
+        {
+          "id": "P2",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "輪郭と接続だけでは、具体的な部分を十分に絞り込めない。"
+        },
+        {
+          "id": "P3",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "足",
+              "owner": "動物",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "中央の領域の下に四角く垂れる。",
+              "weaknesses": "足首や指は区別できない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-10",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "スカート",
+              "owner": "人",
+              "basis": "単独",
+              "confidence": "中",
+              "evidence": "上の一点から左右の裾へ三角形に広がる。",
+              "weaknesses": "布のひだや腰回りは見えない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P2",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "輪郭と接続だけでは、具体的な部分を十分に絞り込めない。"
+        },
+        {
+          "id": "P3",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "輪郭と接続だけでは、具体的な部分を十分に絞り込めない。"
+        }
+      ]
+    },
+    {
+      "item": "item-11",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "広い中心領域で、具体的な部分の形を特定しにくい。"
+        },
+        {
+          "id": "P2",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "足",
+              "owner": "動物",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "中央領域の下端から四角く垂れる。",
+              "weaknesses": "指や足首は見えない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P3",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "輪郭と接続だけでは、具体的な部分を十分に絞り込めない。"
+        },
+        {
+          "id": "P4",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "耳",
+              "owner": "ウサギ",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "上端から斜め右上へ細長く伸びる。",
+              "weaknesses": "先端は尖らず平らである。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-12",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "広い中心領域で、具体的な部分の形を特定しにくい。"
+        },
+        {
+          "id": "P2",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "柄",
+              "owner": "道具",
+              "basis": "両方",
+              "confidence": "中",
+              "evidence": "大きな領域の左下に付き細長く斜めに伸びる。",
+              "weaknesses": "握りの丸みや細部はない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-13",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "広い中心領域で、具体的な部分の形を特定しにくい。"
+        },
+        {
+          "id": "P2",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "輪郭と接続だけでは、具体的な部分を十分に絞り込めない。"
+        },
+        {
+          "id": "P3",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "刃",
+              "owner": "刃物",
+              "basis": "両方",
+              "confidence": "低",
+              "evidence": "右上へ細長く伸び一端が尖る。",
+              "weaknesses": "刃の縁や柄との明確な区別はない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P4",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "脚",
+              "owner": "動物",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "下側に付き下へ尖って伸びる。",
+              "weaknesses": "関節や足先は見えない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P5",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "ひれ",
+              "owner": "魚",
+              "basis": "両方",
+              "confidence": "低",
+              "evidence": "左側に付き外へ尖る小三角形である。",
+              "weaknesses": "ひれの曲線や筋はない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-14",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "船底",
+              "owner": "船",
+              "basis": "単独",
+              "confidence": "中",
+              "evidence": "水平に長い上辺から斜めに狭まり下辺が短い。",
+              "weaknesses": "船首や曲線は明確でない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P2",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "ひれ",
+              "owner": "魚",
+              "basis": "両方",
+              "confidence": "低",
+              "evidence": "右下側から下へ三角形に尖る。",
+              "weaknesses": "ひれの筋や曲線はない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P3",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "煙突",
+              "owner": "建物",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "右上端で水平な領域から四角く立ち上がる。",
+              "weaknesses": "高さが幅と同じで短い。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-15",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "歯",
+              "owner": "のこぎり",
+              "basis": "両方",
+              "confidence": "低",
+              "evidence": "上部の横長の縁から下へ三角形に尖る。",
+              "weaknesses": "単独の歯で連続する歯列はない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P2",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "広い中心領域で、具体的な部分の形を特定しにくい。"
+        },
+        {
+          "id": "P3",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "輪郭と接続だけでは、具体的な部分を十分に絞り込めない。"
+        },
+        {
+          "id": "P4",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "輪郭と接続だけでは、具体的な部分を十分に絞り込めない。"
+        },
+        {
+          "id": "P5",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "輪郭と接続だけでは、具体的な部分を十分に絞り込めない。"
+        }
+      ]
+    },
+    {
+      "item": "item-16",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "広い中心領域で、具体的な部分の形を特定しにくい。"
+        },
+        {
+          "id": "P2",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "足",
+              "owner": "動物",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "中央領域から下へ四角く垂れる。",
+              "weaknesses": "指や足首は見えない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P3",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "輪郭と接続だけでは、具体的な部分を十分に絞り込めない。"
+        },
+        {
+          "id": "P4",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "羽",
+              "owner": "鳥",
+              "basis": "両方",
+              "confidence": "低",
+              "evidence": "上端から右上へ斜めに細長く伸びる。",
+              "weaknesses": "先端は平らで羽毛の細部はない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-17",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "広い中心領域で、具体的な部分の形を特定しにくい。"
+        },
+        {
+          "id": "P2",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "輪郭と接続だけでは、具体的な部分を十分に絞り込めない。"
+        },
+        {
+          "id": "P3",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "ひれ",
+              "owner": "魚",
+              "basis": "両方",
+              "confidence": "低",
+              "evidence": "右下側から右へ三角形に張り出す。",
+              "weaknesses": "ひれの筋や曲線は見えない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P4",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "脚",
+              "owner": "動物",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "中央の左下に付き下へ尖って伸びる。",
+              "weaknesses": "足先や関節は見えない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P5",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "脚",
+              "owner": "動物",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "左下へ細長く伸び下端に達する。",
+              "weaknesses": "関節や足先は区別できない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-18",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "煙突",
+              "owner": "建物",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "上端に細長く立ち上がる。",
+              "weaknesses": "下端が斜めに尖り不規則である。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P2",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "広い中心領域で、具体的な部分の形を特定しにくい。"
+        },
+        {
+          "id": "P3",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "輪郭と接続だけでは、具体的な部分を十分に絞り込めない。"
+        },
+        {
+          "id": "P4",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "脚",
+              "owner": "動物",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "左下へ細長く斜めに伸びる。",
+              "weaknesses": "関節と足先は見えない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-19",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "広い中心領域で、具体的な部分の形を特定しにくい。"
+        },
+        {
+          "id": "P2",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "輪郭と接続だけでは、具体的な部分を十分に絞り込めない。"
+        },
+        {
+          "id": "P3",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "輪郭と接続だけでは、具体的な部分を十分に絞り込めない。"
+        },
+        {
+          "id": "P4",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "輪郭と接続だけでは、具体的な部分を十分に絞り込めない。"
+        }
+      ]
+    },
+    {
+      "item": "item-20",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "広い中心領域で、具体的な部分の形を特定しにくい。"
+        },
+        {
+          "id": "P2",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "ひれ",
+              "owner": "魚",
+              "basis": "両方",
+              "confidence": "低",
+              "evidence": "左下側から左へ三角形に尖る。",
+              "weaknesses": "ひれの筋や曲線はない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P3",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "ひれ",
+              "owner": "魚",
+              "basis": "両方",
+              "confidence": "低",
+              "evidence": "下端から下へ小さく尖る。",
+              "weaknesses": "直線的な三角形で筋はない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-21",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "帆",
+              "owner": "帆船",
+              "basis": "単独",
+              "confidence": "中",
+              "evidence": "垂直な辺と水平な底辺を持つ三角形である。",
+              "weaknesses": "帆柱や布の曲がりは見えない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P2",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "輪郭と接続だけでは、具体的な部分を十分に絞り込めない。"
+        },
+        {
+          "id": "P3",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "輪郭と接続だけでは、具体的な部分を十分に絞り込めない。"
+        },
+        {
+          "id": "P4",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "脚",
+              "owner": "動物",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "中央から左下へ斜めに細長く伸びる。",
+              "weaknesses": "関節や足先は見えない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P5",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "ひれ",
+              "owner": "魚",
+              "basis": "両方",
+              "confidence": "低",
+              "evidence": "左側に付き左へ三角形に尖る。",
+              "weaknesses": "ひれの筋や曲線はない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-22",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "広い中心領域で、具体的な部分の形を特定しにくい。"
+        },
+        {
+          "id": "P2",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "ひれ",
+              "owner": "魚",
+              "basis": "両方",
+              "confidence": "低",
+              "evidence": "右側に付き右へ鋭く尖る。",
+              "weaknesses": "ひれの筋や曲線はない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P3",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "脚",
+              "owner": "動物",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "下端から右下へ細長く伸びる。",
+              "weaknesses": "足先や関節ははっきりしない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P4",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "煙突",
+              "owner": "建物",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "左上端で下の領域から四角く立ち上がる。",
+              "weaknesses": "幅と高さが同じで短い。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-23",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "ひれ",
+              "owner": "魚",
+              "basis": "両方",
+              "confidence": "低",
+              "evidence": "右側に付き右端へ大きな三角形として尖る。",
+              "weaknesses": "ひれとしては幅が広く筋もない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P2",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "輪郭と接続だけでは、具体的な部分を十分に絞り込めない。"
+        },
+        {
+          "id": "P3",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "輪郭と接続だけでは、具体的な部分を十分に絞り込めない。"
+        }
+      ]
+    },
+    {
+      "item": "item-24",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "広い中心領域で、具体的な部分の形を特定しにくい。"
+        },
+        {
+          "id": "P2",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "翼",
+              "owner": "鳥",
+              "basis": "両方",
+              "confidence": "低",
+              "evidence": "右側へ横長に張り出し先へ斜めに細くなる。",
+              "weaknesses": "先は平らで羽毛は見えない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P3",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "ひれ",
+              "owner": "魚",
+              "basis": "両方",
+              "confidence": "低",
+              "evidence": "下端から下へ三角形に尖る。",
+              "weaknesses": "ひれの曲線や筋はない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P4",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "輪郭と接続だけでは、具体的な部分を十分に絞り込めない。"
+        }
+      ]
+    },
+    {
+      "item": "item-25",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "尾びれ",
+              "owner": "魚",
+              "basis": "両方",
+              "confidence": "低",
+              "evidence": "右端に広がり左の接点から上下に開く。",
+              "weaknesses": "外縁が直線で尾びれの切れ込みはない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P2",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "煙突",
+              "owner": "建物",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "上端から垂直に伸びる。",
+              "weaknesses": "下端が尖り不規則である。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P3",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "輪郭と接続だけでは、具体的な部分を十分に絞り込めない。"
+        },
+        {
+          "id": "P4",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "尾羽",
+              "owner": "鳥",
+              "basis": "両方",
+              "confidence": "低",
+              "evidence": "左端で斜め上に細長く伸びる。",
+              "weaknesses": "先端が平らで羽毛は見えない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-26",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "輪郭と接続だけでは、具体的な部分を十分に絞り込めない。"
+        },
+        {
+          "id": "P2",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "広い中心領域で、具体的な部分の形を特定しにくい。"
+        },
+        {
+          "id": "P3",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "ひれ",
+              "owner": "魚",
+              "basis": "両方",
+              "confidence": "低",
+              "evidence": "左上端に小さく立ち上がる三角形である。",
+              "weaknesses": "ひれの曲線や筋はない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P4",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "脚",
+              "owner": "動物",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "右下から左下へ細長く伸びる。",
+              "weaknesses": "足先や関節は区別できない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-27",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "歯",
+              "owner": "のこぎり",
+              "basis": "両方",
+              "confidence": "低",
+              "evidence": "上端の幅広い辺から下へ三角形に尖る。",
+              "weaknesses": "単独の歯で歯列はない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P2",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "広い中心領域で、具体的な部分の形を特定しにくい。"
+        },
+        {
+          "id": "P3",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "輪郭と接続だけでは、具体的な部分を十分に絞り込めない。"
+        },
+        {
+          "id": "P4",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "足",
+              "owner": "動物",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "右下端に四角く付く。",
+              "weaknesses": "指や足首は見えない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P5",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "脚",
+              "owner": "動物",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "左側から左下へ細長く伸びる。",
+              "weaknesses": "関節や足先は見えない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-28",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "広い中心領域で、具体的な部分の形を特定しにくい。"
+        },
+        {
+          "id": "P2",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "羽",
+              "owner": "鳥",
+              "basis": "両方",
+              "confidence": "低",
+              "evidence": "右上へ細長く斜めに伸びる。",
+              "weaknesses": "先端が平らで羽毛の細部はない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P3",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "輪郭と接続だけでは、具体的な部分を十分に絞り込めない。"
+        }
+      ]
+    },
+    {
+      "item": "item-29",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "広い中心領域で、具体的な部分の形を特定しにくい。"
+        },
+        {
+          "id": "P2",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "ひれ",
+              "owner": "魚",
+              "basis": "両方",
+              "confidence": "低",
+              "evidence": "上端から上へ三角形に尖る。",
+              "weaknesses": "ひれの曲線や筋はない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P3",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "輪郭と接続だけでは、具体的な部分を十分に絞り込めない。"
+        },
+        {
+          "id": "P4",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "煙突",
+              "owner": "建物",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "右上端から四角く立ち上がる。",
+              "weaknesses": "幅と高さが同じで短い。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P5",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "脚",
+              "owner": "動物",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "左側から左下へ細長く伸びる。",
+              "weaknesses": "関節や足先は見えない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-30",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "輪郭と接続だけでは、具体的な部分を十分に絞り込めない。"
+        },
+        {
+          "id": "P2",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "広い中心領域で、具体的な部分の形を特定しにくい。"
+        },
+        {
+          "id": "P3",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "輪郭と接続だけでは、具体的な部分を十分に絞り込めない。"
+        },
+        {
+          "id": "P4",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "輪郭と接続だけでは、具体的な部分を十分に絞り込めない。"
+        }
+      ]
+    }
+  ]
+}

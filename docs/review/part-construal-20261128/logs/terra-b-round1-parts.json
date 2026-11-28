@@ -1,0 +1,1680 @@
+{
+  "observer": "CherryHopper",
+  "model": "GPT-6（詳細ID不明）",
+  "effort": "不明",
+  "viewedImages": true,
+  "items": [
+    {
+      "item": "item-01",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "足",
+              "owner": "人",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "右に張り出し、底辺が水平である。",
+              "weaknesses": "足指や関節はない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P2",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "中央に広く接する形で、具体的な物の一部分としては決め手がない。"
+        },
+        {
+          "id": "P3",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "形と位置から具体的な部分を支持する決め手がない。"
+        },
+        {
+          "id": "P4",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "耳",
+              "owner": "ウサギ",
+              "basis": "両方",
+              "confidence": "低",
+              "evidence": "上部から左上へ細長く伸び先が尖る。",
+              "weaknesses": "先端の片側が縦に切れている。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-02",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "船底",
+              "owner": "船",
+              "basis": "両方",
+              "confidence": "中",
+              "evidence": "幅広い水平辺の下から中央へ先細りになる。",
+              "weaknesses": "底が尖りすぎている。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P2",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "屋根",
+              "owner": "建物",
+              "basis": "両方",
+              "confidence": "中",
+              "evidence": "上辺が短く左右の斜辺が下方に開く。",
+              "weaknesses": "上の平坦な部分が広い。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P3",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "煙突",
+              "owner": "建物",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "横長の領域の上から四角く垂直に立つ。",
+              "weaknesses": "高さと幅が同程度で短い。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-03",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "中央に広く接する形で、具体的な物の一部分としては決め手がない。"
+        },
+        {
+          "id": "P2",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "ひれ",
+              "owner": "魚",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "大きな領域の下辺から三角形が下に垂れる。",
+              "weaknesses": "左右対称で単純な輪郭である。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P3",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "尾",
+              "owner": "動物",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "大きな領域から左下に細く伸びる。",
+              "weaknesses": "先が縦に切れている。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P4",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "頭",
+              "owner": "動物",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "斜め上に伸びる領域の右上端に四角く付く。",
+              "weaknesses": "顔の向きや特徴がない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-04",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "中央に広く接する形で、具体的な物の一部分としては決め手がない。"
+        },
+        {
+          "id": "P2",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "取っ手",
+              "owner": "箱",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "大きな領域の左側面から四角く横へ出る。",
+              "weaknesses": "穴のない塊である。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P3",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "頭",
+              "owner": "動物",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "大きな領域の上端に小さな四角が付く。",
+              "weaknesses": "顔の特徴がない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P4",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "耳",
+              "owner": "ウサギ",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "上の四角の右側から細長く右下へ垂れる。",
+              "weaknesses": "先端が垂直に切れている。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-05",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "中央に広く接する形で、具体的な物の一部分としては決め手がない。"
+        },
+        {
+          "id": "P2",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "耳",
+              "owner": "動物",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "大きな領域の左上に三角形が上向きに立つ。",
+              "weaknesses": "幅が広く内側の形はない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P3",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "くちばし",
+              "owner": "鳥",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "大きな領域の左側から三角形が左へ出る。",
+              "weaknesses": "口の線はない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-06",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "ひれ",
+              "owner": "魚",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "広い領域の下辺から三角形が下向きに出る。",
+              "weaknesses": "左右対称で単純な輪郭である。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P2",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "中央に広く接する形で、具体的な物の一部分としては決め手がない。"
+        },
+        {
+          "id": "P3",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "首",
+              "owner": "鳥",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "大きな領域の左上から四角い部分が上に伸びる。",
+              "weaknesses": "幅と高さが同程度で短い。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P4",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "くちばし",
+              "owner": "鳥",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "上端の細い領域が右上へ斜めに突き出る。",
+              "weaknesses": "幅が均一で先が細くならない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-07",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "屋根",
+              "owner": "建物",
+              "basis": "両方",
+              "confidence": "中",
+              "evidence": "水平な下辺から頂点へ左右の斜辺が上がる。",
+              "weaknesses": "建物の他の細部はない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P2",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "幹",
+              "owner": "木",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "幅広い三角形の下から四角く垂直に下がる。",
+              "weaknesses": "短く太い。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P3",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "牙",
+              "owner": "動物",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "大きな領域の左下から小さな三角形が下に出る。",
+              "weaknesses": "歯列や口の線がない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P4",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "翼",
+              "owner": "鳥",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "大きな領域の左上に左へ広がる三角形が接する。",
+              "weaknesses": "羽の細部がない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P5",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "耳",
+              "owner": "ウサギ",
+              "basis": "両方",
+              "confidence": "低",
+              "evidence": "接続部から左上へ細長く伸び先が尖る。",
+              "weaknesses": "耳の内側はない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-08",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "帆",
+              "owner": "帆船",
+              "basis": "両方",
+              "confidence": "中",
+              "evidence": "垂直辺と水平辺に挟まれた大きな三角形が上に尖る。",
+              "weaknesses": "帆柱や船底は示されていない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P2",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "茎",
+              "owner": "植物",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "中央の接点から左下へ細く伸び下の四角につながる。",
+              "weaknesses": "幅が広く直線的である。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P3",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "形と位置から具体的な部分を支持する決め手がない。"
+        },
+        {
+          "id": "P4",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "葉",
+              "owner": "植物",
+              "basis": "両方",
+              "confidence": "中",
+              "evidence": "接続部から左上へ細長く伸び先端が尖る。",
+              "weaknesses": "平行な直線の辺で葉脈はない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-09",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "中央に広く接する形で、具体的な物の一部分としては決め手がない。"
+        },
+        {
+          "id": "P2",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "足",
+              "owner": "動物",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "大きな領域の下辺から右下へ垂れ下端が水平である。",
+              "weaknesses": "足先や関節はない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P3",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "尾",
+              "owner": "動物",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "大きな領域の右下から細長く斜めに伸びる。",
+              "weaknesses": "先端は斜めに切られている。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P4",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "くちばし",
+              "owner": "鳥",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "上部の接続点から三角形が左に出る。",
+              "weaknesses": "下向きの幅が広い。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P5",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "耳",
+              "owner": "動物",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "上部の接続点から小さな三角形が上へ尖る。",
+              "weaknesses": "耳の内側はない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-10",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "船底",
+              "owner": "船",
+              "basis": "両方",
+              "confidence": "中",
+              "evidence": "上辺が長く下辺が短く下に絞られている。",
+              "weaknesses": "左右の斜辺が急である。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P2",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "屋根",
+              "owner": "建物",
+              "basis": "両方",
+              "confidence": "中",
+              "evidence": "水平な長い下辺から頂点へ斜辺が上がる。",
+              "weaknesses": "一方の斜面が隣の領域と接している。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P3",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "形と位置から具体的な部分を支持する決め手がない。"
+        },
+        {
+          "id": "P4",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "煙突",
+              "owner": "建物",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "大きな三角形の上方に縦長の四角形が立つ。",
+              "weaknesses": "下端が斜めに切れている。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-11",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "形と位置から具体的な部分を支持する決め手がない。"
+        },
+        {
+          "id": "P2",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "中央に広く接する形で、具体的な物の一部分としては決め手がない。"
+        },
+        {
+          "id": "P3",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "くちばし",
+              "owner": "鳥",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "細長い領域の右上端から小さな三角形が右に伸びる。",
+              "weaknesses": "口の境目がない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P4",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "尾",
+              "owner": "動物",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "中心部の左下から細長く左上へ張り出す。",
+              "weaknesses": "先が縦に切れている。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-12",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "中央に広く接する形で、具体的な物の一部分としては決め手がない。"
+        },
+        {
+          "id": "P2",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "取っ手",
+              "owner": "箱",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "大きな領域の左側面から四角く横へ出る。",
+              "weaknesses": "穴のない塊である。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P3",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "頭",
+              "owner": "動物",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "大きな領域の上に小さな四角が乗る。",
+              "weaknesses": "顔の特徴が見えない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P4",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "足",
+              "owner": "動物",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "大きな領域の右側から細長く右下へ下がる。",
+              "weaknesses": "足先や関節がない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-13",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "翼",
+              "owner": "鳥",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "中央の接続点から右へ幅広い三角形が広がる。",
+              "weaknesses": "羽の細部がない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P2",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "形と位置から具体的な部分を支持する決め手がない。"
+        },
+        {
+          "id": "P3",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "形と位置から具体的な部分を支持する決め手がない。"
+        },
+        {
+          "id": "P4",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "葉",
+              "owner": "植物",
+              "basis": "両方",
+              "confidence": "中",
+              "evidence": "中央から左上へ細長く張り出し先が尖る。",
+              "weaknesses": "直線の辺で葉脈はない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P5",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "ひれ",
+              "owner": "魚",
+              "basis": "両方",
+              "confidence": "低",
+              "evidence": "短い底辺から小さな三角形が上に尖る。",
+              "weaknesses": "魚の輪郭との接続は明瞭でない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-14",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "尾びれ",
+              "owner": "魚",
+              "basis": "両方",
+              "confidence": "中",
+              "evidence": "左側の狭い接続部から右に上下へ大きく広がる。",
+              "weaknesses": "後縁が直線で切れ込みがない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P2",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "ひれ",
+              "owner": "魚",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "左側の接続部から三角形が左下へ広がる。",
+              "weaknesses": "向きが水平に近い。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P3",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "形と位置から具体的な部分を支持する決め手がない。"
+        }
+      ]
+    },
+    {
+      "item": "item-15",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "中央に広く接する形で、具体的な物の一部分としては決め手がない。"
+        },
+        {
+          "id": "P2",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "足",
+              "owner": "動物",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "大きな上部領域から右下へ細長く垂れる。",
+              "weaknesses": "足先や関節の区別がない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P3",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "足",
+              "owner": "動物",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "大きな上部領域の下面から四角く下へ出る。",
+              "weaknesses": "短く足先の形がない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-16",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "中央に広く接する形で、具体的な物の一部分としては決め手がない。"
+        },
+        {
+          "id": "P2",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "ひれ",
+              "owner": "魚",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "横長の大きな領域の下面から下向きに伸びる。",
+              "weaknesses": "先の片側が垂直で左右非対称である。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-17",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "中央に広く接する形で、具体的な物の一部分としては決め手がない。"
+        },
+        {
+          "id": "P2",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "ひれ",
+              "owner": "魚",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "大きな領域の下から下向きに細長く伸びる。",
+              "weaknesses": "先の片側が垂直で左右非対称である。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P3",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "尾びれ",
+              "owner": "魚",
+              "basis": "全体との関係",
+              "confidence": "中",
+              "evidence": "大きな領域の左側から三角形が左に出る。",
+              "weaknesses": "後縁の切れ込みがない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P4",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "煙突",
+              "owner": "建物",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "大きな領域の上辺から垂直に四角く立つ。",
+              "weaknesses": "幅に対して短い。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-18",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "中央に広く接する形で、具体的な物の一部分としては決め手がない。"
+        },
+        {
+          "id": "P2",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "形と位置から具体的な部分を支持する決め手がない。"
+        },
+        {
+          "id": "P3",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "取っ手",
+              "owner": "容器",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "縦長の領域の左側から四角く横へ出る。",
+              "weaknesses": "穴がない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-19",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "帆",
+              "owner": "帆船",
+              "basis": "両方",
+              "confidence": "中",
+              "evidence": "縦に長く上に尖り右辺が垂直に伸びる。",
+              "weaknesses": "下側が尖り船底との接続が明瞭でない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P2",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "ひれ",
+              "owner": "魚",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "大きな領域の左下から三角形が左へ広がる。",
+              "weaknesses": "周囲が魚らしい形とは限らない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P3",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "足",
+              "owner": "人",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "縦に伸びる領域の右下に四角く横へ付く。",
+              "weaknesses": "足指や関節の区別がない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-20",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "尾びれ",
+              "owner": "魚",
+              "basis": "両方",
+              "confidence": "中",
+              "evidence": "右の接続点から左へ広がり左端に切れ込みがある。",
+              "weaknesses": "二股の上下が同じ長さではない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P2",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "ひれ",
+              "owner": "魚",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "接続点の下から三角形が下へ尖る。",
+              "weaknesses": "大きく左右非対称である。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P3",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "形と位置から具体的な部分を支持する決め手がない。"
+        },
+        {
+          "id": "P4",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "頭",
+              "owner": "動物",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "右上端に四角い領域が付く。",
+              "weaknesses": "顔や向きの手掛かりがない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P5",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "耳",
+              "owner": "動物",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "右上の四角の左から三角形が上へ尖る。",
+              "weaknesses": "耳の内側はない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-21",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "翼",
+              "owner": "鳥",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "右の接続部から左側へ大きな三角形が広がる。",
+              "weaknesses": "羽の細部がなく縦の幅が大きい。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P2",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "屋根",
+              "owner": "建物",
+              "basis": "両方",
+              "confidence": "中",
+              "evidence": "頂点から左右に斜辺が下がり右下に水平辺がある。",
+              "weaknesses": "左側の裾が隣の領域と接している。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P3",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "幹",
+              "owner": "木",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "上の三角形の下から四角く垂直に下がる。",
+              "weaknesses": "短く幅広い。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-22",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "牙",
+              "owner": "動物",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "横長の上部の右端から三角形が下に尖る。",
+              "weaknesses": "歯列や口の線はない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P2",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "歯",
+              "owner": "動物",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "上の長い辺から幅広い三角形が下に尖る。",
+              "weaknesses": "歯にしては幅が広い。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P3",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "形と位置から具体的な部分を支持する決め手がない。"
+        },
+        {
+          "id": "P4",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "形と位置から具体的な部分を支持する決め手がない。"
+        },
+        {
+          "id": "P5",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "尾",
+              "owner": "動物",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "斜めに伸びる領域の先に小さく左下へ尖る。",
+              "weaknesses": "根元との境目が直線的で短い。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-23",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "中央に広く接する形で、具体的な物の一部分としては決め手がない。"
+        },
+        {
+          "id": "P2",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "ひれ",
+              "owner": "魚",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "大きな領域の左下から三角形が左に張り出す。",
+              "weaknesses": "辺が対称で単純である。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P3",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "ひれ",
+              "owner": "魚",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "大きな領域の下から三角形が下向きに伸びる。",
+              "weaknesses": "片側が垂直で幅が広い。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P4",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "煙突",
+              "owner": "建物",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "大きな領域の上辺から四角く上に立つ。",
+              "weaknesses": "短く屋根との関係は曖昧である。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P5",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "耳",
+              "owner": "ウサギ",
+              "basis": "両方",
+              "confidence": "低",
+              "evidence": "上部から右上へ細長く伸び先端が尖る。",
+              "weaknesses": "直線的で内側の形はない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-24",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "中央に広く接する形で、具体的な物の一部分としては決め手がない。"
+        },
+        {
+          "id": "P2",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "形と位置から具体的な部分を支持する決め手がない。"
+        },
+        {
+          "id": "P3",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "足",
+              "owner": "動物",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "下向きに伸びる部分の末端に四角く付く。",
+              "weaknesses": "足指や足先の向きが分からない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P4",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "耳",
+              "owner": "ウサギ",
+              "basis": "両方",
+              "confidence": "低",
+              "evidence": "上部から左上に細長く伸び上端が尖る。",
+              "weaknesses": "先端は片側で切れている。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-25",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "中央に広く接する形で、具体的な物の一部分としては決め手がない。"
+        },
+        {
+          "id": "P2",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "屋根",
+              "owner": "建物",
+              "basis": "両方",
+              "confidence": "中",
+              "evidence": "上に尖った三角形が下の領域の上に乗る。",
+              "weaknesses": "左右非対称で片方の辺が垂直である。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P3",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "形と位置から具体的な部分を支持する決め手がない。"
+        },
+        {
+          "id": "P4",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "尾",
+              "owner": "動物",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "左下の小さな領域からさらに左下へ細く伸びる。",
+              "weaknesses": "先が尖らず水平に切れている。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-26",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "中央に広く接する形で、具体的な物の一部分としては決め手がない。"
+        },
+        {
+          "id": "P2",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "柄",
+              "owner": "道具",
+              "basis": "全体との関係",
+              "confidence": "中",
+              "evidence": "大きな領域の左上から細長く斜めに伸びる。",
+              "weaknesses": "先端が斜めに切れ握りの細部はない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-27",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "屋根",
+              "owner": "建物",
+              "basis": "両方",
+              "confidence": "中",
+              "evidence": "長い水平辺から中央上の頂点へ斜辺が上がる。",
+              "weaknesses": "周辺との結合は一般的な屋根と異なる。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P2",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "形と位置から具体的な部分を支持する決め手がない。"
+        },
+        {
+          "id": "P3",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "船底",
+              "owner": "船",
+              "basis": "両方",
+              "confidence": "中",
+              "evidence": "長い上辺から斜辺が下の短い辺に向かって絞られる。",
+              "weaknesses": "中央部に水平な底が残る。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P4",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "煙突",
+              "owner": "建物",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "三角形の上方へ縦長に立っている。",
+              "weaknesses": "下端が斜めに切れている。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-28",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "中央に広く接する形で、具体的な物の一部分としては決め手がない。"
+        },
+        {
+          "id": "P2",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "くちばし",
+              "owner": "鳥",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "右上の接続部から三角形が右へ出る。",
+              "weaknesses": "口の線がなく幅が広い。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P3",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "足",
+              "owner": "動物",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "中央の下から右下に尖って垂れ四角い領域に接する。",
+              "weaknesses": "関節や足指はない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P4",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "足",
+              "owner": "動物",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "下に垂れる領域の右下端に四角く付く。",
+              "weaknesses": "足指や足先の区別がない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P5",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "耳",
+              "owner": "ウサギ",
+              "basis": "両方",
+              "confidence": "低",
+              "evidence": "上部から左上に細長く伸び左端が尖る。",
+              "weaknesses": "長辺が平行で耳の内側がない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-29",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "中央に広く接する形で、具体的な物の一部分としては決め手がない。"
+        },
+        {
+          "id": "P2",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "袖",
+              "owner": "服",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "中央上部から右へ張り出し右端が垂直である。",
+              "weaknesses": "袖口の開きや腕はない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P3",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "形と位置から具体的な部分を支持する決め手がない。"
+        },
+        {
+          "id": "P4",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "耳",
+              "owner": "ウサギ",
+              "basis": "両方",
+              "confidence": "低",
+              "evidence": "上の領域から右上へ細長く伸びる。",
+              "weaknesses": "先端が斜めに切れ耳の内側はない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    },
+    {
+      "item": "item-30",
+      "regions": [
+        {
+          "id": "P1",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "牙",
+              "owner": "動物",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "上部の右端から三角形が下に尖る。",
+              "weaknesses": "口や歯列の線はない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P2",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "中央に広く接する形で、具体的な物の一部分としては決め手がない。"
+        },
+        {
+          "id": "P3",
+          "candidates": [],
+          "noCandidate": true,
+          "noCandidateReason": "形と位置から具体的な部分を支持する決め手がない。"
+        },
+        {
+          "id": "P4",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "足",
+              "owner": "動物",
+              "basis": "全体との関係",
+              "confidence": "低",
+              "evidence": "左端の下側に四角い領域が付いている。",
+              "weaknesses": "足指や関節は見えない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        },
+        {
+          "id": "P5",
+          "candidates": [
+            {
+              "rank": 1,
+              "noun": "耳",
+              "owner": "ウサギ",
+              "basis": "両方",
+              "confidence": "低",
+              "evidence": "上部から左上へ細長く伸び左先端が尖る。",
+              "weaknesses": "長辺が平行で耳の内側はない。"
+            }
+          ],
+          "noCandidate": false,
+          "noCandidateReason": ""
+        }
+      ]
+    }
+  ]
+}
