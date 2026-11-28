@@ -21,7 +21,7 @@ import { isPostGenerationCheck, type PostGenerationCheck } from './deferred-ai-e
 export type ReceptionProtocol = { schemaVersion: 'reception_protocol_v1'; protocolId: string; revision: number;
   allowedOrders: Strategy[][]; seedPolicy: 'shared' | 'per_trial'; referenceMemory: boolean;
   betweenTrials: 'none'; receptionNumberFormat: 'daily_seq3' };
-export type RotationMode = 'relative_pm90' | 'relative_0';
+export type RotationMode = 'relative_pm90' | 'relative_0' | 'relative_90_180_270';
 /** The stimulus generator's own list, so the protocol never offers a mode the generator cannot produce. */
 export const ROTATION_MODES = STIMULUS_ROTATION_MODES as readonly RotationMode[];
 export type BetweenTrials = 'none' | 'questionnaire_required';
