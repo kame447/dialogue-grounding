@@ -1,7 +1,7 @@
 // S4 and the pre-made rotation memory: a record whose requests carry a `rotation` memory is verified against the independent table in
 // diagnostics/parity-verify/turned-view-records.ts (the legends, the layers, the sentences each call adds, the name candidates), never against the runtime.
 // The records come from the real runtime and the offline replay (buildRecords); no key, network or study data.
-//   1. S4 passes them: four scenes, both strategies, the three stimulus rotation modes, 3/4/6 figures, a memo that lacks one figure's memory.
+//   1. S4 passes them: five scenes (an answer, a check, a check whose draft is regenerated, a name proposal, a second look), both strategies, the three stimulus rotation modes, 3/4/6 figures, a memo that lacks one figure's memory.
 //   2. A text or a layer line that says one character differently makes only the replay check disagree (mutateRecord rewrites it everywhere it is recorded and carries every hash through).
 //   3. The table does not drift from the runtime it copies: every text, the six generation replacements and the layers of all 120 (figure, current rotation) projections.
 //   4. The name candidates rule, and a record of an earlier version that carries the memory.
@@ -16,6 +16,7 @@ import { GENERATION_INSTRUCTIONS_V23, GENERATION_INSTRUCTIONS_V24 } from '../dia
 import { rotationInitialMemo } from '../dialogue-model/runtime/observation/rotation-memo.ts';
 import { projectOwnRotationMemory, rotationNameCandidates } from '../dialogue-model/runtime/stimuli/rotation-memory.ts';
 import { ROTATION_MEMORY_ENTRIES } from '../dialogue-model/runtime/stimuli/rotation-memory-data.ts';
+import { DIRECTION_WORDS, POSITION_WORDS, ROTATION_MEMORY_LIMITS } from '../dialogue-model/runtime/stimuli/rotation-memory-shape.ts';
 import { buildRecords, OWN, type Label } from './support/s4-v3-records.ts';
 import { retargetToMode, type RotationMode } from './support/s4-rotation-records.ts';
 import { changeOneChar, editRequests, holds, mutateRecord, positionsOf, requestHashesConsistent } from './support/s4-rotation-mutation.ts';
@@ -35,9 +36,22 @@ const MODES: RotationMode[] = ['relative_pm90', 'relative_0', 'relative_90_180_2
 // ---- Records ----
 type Check = 'off' | 'on';
 type Scene = 'accept' | 'confirm' | 'confirm_regenerated' | 'propose_name' | 'request_observation';
-/** Bank figure key and the rotation now shown on the AI's screen, per own figure. The first one has a whole noun in its current view that no turned view has (F1 at 270). */
-const VIEWS: readonly [string, number][] = [['F1', 270], ['F9', 90], ['F6', 0], ['F11', 180], ['F14', 90], ['F20', 0]];
 const projectionOf = ([key, rotation]: readonly [string, number]) => projectOwnRotationMemory({ figureKey: key, rotation })!;
+/**
+ * The (figure, current rotation) whose memory shows what these tests look at: a whole noun in the current view that no turned view has, three or more name candidates and layers of
+ * many lines. It is chosen from the bundle, so a bundle regenerated from the researcher's confirmation keeps the tests meaningful.
+ */
+function richestFirst(): [string, number] {
+  for (const { figureKey } of ROTATION_MEMORY_ENTRIES) for (const rotation of [0, 90, 180, 270]) {
+    const projection = projectOwnRotationMemory({ figureKey, rotation })!;
+    const current = projection.current.whole[0]?.noun, turned = projection.turned.flatMap(view => view.whole.map(candidate => candidate.noun));
+    if (current !== undefined && !turned.includes(current) && rotationNameCandidates(projection).length >= 3 &&
+        layerLines(projection, 'nouns').length >= 8 && layerLines(projection, 'roles').length >= 8) return [figureKey, rotation];
+  }
+  throw new Error('no (figure, rotation) of the bundle has a memory rich enough for these tests');
+}
+/** Bank figure key and the rotation now shown on the AI's screen, per own figure. */
+const VIEWS: readonly [string, number][] = [richestFirst(), ['F9', 90], ['F6', 0], ['F11', 180], ['F14', 90], ['F20', 0]];
 /** `lacking`: the index of an own figure the bundle does not know (it keeps the plain entry without a rotation memory). */
 const memoOf = (count: number, lacking?: number) => {
   const anchors = OWN.ownAnchors.slice(0, count);
@@ -53,11 +67,11 @@ const finalTurn = (scene: Scene, check: Check, anchorId: string) => {
   return {
     accept: { human: 'もう一度さっきの図形に戻って特徴を教えてください。', plan: { ...base, action: 'accept', target: 'figure_0', speech: draft('さっきの図形ですね。', check, true) } },
     confirm: { human: 'もう一度さっきの図形に戻って特徴を教えてください。', plan: { ...base, action: 'confirm', target: 'figure_0', speech: draft('もう一つ特徴を確かめさせてください。', check) } },
-    // A name proposal is not a visual answer: its draft is plain text and the AI's own claims are an array even when the checks are on.
     // The first draft moves the topic, so the draft is regenerated: the retry message restates the whole action message (the observation sources line included).
     confirm_regenerated: { human: '細い部分はどうつながっていますか？', plan: { ...base, action: 'confirm', target: 'figure_0',
       drafts: [draft('この図形をいったん置いて、次のを見よう。', check), draft('もう一つ特徴を確かめさせてください。', check)],
       choose: (key: string, _criteria: unknown, { generationCalls }: { generationCalls: number }) => key === 'draft_topic_shift' ? generationCalls === 1 ? 'unsupported_shift' : 'within_plan' : choose(key) } },
+    // A name proposal is not a visual answer: its draft is plain text and the AI's own claims are an array even when the checks are on.
     propose_name: { human, plan: { ...base, action: 'propose_name', target: 'figure_0', name: firstName, speech: firstNameDraft(), aiExtraction: '[]', act: 'construe',
       extraction: JSON.stringify([{ segmentId: 'shape', quote: human, targets: [anchorId], aspect: 'construal', proposition: human, name: null, linkedIssueId: null, respondsToTurn: null }]),
       choose: (key: string) => key === 'draft_naming' ? 'propose_chosen' : choose(key) } },
@@ -95,8 +109,20 @@ test('a memo that lacks one own figure (the bundle does not know it) keeps that 
   assert.deepEqual(statuses(records), ALL_PASS);
 });
 
+test('a second look at a figure without a memory keeps the earlier bytes while the other figures of the memo carry theirs', async () => {
+  const records = await record('request_observation', 'off', { lacking: 0 });
+  const memo = records.trials[0].attempts[0].observationMemo;
+  assert.equal(memo.figures[0].rotation, undefined);
+  assert.ok(memo.figures[1].rotation !== undefined);
+  assert.deepEqual(statuses(records), ALL_PASS);
+  const look = records.trials[0].replay[0].result.sides[0].requests.find((r: { phase: string }) => r.phase === 'observation_targeted');
+  assert.ok(look, 'the record holds the second look');
+  assert.equal(holds(look.payload, table.REOBSERVATION_ROTATION_USE), false);
+  assert.equal(holds(look.payload, table.ROTATION_LEGEND_NOUNS), false);
+});
+
 // ---- 2. One character of what the memory adds ----
-/** The texts of the table, with the scenes whose requests carry them (a text can be tried in any record that holds it). */
+/** The texts of the table. Each is tried in every record of MUTATION_RECORDS that holds it. */
 const TEXTS: [string, string][] = [
   ['nouns legend', table.ROTATION_LEGEND_NOUNS], ['roles legend', table.ROTATION_LEGEND_ROLES], ['common sentence', table.COMMON_DIFFERENT_CONSTRUAL_ROTATION],
   ['match use', table.ROTATION_MATCH_USE], ['accept answer', table.ROTATION_ACCEPT_ANSWER], ['accept backchannel', table.ROTATION_ACCEPT_BACKCHANNEL],
@@ -217,6 +243,21 @@ test('the layers, the name nouns and the shape check of the table are those of t
   const memo = memoOf(3) as { figures: unknown[] };
   assert.deepEqual(table.memoInLayer(memo as never, 'nouns'), guidance.withRotationLayer(memo, 'nouns'));
   assert.deepEqual(table.memoInLayer(memo as never, 'roles'), guidance.withRotationLayer(memo, 'roles'));
+});
+test('the shape check of the table accepts every word and every size the shape module allows, and not one more', () => {
+  const base: any = projectionOf(VIEWS[0]);
+  const region = (change: object) => ({ ...base, regions: [{ ...base.regions[0], ...change }, ...base.regions.slice(1)] });
+  for (const word of POSITION_WORDS) assert.equal(table.wellFormedRotation(region({ at: word })), true, word);
+  for (const word of DIRECTION_WORDS) assert.equal(table.wellFormedRotation(region({ tip: word })), true, word);
+  assert.equal(table.wellFormedRotation(region({ at: '中央' })), false);
+  assert.equal(table.wellFormedRotation(region({ tip: '真上' })), false);
+  const limits = ROTATION_MEMORY_LIMITS;
+  const noun = (length: number) => ({ ...base, current: { ...base.current, whole: [{ noun: 'あ'.repeat(length), posture: 'p', direction: 'd', roles: { [base.regions[0].id]: 'r' } }], parts: {} } });
+  assert.equal(table.wellFormedRotation({ ...noun(limits.noun), wholeAnywhere: true }), true);
+  assert.equal(table.wellFormedRotation({ ...noun(limits.noun + 1), wholeAnywhere: true }), false);
+  const shape = (length: number) => region({ shapeName: 'あ'.repeat(length) });
+  assert.equal(table.wellFormedRotation(shape(limits.shapeName)), true);
+  assert.equal(table.wellFormedRotation(shape(limits.shapeName + 1)), false);
 });
 test('a memory that is not well formed is not a memory (like in the run): no figure of the memo carries one', () => {
   const projection: any = structuredClone(projectionOf(VIEWS[0]));
