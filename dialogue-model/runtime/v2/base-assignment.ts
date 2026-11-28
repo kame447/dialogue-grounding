@@ -1,4 +1,5 @@
 /** Participant assignment API. Researcher values only; never an allocation method. */
+import type { OpeningMode } from './opening-mode.ts';
 import type { ParticipantProductionProfile } from '../web/participant-usage-policy.ts';
 import type { BudgetLimits } from '../diagnostics/parity-live/audit.ts';
 import type { ParticipantModelPin } from './participant-model-pin.ts';
@@ -14,7 +15,7 @@ export type BaseAssignmentConfig = Readonly<{ schemaVersion: 'base_assignment_co
 export type BaseAssignment = Readonly<{ schemaVersion: 'base_assignment_v1'; assignmentId: string;
   strategy: Strategy; seed: number; referenceMemory: boolean;
   source: Readonly<{ kind: 'server_config_v1'; adapter: SourceAdapter; configId: string; revision: number; configSha256: string;
-    memoryPruneVersion?: import('../memory/reference-graph.mjs').MemoryPruneVersion }> |
+    memoryPruneVersion?: import('../memory/reference-graph.mjs').MemoryPruneVersion; openingMode?: OpeningMode }> |
     Readonly<{ kind: 'reception_plan_v1'; adapter: SourceAdapter; receptionId: string; protocolId: string; protocolRevision: number;
       protocolSha256: string; trialIndex: number; plan: ReceptionPlanV1 }> |
     Readonly<{ kind: 'reception_plan_v2'; adapter: SourceAdapter; receptionId: string; protocolId: string; protocolRevision: number;
@@ -57,9 +58,10 @@ export type MakeBaseTask = (options: { strategy: Strategy; seed: number; referen
   restore: BaseRecord | null; now: () => number; onPersist: (record: RawBaseRecord) => Promise<void>; rotationMode?: RotationMode;
   figureSelection?: ResolvedFigureSelection; participantModelPin?: ParticipantModelPin; participantLimits?: Readonly<BudgetLimits>;
   initialObservationGeneration?: InitialObservationGeneration;
+  openingMode?: OpeningMode;
   participantDialogueProfile?: ParticipantDialogueProfile;
   participantRuntime?: { profile: ParticipantProductionProfile; assignmentId: string } }) => Promise<BaseTask>;
-export type BaseSessionOptions = { ownerId: string; store: BaseStore; readConfig: () => Promise<BaseAssignmentConfig | null>;
+export type BaseSessionOptions = { openingMode?: OpeningMode; ownerId: string; store: BaseStore; readConfig: () => Promise<BaseAssignmentConfig | null>;
   /** null explicitly declines a plan, so the configured (non-reception) assignment is used. */
   readPlan?: () => Promise<{ receptionId: string; plan: ReceptionPlan; trialIndex: number } | null>;
   memoryPruneVersion?: import('../memory/reference-graph.mjs').MemoryPruneVersion;

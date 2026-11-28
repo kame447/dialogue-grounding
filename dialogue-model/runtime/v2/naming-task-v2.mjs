@@ -1,3 +1,4 @@
+import { SCRIPTED_OPENING_MODE, SCRIPTED_OPENING_TEXT, isOpeningMode } from './opening-mode.ts';
 import { ParticipantUsageLedger } from '../web/participant-usage.ts';
 import { PARTICIPANT_USAGE_ONLY } from '../web/participant-usage-policy.ts';
 // v2 naming task: scattered unlabeled boards with opaque per-side ids, immediate
@@ -102,7 +103,7 @@ export function parseAiNamesV2(text, slots) {
  *   judge?: import('../judgment/schema.mjs').DialogueJudge | null, now?: () => number, restore?: object | null, onPersist?: Function | null,
  *   decisionShadowClient?: {chooseAction(request: object): Promise<any>} | null,
  *   activeDecision?: {purpose: string, client: {chooseAction(request: object): Promise<any>}} | null,
- *   utteranceStyle?: string, rotationMode?: string, groundingShadow?: import('./grounding-shadow.ts').GroundingShadowOptions | null,
+ *   openingMode?: import("./opening-mode.ts").OpeningMode, utteranceStyle?: string, rotationMode?: string, groundingShadow?: import('./grounding-shadow.ts').GroundingShadowOptions | null,
  *   memoryPruneVersion?: import("../memory/reference-graph.mjs").MemoryPruneVersion,
  *   localGrounding?: import('../local-grounding/contract.ts').LocalGroundingOptions | null,
  *   jevResearch?: import('../web/participant-jev-wiring.ts').JevResearchOptions<import('../web/participant-jev-wiring.ts').JevResearchLedger> | null,
@@ -113,7 +114,7 @@ export async function createNamingTaskV2({
   client, strategy, seed, referenceMemory = true, memoryPruneVersion, runDir = process.env.RESEARCH_RUN_DIR,
   createTrial = createTrialV2, scoreTrial = defaultScoreTrial, judge = null, now = () => Date.now(),
   restore = null, onPersist = null, onPersistFailure = null, onPersistSlow = null, decisionShadowClient = null, activeDecision = null, utteranceStyle = "default",
-  groundingShadow = null, localGrounding = null, onLocalGroundingTrace = null, jevResearch = null, rotationMode = "relative_pm90", figureSelection = undefined,
+  openingMode = undefined, groundingShadow = null, localGrounding = null, onLocalGroundingTrace = null, jevResearch = null, rotationMode = "relative_pm90", figureSelection = undefined,
 }) {
   // Checked before any generation, observation or persist.
   const rotation = trialRotation(restore, rotationMode);
@@ -132,7 +133,15 @@ export async function createNamingTaskV2({
   const jev = selectParticipantJev(restore, jevResearch, { referenceMemory, strategy, style,
     legacy: [localGrounding, activeDecision, decisionShadowClient, groundingShadow] });
   if (memoryPruneVersion === CLAIM_PRUNE_V3 && !jev) throw new NamingTaskError("invalid_options");
-  const generatedOpening = isGenerationV17(jev?.generationRetryVersion);
+  if (restore) {
+    const saved = restore.options?.openingMode;
+    if (openingMode !== undefined && openingMode !== saved ||
+        Object.hasOwn(restore.options ?? {}, 'openingMode') && !isOpeningMode(saved)) throw new NamingTaskError('invalid_options');
+    openingMode = saved;
+  }
+  if (openingMode !== undefined && !isOpeningMode(openingMode)) throw new NamingTaskError('invalid_options');
+  const scriptedOpening = openingMode === SCRIPTED_OPENING_MODE ? SCRIPTED_OPENING_TEXT : SCRIPTED_OPENING;
+  const generatedOpening = openingMode === undefined && isGenerationV17(jev?.generationRetryVersion);
   const dialogueRecoveryEnabled = !!jev && !allowsOrientationFallback(jev.generationRetryVersion);
   let dialogueInterruption = restore?.dialogueInterruption;
   if (restore && Object.hasOwn(restore, "dialogueInterruption") &&
@@ -402,7 +411,12 @@ export async function createNamingTaskV2({
     ...(deferredExtraction ? { afterPublication, beforeRequest } : {}),
     initialEvents: opening === null ? [] : [{ speaker: "ai", text: opening, nonReferential: true }],
     ...(saved ? { initialState: saved } : {}) });
-  const opening = generatedOpening ? restore ? null : await openingText() : SCRIPTED_OPENING;
+  const opening = generatedOpening ? restore ? null : await openingText() : scriptedOpening;
+  if (openingMode && restore) {
+    const first = initialQueue?.events?.[0];
+    if (first?.speaker !== 'ai' || first.nonReferential !== true || first.text !== scriptedOpening ||
+        restore.events?.[0]?.origin !== 'scripted_opening' || restore.events[0].text !== first.text) throw new NamingTaskError('invalid_options');
+  }
   if (generatedOpening && restore) {
     const events = initialQueue.events;
     if (!Array.isArray(events) || (events.length ? events[0]?.speaker !== "ai" || events[0]?.nonReferential !== true ||
@@ -528,7 +542,7 @@ export async function createNamingTaskV2({
     const savedTraces = completion ? jevTraces.map((trace, index) => index === completion.traceIndex ? completion.trace : trace) : jevTraces;
     const record = {
       recordId, version: VERSION, trialId: trial.trialId, seed, strategy, startedAt, updatedAt: new Date(now()).toISOString(),
-      options: { visualAid: false, referenceMemory, ...(memoryPruneVersion ? { memoryPruneVersion } : {}), decisionShadow: Boolean(decisionShadowClient), activeDecision: activeDecision?.purpose ?? null, utteranceStyle: style,
+      options: { visualAid: false, ...(openingMode ? { openingMode } : {}), referenceMemory, ...(memoryPruneVersion ? { memoryPruneVersion } : {}), decisionShadow: Boolean(decisionShadowClient), activeDecision: activeDecision?.purpose ?? null, utteranceStyle: style,
         // Legacy records keep their original shape; they never gain rotation fields on restore.
         ...(rotation.legacy ? {} : { rotationMode: rotation.mode }),
         // Present only for a trial that selected figures, so earlier records keep their shape.
@@ -546,7 +560,7 @@ export async function createNamingTaskV2({
       ...(rotation.legacy ? {} : { stimulus: clone(stimulus) }),
       status: result ? "completed" : closed ? "submitting" : "dialogue",
       // Origin is research metadata only; queue/model/participant events stay ordinary public speech.
-      events: snapshot.events.map((event) => event.seq === 1 && event.speaker === "ai" && (generatedOpening || event.text === SCRIPTED_OPENING)
+      events: snapshot.events.map((event) => event.seq === 1 && event.speaker === "ai" && (generatedOpening || event.text === scriptedOpening)
         ? { ...event, origin: generatedOpening ? "generated_opening" : "scripted_opening" } : event),
       // Same role/content shape as v1 so offline metrics apply unchanged.
       publicHistory: snapshot.events.map((e) => ({ role: e.speaker === "human" ? "user" : "assistant", content: e.text })),
@@ -693,7 +707,7 @@ export async function createNamingTaskV2({
       const thinking = cutoff >= 0 || snapshot.status === "pending" || snapshot.status === "processing";
       return clone({
         // No seed or seed-derived trial id: either would let a client regenerate the boards and key.
-        version: VERSION, sessionId: recordId, scene,
+        version: VERSION, sessionId: recordId, scene, ...(openingMode ? { openingMode } : {}),
         events: openingUnavailable ? [] : cutoff < 0 ? visibleEvents : visibleEvents.slice(0, cutoff),
         aiStatus: extractionError ? "error" : thinking ? "thinking" : snapshot.status === "error" || openingUnavailable ? "error" : "idle",
         submitted: humanSubmission !== null, aiSubmitted: aiSubmission !== null, closed,

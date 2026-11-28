@@ -1674,7 +1674,8 @@ async function verifyPilot012WorkerProfile(t: TestContext,
     typeof PILOT012_V20_PARTICIPANT_PROFILE | typeof PILOT012_V21_PARTICIPANT_PROFILE | typeof PILOT012_V22_PARTICIPANT_PROFILE |
     typeof PILOT012_V23_PARTICIPANT_PROFILE,
   generation: 'jev_generation_retry_v17' | typeof SHAPE_TERMINOLOGY_GENERATION | typeof VISUAL_FEATURE_GENERATION |
-    typeof DEFERRED_AI_EXTRACTION_GENERATION | typeof ISSUE_HANDLING_GENERATION | typeof GENERATION_RETRY_V22 | typeof GENERATION_RETRY_V23) {
+    typeof DEFERRED_AI_EXTRACTION_GENERATION | typeof ISSUE_HANDLING_GENERATION | typeof GENERATION_RETRY_V22 | typeof GENERATION_RETRY_V23,
+  legacyOpening = false) {
   const h = harness(true, figureBankProtocol, true);
   const transport = v12Transport(t, h);
   transport.options.sharedReading = true;
@@ -1689,6 +1690,15 @@ async function verifyPilot012WorkerProfile(t: TestContext,
   h.env.PARTICIPANT_TERRA_INITIAL_OBSERVATION_GENERATION = undefined;
 
   const { plan } = await h.approve();
+  assert.equal(plan.openingMode, 'scripted_v1');
+  if (legacyOpening) {
+    delete plan.openingMode;
+    await h.storage.transaction(async tx => {
+      const reception = await tx.get('reception:v1');
+      await tx.put({ 'reception:v1': { ...reception, plan } });
+    });
+  }
+  assert.throws(() => validateReceptionPlan({ ...plan, openingMode: 'unknown' }));
   assert.equal(plan.participantDialogueProfile, participantProfile);
   assert.equal(plan.participantModelPin.schemaVersion, 'participant_model_pin_v3');
   assert.equal(plan.memoryPruneVersion, CLAIM_PRUNE_V3);
@@ -1705,6 +1715,7 @@ async function verifyPilot012WorkerProfile(t: TestContext,
   h.evict();
   let predecessor: string | undefined;
   for (const strategy of plan.order) {
+    const beforeStart = transport.textPhases.length;
     const { trial } = await jsonOk(await h.start(predecessor));
     assert.equal(trial.scene.shapes.length, 6);
     const id = trial.sessionId;
@@ -1726,7 +1737,16 @@ async function verifyPilot012WorkerProfile(t: TestContext,
     assert.equal(start.options.questionLayout, 'two_stage_v3');
     assert.equal(start.options.interventionPolicy.version, issueHandling ? 'bypass_acceptance_v3' : 'bypass_acceptance_v2');
     assert.deepEqual(start.options.technicalTrial, { version: 'adaptive_repair_v3' });
-    assert.equal(start.events[0].origin, 'generated_opening');
+    assert.equal(start.options.openingMode, legacyOpening ? undefined : 'scripted_v1');
+    assert.equal(trial.openingMode, start.options.openingMode);
+    assert.equal(start.events[0].origin, legacyOpening ? 'generated_opening' : 'scripted_opening');
+    if (!legacyOpening) {
+      assert.equal(trial.events[0].text, 'どれから話しましょうか？');
+      assert.equal(transport.textPhases.length, beforeStart, 'a cached start must make no greeting-generation RPC');
+      const missingMode = structuredClone(start);
+      delete missingMode.options.openingMode;
+      assert.throws(() => validateBoundBaseRecord(missingMode, start.assignment));
+    }
     assert.doesNotMatch(JSON.stringify(trial), /participantDialogueProfile|claim_prune_v3|jev_repair_quality_v1|structured_outputs_v2/u);
 
     const callStart = h.calls.length;
@@ -1756,6 +1776,7 @@ async function verifyPilot012WorkerProfile(t: TestContext,
     h.evict();
     const restored = (await jsonOk(await h.request('state'))).trial;
     assert.equal(restored.sessionId, id);
+    assert.equal(restored.openingMode, legacyOpening ? undefined : 'scripted_v1');
     assert.deepEqual(transport.textPhases, sent);
     assert.deepEqual((await h.storage.get(key)).queueState.privateState, stored.queueState.privateState);
     await h.complete(id, restored);
@@ -1764,6 +1785,9 @@ async function verifyPilot012WorkerProfile(t: TestContext,
   }
   assert.equal(transport.textPhases.filter(phase => phase === 'initial_observation').length, 1);
 }
+
+test('an already approved v23 reception keeps generated openings in both conditions after the scripted-opening update',
+  t => verifyPilot012WorkerProfile(t, PILOT012_V23_PARTICIPANT_PROFILE, GENERATION_RETRY_V23, true));
 
 test('pilot012 pins the integrated versions at approval and preserves them through both trials and cold restore',
   t => verifyPilot012WorkerProfile(t, PILOT012_PARTICIPANT_PROFILE, 'jev_generation_retry_v17'));

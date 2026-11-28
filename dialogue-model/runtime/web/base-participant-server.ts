@@ -1,3 +1,4 @@
+import { SCRIPTED_OPENING_MODE } from '../v2/opening-mode.ts';
 import { CLAIM_PRUNE_V2 } from '../memory/reference-graph.mjs';
 import { createServer } from 'node:http';
 import type { IncomingMessage, ServerResponse } from 'node:http';
@@ -52,6 +53,7 @@ export function createBaseParticipantServer(options: Record<string, any> = {}) {
         const store=await openBaseFileStore({root:baseStoreRoot,ownerId,now});
         loadedStores.add(store);
         const coordinator=createBaseAssignmentSession({ownerId,store,now,newId:randomUUID,adapter:'local_private_file',
+          openingMode: SCRIPTED_OPENING_MODE,
           ...(memoryPruneVersion ? { memoryPruneVersion } : {}),
           readConfig:async()=>baseAssignmentFile ? readPrivateAssignment(baseAssignmentFile) : null,
           makeTask:async value=>createTaskV2({client,...value,onPersistSlow:(slow:{waitedMs:number;tookMs:number;joined:number})=>{try{process.stderr.write('persist_slow waited_ms='+slow.waitedMs+' took_ms='+slow.tookMs+' joined='+slow.joined+'\n');}catch{/* never affects the write */}},onPersistFailure:(failure:{code:string;at:string;reason?:string})=>{try{process.stderr.write('persist_failed code='+failure.code+(failure.reason?' reason='+failure.reason:'')+' at='+failure.at+'\n');}catch{/* never affects the write */}},activeDecision,utteranceStyle,...(groundingShadow?{groundingShadow}:{}),

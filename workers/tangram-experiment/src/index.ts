@@ -1,5 +1,6 @@
 import { DurableObject } from "cloudflare:workers";
 import { createChatClient } from "../../../dialogue-model/runtime/client.mjs";
+import { SCRIPTED_OPENING_MODE } from "../../../dialogue-model/runtime/v2/opening-mode.ts";
 import { createNamingTaskV2 } from "../../../dialogue-model/runtime/v2/naming-task-v2.mjs";
 import { createGroundingJudgeClient } from "../../../dialogue-model/runtime/grounding/client.ts";
 import { INITIAL_OBSERVATION_STRUCTURED_V2, isInitialObservationGeneration } from "../../../dialogue-model/runtime/observation/initial-observation-generation.ts";
@@ -330,6 +331,7 @@ export class TangramSession extends DurableObject<Env> {
         const raw = await tx.get('reception:v1'); if (!raw) throw new ReceptionError('reception_unavailable');
         const next = await approveReception(raw, { expectedRevision:input.expectedRevision, order:input.order, protocol, expected, approvedAt:new Date().toISOString(),
           randomSeed:() => crypto.getRandomValues(new Uint32Array(1))[0], ...participant,
+          ...(['reception_protocol_v2', 'reception_protocol_v3'].includes(protocol.schemaVersion) ? { openingMode: SCRIPTED_OPENING_MODE } : {}),
           ...(protocol.referenceMemory ? { memoryPruneVersion: participantMemoryPruneVersion(participant.participantDialogueProfile) } : {}) });
         await tx.put({ 'reception:v1':next }); return next;
       }));
@@ -905,6 +907,7 @@ export class TangramSession extends DurableObject<Env> {
   private assignmentSession(): BaseSession {
     if (this.base) return this.base;
     this.base = createBaseAssignmentSession({ownerId:this.ctx.id.toString(),adapter:'worker_binding',now:Date.now,newId:()=>crypto.randomUUID(),
+      openingMode: SCRIPTED_OPENING_MODE,
       readConfig:async()=>this.env.BASE_ASSIGNMENT_JSON === undefined ? null : validateBaseAssignmentConfig(JSON.parse(this.env.BASE_ASSIGNMENT_JSON)),
       // Every admission names its intent explicitly; without one, nothing is admitted.
       readPlan:async () => {
@@ -1039,7 +1042,7 @@ export class TangramSession extends DurableObject<Env> {
   }
 
   private async createTrial(binding: Parameters<MakeBaseTask>[0]): Promise<NamingTask> {
-    const {seed,strategy,referenceMemory,restore,participantRuntime,initialObservationGeneration,memoryPruneVersion,participantDialogueProfile} = binding;
+    const {seed,strategy,referenceMemory,restore,participantRuntime,initialObservationGeneration,memoryPruneVersion,participantDialogueProfile,openingMode} = binding;
     if (restore && !matchesWorkerDialogueProfile(participantDialogueProfile, restore) ||
         participantDialogueProfile !== undefined &&
           (memoryPruneVersion !== participantMemoryPruneVersion(participantDialogueProfile) ||
@@ -1106,7 +1109,7 @@ export class TangramSession extends DurableObject<Env> {
           },
         } };
       }
-      const task = await createNamingTaskV2(({ ...runtime, jevResearch, seed, strategy, referenceMemory, memoryPruneVersion, rotationMode, ...figures,
+      const task = await createNamingTaskV2(({ ...runtime, jevResearch, seed, strategy, referenceMemory, memoryPruneVersion, rotationMode, openingMode, ...figures,
         utteranceStyle: runtime.jevResearch.profile.utteranceStyle, createTrial: () => trial, onPersist,
         runDir: null, ...(restore ? { restore } : {}),
       }) as unknown as Parameters<typeof createNamingTaskV2>[0]) as NamingTask;
@@ -1143,7 +1146,7 @@ export class TangramSession extends DurableObject<Env> {
           return new Response(JSON.stringify(response.data), { status: response.status, headers: { "Content-Type": "application/json" } });
         }),
     } : null;
-    return await createNamingTaskV2(({ client, seed, strategy, referenceMemory, memoryPruneVersion, utteranceStyle, runDir: null, groundingShadow, ...rotation,
+    return await createNamingTaskV2(({ client, seed, strategy, referenceMemory, memoryPruneVersion, utteranceStyle, openingMode, runDir: null, groundingShadow, ...rotation,
       ...(restore ? { restore } : {}),
       // Every write also keeps record:<recordId>, so a later trial never erases this one.
       onPersist,
