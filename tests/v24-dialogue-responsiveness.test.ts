@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { GENERATION_RETRY_V24, type PostGenerationCheck } from "../dialogue-model/runtime/v2/deferred-ai-extraction.ts";
+import { GENERATION_INSTRUCTIONS_V23 } from "../dialogue-model/runtime/v2/generation-prompt-v23.ts";
 import { researchTrialProfileV3 } from "../dialogue-model/runtime/v2/research-profile.ts";
 import { initialState, normal, OLD, OWN, runTurn, type Label, type Plan } from "./support/s4-v3-records.ts";
 
@@ -103,6 +104,20 @@ test("v24 ON は回復した説明の出所も照合してから公開する", a
   assert.deepEqual(result.trace.generationGuard.violations, ["visual_feature_mismatch"]);
   assert.deepEqual(result.trace.generatedPublication?.visualFeatures?.sources, [scenarios[0].observation]);
   assert.equal(result.luna.filter(call => call.phase === "ai_extraction").length, 2);
+});
+
+test("v24 は質問するときにも自分の見え方や理解を添えるよう両方略に指示する", async () => {
+  const instruction = "質問するときも問いだけで終えず、自分の見え方や今の理解を一言添えてください。";
+  const correction = scenarios.find(scenario => scenario.answer === corrected)!;
+  const [repair, bypass] = await Promise.all(strategies.map(label => dialogue(label, "off", correction)));
+  assert.deepEqual(repair.requests, bypass.requests);
+  const instructions = repair.requests.filter(request => request.provider === "luna")
+    .map(request => JSON.parse(request.body).messages)
+    .find(messages => messages[0]?.content.startsWith("あなたは二者によるタングラム"))?.[1].content;
+  assert.equal(instructions.split(instruction).length, 2);
+  assert.ok(instructions.includes("何に答えてほしいか明示してください。" + instruction));
+  assert.match(repair.speech!, /私の図形にも[^。]+。[^？]+？$/u);
+  assert.equal(GENERATION_INSTRUCTIONS_V23.includes(instruction), false);
 });
 
 for (const mode of ["on", "off"] as const) test(`v24 ${mode.toUpperCase()} は両方略で依頼・訂正に答える`, async () => {
