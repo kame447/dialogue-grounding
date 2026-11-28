@@ -526,12 +526,22 @@ export function renderFigurePresetEditor(preset: FigurePreset | null): string {
 <p><button class="primary">保存</button></p></form>
 ${preset ? `<form method="post" action="${escapeHtml(action)}/hide">${revision}<button>プリセットを非表示</button></form>` : ''}`);
 }
-export function renderFigures(): string {
+/**
+ * Researcher catalogue. New receptions offer the managed three-figure presets only (#268), so they are listed on their own;
+ * the older four- and six-figure sets are kept apart and closed, because the reception list still prints their ids for
+ * receptions approved before. Without a preset port the presets section is left out, as on the settings page.
+ */
+export function renderFigures(presets?: readonly FigurePreset[]): string {
   const cell = (figure: BankFigure) => `<figure><div class="figure-art">${figureSvg(figure)}</div><figcaption>${escapeHtml(figure.id)}</figcaption></figure>`;
   const byId = new Map(FIGURE_BANK.map(f => [f.id, f]));
-  const sets = Object.entries(FIGURE_SETS).map(([id, ids]) => `<h3>${escapeHtml(id)}</h3><div class="figure-grid">${ids.map(fid => byId.get(fid)).filter((f): f is BankFigure => Boolean(f)).map(cell).join('')}</div>`).join('');
+  const grid = (ids: readonly string[]) => `<div class="figure-grid">${ids.map(id => byId.get(id)).filter((f): f is BankFigure => Boolean(f)).map(cell).join('')}</div>`;
+  const titled = (title: string, ids: readonly string[]) => `<h3>${escapeHtml(title)}</h3>${grid(ids)}`;
+  const current = presets === undefined ? '' : `<h2>新しい受付のプリセット（3図形）</h2>
+<p><a href="/admin/figure-presets">図形プリセットを管理</a></p>${presets.length ? presets.map(preset => titled(preset.name, preset.figureIds)).join('') : '<p>表示中のプリセットはありません。</p>'}`;
+  const legacy = Object.entries(FIGURE_SETS);
   return page('図形一覧', `${adminNav('/admin/figures')}<h1>図形一覧</h1>
-<p class="muted">候補バンク（${escapeHtml(FIGURE_BANK_VERSION)}）と候補セットは予備検討用です。実験条件への採用は研究者が判断します。</p>
-<h2>全${FIGURE_BANK.length}図形</h2><div class="figure-grid">${FIGURE_BANK.map(cell).join('')}</div>
-<h2>候補セット</h2>${sets}`);
+<p class="muted">候補バンク（${escapeHtml(FIGURE_BANK_VERSION)}）は予備検討用です。実験条件への採用は研究者が判断します。</p>
+<h2>全${FIGURE_BANK.length}図形</h2>${grid(FIGURE_BANK.map(f => f.id))}
+${current}
+<h2>旧い受付の図形セット（4・6図形）</h2>${fold(`図形セット（${legacy.length}件）`, legacy.map(([id, ids]) => titled(id, ids)).join(''))}`);
 }

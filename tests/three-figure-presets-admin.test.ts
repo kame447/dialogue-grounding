@@ -225,3 +225,35 @@ test('individual approval carries the displayed protocol fields and has no figur
   assert.match(approval, /name="protocolSha256"/u);
   assert.doesNotMatch(approval, /name="figure/u);
 });
+
+// #280: the catalogue lists what new receptions offer, and keeps the older four- and six-figure sets apart.
+test('the figure catalogue lists the presets the settings form offers, through create, rename and hide, and keeps the older sets in a closed block of their own', async () => {
+  const h = harness();
+  const offered = async () => [...(await (await h.request(SETTINGS)).text()).matchAll(/name="figureSetId" value="[^"]*"> ([^<]*?) ・ ([^<]*)<\/label>/gu)]
+    .map(match => [match[1], match[2].split('、')]);
+  const catalogue = async () => {
+    const html = await (await h.request('/admin/figures')).text();
+    const current = html.split(/(?=<h2>)/u).find(part => part.startsWith('<h2>新しい受付のプリセット（3図形）</h2>'));
+    assert.ok(current, 'the new-reception presets have a heading of their own');
+    return { html, presets: current.split('<h3>').slice(1).map(chunk => [chunk.slice(0, chunk.indexOf('</h3>')), [...chunk.matchAll(/aria-label="(F\d+)"/gu)].map(match => match[1])]) };
+  };
+  const initial = await catalogue();
+  assert.equal(initial.presets.length, 10);
+  assert.deepEqual(initial.presets, await offered());
+  assert.ok(initial.presets.every(([, ids]) => ids.length === 3));
+
+  assert.equal((await h.request(PRESETS + '/new', editorForm(0, '確認用', ['F30', 'F2', 'F11']))).status, 303);
+  const created = (await h.index.listFigurePresets()).find(row => row.name === '確認用')!;
+  assert.equal((await h.request(PRESETS + '/' + TRIO + '/hide', new URLSearchParams({ expectedRevision: '1' }))).status, 303);
+  assert.equal((await h.request(PRESETS + '/' + created.id, editorForm(1, '改名', ['F1', 'F3', 'F29']))).status, 303);
+  const after = await catalogue();
+  assert.deepEqual(after.presets, await offered());
+  assert.equal(after.presets.length, 10);
+  assert.ok(!after.presets.some(([name]) => name === '3図形（F1–F3）'), 'a hidden preset is no longer listed');
+  assert.deepEqual(after.presets.at(-1), ['改名', ['F1', 'F3', 'F29']]);
+
+  const olderHeading = '<h2>旧い受付の図形セット（4・6図形）</h2>';
+  assert.doesNotMatch(after.html.slice(0, after.html.indexOf(olderHeading)), /legacy-v1|pilot-four-v1|bank-set-/u);
+  assert.match(after.html, new RegExp(`${olderHeading}\\s*<details class="diag"><summary>図形セット（6件）</summary>`, 'u'));
+  assert.doesNotMatch(after.html, /<details[^>]*\sopen/u);
+});

@@ -572,7 +572,10 @@ export async function handleAdmin(request: Request, deps: AdminDeps): Promise<Re
   }
   if (url.pathname === "/admin/log-live.js") return respond(200, LOG_LIVE_JS, "text/javascript; charset=utf-8");
   if (url.pathname === "/admin/style.css") return respond(200, ADMIN_CSS, "text/css; charset=utf-8");
-  if (url.pathname === "/admin/figures") return respond(200, renderFigures());
+  if (url.pathname === "/admin/figures") {
+    try { return respond(200, renderFigures(await deps.receptionSettings?.figurePresets?.list())); }
+    catch { return respond(503, renderMessage('図形一覧', '図形プリセットを読み込めませんでした。')); }
+  }
   if (url.pathname === "/admin" || url.pathname === "/admin/") {
     const filter = parseFilter(url.searchParams);
     const page = await deps.listPage(url.searchParams.get("after"));
