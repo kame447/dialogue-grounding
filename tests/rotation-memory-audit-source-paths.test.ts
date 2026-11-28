@@ -111,3 +111,33 @@ test('同じ向きの別の候補は一致せず、同じ候補は一致する�
   }
   assert.ok(sameChecked > 500 && differentChecked > 500 && otherViewChecked > 5000 && unnamedChecked > 500, JSON.stringify({ sameChecked, differentChecked, otherViewChecked, unnamedChecked }));
 });
+
+test('同じ名詞が別の領域にあるとき（例: F1@270 の P1 と P4 の「尾」）、明示の領域が違えば一致せず、同じなら一致し、領域を定めない引用は一致しない', { skip }, async () => {
+  const memory = await load(files[0]), evidence = await load(files[2]);
+  let pairs = 0, sameRegion = 0, unnamedRegion = 0;
+  for (const figureKey of FIGURES) for (const rotation of [0, 90, 180, 270]) {
+    const projection = memory.projectOwnRotationMemory({ figureKey, rotation }), figureId = 's-0000';
+    const memo = { observedAt: '2026-01-01T00:00:00.000Z', figures: [{ id: figureId, region: { x: 0, y: 0, w: 1, h: 1 }, holistic: [],
+      analytic: { shapes: [], composition: 'x', relations: [] }, unknowns: [], reobservations: [], rotation: projection }] };
+    const declare = (path: Path) => evidence.readVisualFeatureSources([{ figureId, path }], memo, [figureId]);
+    const extract = (path: Path, text: string, quote: string) => evidence.readVisualFeatureEvidence({ sources: [{ source: { figureId, path }, quote }] }, memo, [figureId], text);
+    const views: { view: any; head: Path }[] = [{ view: projection.current, head: ['rotation', 'current'] }, ...projection.turned.map((v: any, i: number) => ({ view: v, head: ['rotation', 'turned', i] }))];
+    for (const { view, head } of views) {
+      const partCandidates = Object.entries<any[]>(view.parts).flatMap(([region, list]) => list.map((c, j) => ({ region, j, noun: c.noun as string })));
+      for (const a of partCandidates) for (const b of partCandidates) {
+        if (a.noun !== b.noun || a.region === b.region) continue;
+        const label = `${figureKey}@${rotation} ${head.slice(1).join('/')} 「${a.noun}」 ${a.region} と ${b.region}`;
+        const declared = declare([...head, 'parts', a.region, a.j, 'noun']);
+        assert.ok(declared, `${label}: 宣言が読めない`);
+        const text = `${a.noun}に見えます`;
+        const other = extract([...head, 'parts', b.region, b.j, 'noun'], text, a.noun), same = extract([...head, 'parts', a.region, a.j, 'noun'], text, a.noun);
+        assert.ok(!other || !evidence.sameVisualFeatureSources(declared, other), `${label}: 別の領域の同名の候補が一致扱い`);
+        assert.ok(same && evidence.sameVisualFeatureSources(declared, same), `${label}: 同じ領域の同じ候補が一致しない`);
+        const line = extract(head[1] === 'current' ? ['rotation', 'current'] : ['rotation', 'turned', head[2] as number, 'view'], text, a.noun);
+        assert.ok(!line || !evidence.sameVisualFeatureSources(declared, line), `${label}: 領域を定めない引用（向きの行＋名詞）が一致扱い`);
+        pairs++; sameRegion++; unnamedRegion++;
+      }
+    }
+  }
+  assert.ok(pairs >= 10, '同名・別領域の組の数 ' + pairs + '（現行の束では18組のはず）');
+});
