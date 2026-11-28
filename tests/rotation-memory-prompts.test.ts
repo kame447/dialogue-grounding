@@ -227,7 +227,15 @@ test('end to end (offline, both strategies): the decision, local extraction, AI 
   const luna = bodies.filter(b => b.provider === 'luna');
   const memoMessages = luna.flatMap(b => (b.json.messages as { content: unknown }[]).map(m => String(m.content))).filter(text => text.includes('"rotationLegend"'));
   assert.ok(memoMessages.length >= 3, 'generation, local extraction and AI extraction carry the memo');
-  for (const text of memoMessages) { assert.equal(count(text, '"rotationLegend"'), 1); assert.ok(text.includes(JSON.stringify(ROTATION_LEGENDS.roles).slice(1, -1))); }
+  for (const text of memoMessages) assert.equal(count(text, '"rotationLegend"'), 1);
+  // Generation carries the roles layer (one line per region and per whole); the two extractions carry the nouns layer.
+  const parsed = memoMessages.map(text => JSON.parse(text));
+  const generationMemo = parsed.filter(p => p.rotationLegend === ROTATION_LEGENDS.roles), extractionMemos = parsed.filter(p => p.rotationLegend === ROTATION_LEGENDS.nouns);
+  assert.equal(generationMemo.length, 1);
+  assert.ok(extractionMemos.length >= 2);
+  assert.ok(Array.isArray(generationMemo[0].memo.figures[0].rotation.current.whole) || generationMemo[0].memo.figures[0].rotation.current.whole === undefined);
+  assert.equal(typeof generationMemo[0].memo.figures[0].rotation.regions[0], 'string');
+  for (const p of extractionMemos) assert.equal(typeof p.observations.figures[0].rotation.current, 'string');
   const generation = luna.find(b => (b.json.messages as { content: unknown }[]).some(m => String(m.content).includes('見る角度によっては〜')));
   assert.ok(generation, 'the generation instructions carry the rotation lines');
   // Nothing from the researcher side reaches any request: no bank figure key, no absolute rotation word, no mode name inside the memo part, no old template construal.

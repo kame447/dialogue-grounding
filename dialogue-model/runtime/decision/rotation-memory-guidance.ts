@@ -15,7 +15,7 @@ const object = (v: unknown): v is Record<string, unknown> => !!v && Object.getPr
 /** What a call is shown: nouns = whole/part nouns with minimal geometry; roles = nouns + the roles of regions in each whole + full geometry; full = everything. */
 export type RotationLayer = "nouns" | "roles" | "full";
 /** One place that says which layer each kind of call carries (decision: the fixed small block counted in the state budget). */
-export const ROTATION_LAYER_OF_CALL = Object.freeze({ decision: "nouns", generation: "roles", extraction: "roles", reobservation: "nouns" } as const);
+export const ROTATION_LAYER_OF_CALL = Object.freeze({ decision: "nouns", generation: "roles", extraction: "nouns", reobservation: "nouns" } as const);
 
 /** The figure's rotation memory when it is present and well formed, else null. A malformed value is treated as absent: it never stops a request. */
 export function figureRotation(figure: unknown): OwnRotationMemory | null {
@@ -28,14 +28,13 @@ export function hasRotationMemory(memo: { figures: readonly unknown[] } | undefi
 }
 
 type Layered = Record<string, unknown>;
-const mark = (c: { confidence?: "中" | "高" }) => c.confidence === undefined ? {} : { confidence: c.confidence };
 const nounMark = (c: { noun: string; confidence?: "中" | "高" }) => c.confidence === undefined ? c.noun : `${c.noun}（${c.confidence}）`;
-/** The roles and full layers: whole candidates as objects (noun, confidence mark, roles per region; full adds posture and direction), part candidates as plain nouns. The owner of a part is not carried. */
+const partsLine = (view: OwnRotationView): string => Object.entries(view.parts).map(([id, list]) => `${id} ${list.map(nounMark).join("・")}`).join(" / ") || "なし";
+/** The roles and full layers: a whole construal is one line "見立て: P1 役割 / P2 役割 …" (full adds the posture and the direction in the view), the part candidates one line; the owner of a part is not carried. */
 function layerView(view: OwnRotationView, layer: RotationLayer): Layered {
-  const whole = view.whole.map(w => ({ noun: w.noun, ...mark(w), roles: w.roles, ...(layer === "full" ? { posture: w.posture, direction: w.direction } : {}) }));
-  const parts = Object.fromEntries(Object.entries(view.parts).map(([id, list]) => [id, list.map(nounMark)]));
-  return { whole, parts };
+  return { whole: view.whole.map(w => `${nounMark(w)}${layer === "full" ? `（${w.posture}／${w.direction}）` : ""}: ${Object.entries(w.roles).map(([id, role]) => `${id} ${role}`).join(" / ")}`), parts: partsLine(view) };
 }
+const regionLine = (r: OwnRotationMemory["regions"][number]): string => `${r.id} ${r.at}の${r.shapeName} ${r.areaPercent}%${r.tip === undefined ? "" : ` 頂点${r.tip}向き`}${r.concave === true ? " くぼみあり" : ""}${r.adjacent.length ? ` 隣:${r.adjacent.join("・")}` : ""}`;
 /** The nouns layer writes a view as one line: "全体: 見立て・見立て / P1 部分の見立て・… / P2 …"; "全体: なし" when the view has no whole construal. */
 const viewLine = (view: OwnRotationView): string => ["全体: " + (view.whole.length ? view.whole.map(nounMark).join("・") : "なし"),
   ...Object.entries(view.parts).map(([id, list]) => `${id} ${list.map(nounMark).join("・")}`)].join(" / ");
@@ -43,7 +42,7 @@ const viewLine = (view: OwnRotationView): string => ["全体: " + (view.whole.le
 export function rotationMemoryLayer(rotation: OwnRotationMemory, layer: RotationLayer): Layered {
   if (layer === "nouns") return { regions: rotation.regions.map(r => `${r.id} ${r.shapeName} ${r.areaPercent}%`), current: viewLine(rotation.current),
     turned: rotation.turned.map(t => ({ rel: t.rel, view: viewLine(t) })), wholeAnywhere: rotation.wholeAnywhere };
-  return { regions: rotation.regions, current: layerView(rotation.current, layer), turned: rotation.turned.map(t => ({ rel: t.rel, ...layerView(t, layer) })), wholeAnywhere: rotation.wholeAnywhere };
+  return { regions: rotation.regions.map(regionLine), current: layerView(rotation.current, layer), turned: rotation.turned.map(t => ({ rel: t.rel, ...layerView(t, layer) })), wholeAnywhere: rotation.wholeAnywhere };
 }
 /** The memo as a call shows it: every well-formed rotation replaced by its layer, a malformed one removed. Other fields are untouched. */
 export function withRotationLayer<T extends { figures: readonly unknown[] }>(memo: T, layer: RotationLayer): T {
@@ -58,19 +57,16 @@ export function withRotationLayer<T extends { figures: readonly unknown[] }>(mem
 
 /** The legend of a layer: the base says what the data is; the clauses are present only for the keys the layer carries. */
 export function rotationLegend(layer: RotationLayer): string {
-  const detail = layer !== "nouns", full = layer === "full";
   const head = "rotationは、自分の同じ図形を向きを変えて見たと想像したときの見立ての記録で、すべて仮説です。";
-  if (!detail) return head + "regionsは図形の領域の「領域id 形 面積の割合」で、領域のidで部分の見立てと結び付きます。" +
+  if (layer === "nouns") return head + "regionsは図形の領域の「領域id 形 面積の割合」で、領域のidで部分の見立てと結び付きます。" +
     "currentは今の向き、turnedは今の向きを時計回りにrel度回したと想像した向きで、各向きは「全体: 全体の見立て / 領域id 部分の見立ての候補」の1行です。" +
     "見立ては・で並び、確信度は中・高のときだけ括弧で付き、無ければ低です。「全体: なし」はその向きに全体の見立てがないことです。" +
     "部分の見立ては全体の見立てとは別の候補です。wholeAnywhereはどれかの向きに全体の見立てがあるかを示します。";
-  return head +
-    "regionsは図形の領域のid・形・面積の割合で、領域のidで他の項目と結び付きます。" + "atは自分の今の画面での位置、tipは尖った頂点の向き、adjacentは隣り合う領域です。" +
+  return head + "regionsは領域ごとの1行「領域id 自分の今の画面での位置の形 面積の割合 頂点の向き くぼみ 隣:隣り合う領域」で、領域のidで他の項目と結び付きます。" +
     "currentは今の向き、turnedは今の向きを時計回りにrel度回したと想像した向きで、どの向きも同じ形式です。" +
-    "各向きのwholeは全体の見立ての配列で、nounは見立てた物、confidenceは中・高のときだけ付き無ければ低です" +
-    (detail ? "、rolesは領域idごとの役割" : "") + (full ? "、postureはその姿勢、directionはその見え方の中での向き" : "") + "。空の配列はその向きに全体の見立てがないことです。" +
-    "partsは全体の見立てとは別の、領域idごとの部分の見立ての候補で、確信度は括弧で付きます。wholeAnywhereはどれかの向きにwholeがあるかを示します。" +
-    (detail ? "turnedの位置や方向の語はその見え方の中の向きなので、今の画面での位置はregionsのatで言います。" : "");
+    "各向きのwholeは全体の見立てごとの1行「見立て: 領域id 役割 / …」で、確信度は中・高のときだけ見立ての後に括弧で付き無ければ低です" + (layer === "full" ? "（続く括弧は姿勢／その見え方の中での向き）" : "") + "。空の配列はその向きに全体の見立てがないことです。" +
+    "partsは全体の見立てとは別の、領域idごとの部分の見立ての候補の1行です。wholeAnywhereはどれかの向きに全体の見立てがあるかを示します。" +
+    "turnedの位置や方向の語はその見え方の中の向きなので、今の画面での位置はregionsの位置の語で言います。";
 }
 export const ROTATION_LEGENDS: Readonly<Record<RotationLayer, string>> = Object.freeze({ nouns: rotationLegend("nouns"), roles: rotationLegend("roles"), full: rotationLegend("full") });
 /** The key that carries the legend next to the data in a JSON state or context (once per call). */
@@ -105,12 +101,12 @@ export const ROTATION_REQUEST_OBSERVATION = "回転別メモ（rotation）にな
 export const GENERATION_ROTATION_EDITS: readonly (readonly [from: string, to: string])[] = Object.freeze([
   ["自然な見立てがなければ全体の形でかまいません。",
     "今の向きに見立てがあればそれを自然に優先し、なければ最初から、別の向きの見立てを「見る角度によっては〜」「向きを変えて見ると〜」と添えて伝えてかまいません。" +
-    "相手が今の見立てを受け入れなかったときや、相手の説明が別の向きの見立てに合うと気づいたときにも使えます。一度に伝えるのは一、二個にとどめます。" +
+    "相手が今の見立てを受け入れなかったときや、相手の説明が別の向きの見立てに合うと気づいたときにも使えます。" +
     "どの向きにも全体の見立てがなければ、全体の形や、領域ごとの部分の見立て（耳・くちばし・柄など）から印象を伝えてください。"],
   ["相手の方位は相手の見え方として扱い、自分と同じ配置や向きだと断定しないでください。",
     "相手の方位は相手の見え方として扱い、自分と同じ配置や向きだと断定しないでください。" +
     "「見る角度によっては」「向きを変えて見ると」は自分側の想像の見立てで、相手の画面の向きや相手の見え方を述べるものではありません。" +
-    "回した見え方の上下左右などはその見え方の中の向きなので、今の画面の位置を言うときは「こちらの画面では」と示して領域のatの語を使い、角度の数値は言わなくてかまいません。"],
+    "角度の数値は言わなくてかまいません。"],
   ["などの内部項目名や種別名も公開しないでください。",
     "などの内部項目名や種別名も公開しないでください。rotation、regions、current、turned、whole、roles、領域のid（P1など）も同様です。"],
 ]);
