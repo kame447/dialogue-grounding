@@ -9,6 +9,8 @@ export const ISSUE_HANDLING_GENERATION = "jev_generation_retry_v21";
 export const GENERATION_RETRY_V22 = "jev_generation_retry_v22";
 export const GENERATION_RETRY_V23 = "jev_generation_retry_v23";
 export const GENERATION_RETRY_V24 = "jev_generation_retry_v24";
+export type PostGenerationCheck = "off" | "on";
+export const isPostGenerationCheck = (value: unknown): value is PostGenerationCheck => value === "off" || value === "on";
 export const isGenerationV22 = (value: unknown): value is typeof GENERATION_RETRY_V22 => value === GENERATION_RETRY_V22;
 export const isGenerationV23 = (value: unknown): value is typeof GENERATION_RETRY_V23 => value === GENERATION_RETRY_V23;
 export const isGenerationV24 = (value: unknown): value is typeof GENERATION_RETRY_V24 => value === GENERATION_RETRY_V24;

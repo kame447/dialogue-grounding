@@ -4,13 +4,15 @@
 import type { RepairHistoryEntry } from "../decision/contract.ts";
 
 export type RepairGate = { version: "agreement_gate_v1"; closed: { turn: number; issueId: string | null; agreeTurn: number }[] };
-type Judged = { turnIndex: number; judgment: { action: string; targetSlot: string | null; candidateName?: string | null } };
+type Judged = { turnIndex: number; judgment: { action: string; targetSlot: string | null; candidateName?: string | null };
+  generatedPublication?: { agreementWithheld?: true } };
 type Claim = { speaker: string; act: string; targets: readonly string[]; sourceTurn: number };
 
 const REOPEN_ACTS = ["deny", "name_reject"];
 /** Committed agree turns per figure, strictly between `after` and `before`. */
 function agreeTurns(judgments: readonly Judged[], figureId: string, after: number, before: number) {
-  return judgments.filter(j => j.judgment.action === "agree" && j.judgment.targetSlot === figureId && j.turnIndex > after && j.turnIndex < before)
+  return judgments.filter(j => j.judgment.action === "agree" && !j.generatedPublication?.agreementWithheld &&
+      j.judgment.targetSlot === figureId && j.turnIndex > after && j.turnIndex < before)
     .map(j => j.turnIndex);
 }
 /** A later committed act that moves the figure off "agreed" in the own ledger (judgment/schema.mjs applyAct). */

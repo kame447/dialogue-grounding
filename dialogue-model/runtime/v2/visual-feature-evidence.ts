@@ -74,17 +74,19 @@ export function sameVisualFeatureSources(declared: readonly VisualFeatureSource[
   return declared.length === observed.size && declared.every(source => observed.has(sourceKey(source)));
 }
 
-export function readVisualFeatureDraft(raw: string, memo: ObservationMemo, targets: readonly string[], combined: boolean) {
+export function readVisualFeatureDraft(raw: string, memo: ObservationMemo, targets: readonly string[], combined: boolean,
+  ignoreSources = false) {
   try {
     const value: unknown = JSON.parse(raw);
-    if (!exact(value, combined ? ["text", "observationFeatures", "moveOn"] : ["text", "observationFeatures"]) ||
+    const keys = combined ? ["text", "moveOn"] : ["text"];
+    if (!(exact(value, [...keys, "observationFeatures"]) || ignoreSources && exact(value, keys)) ||
         typeof value.text !== "string" || !value.text.trim() || value.text.length > 12000) return null;
     let moveOn: string | null = null;
     if (combined) {
       if (typeof value.moveOn !== "string" || !value.moveOn.trim() || value.text.length + value.moveOn.length + 1 > 12000) return null;
       moveOn = value.moveOn;
     }
-    const sources = readVisualFeatureSources(value.observationFeatures, memo, targets);
+    const sources = ignoreSources ? [] : readVisualFeatureSources(value.observationFeatures, memo, targets);
     return sources === null ? null : { text: value.text, moveOn, sources };
   } catch { return null; }
 }

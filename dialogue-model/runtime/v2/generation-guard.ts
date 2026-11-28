@@ -686,6 +686,7 @@ export function rewriteReasons(codes: readonly string[], policy?: DialoguePolicy
     codes.includes("draft_shared_claim_unconfirmed") ? "前の下書きに名前以外の過大断定がないか確認できませんでした。候補の範囲と未確認・保留の細部を守り、大まかな共有見立ての範囲が明確になるように書き直してください。" : "",
     isGenerationV19(version) && codes.includes("visual_feature_mismatch") ? "前の下書きでは、公開文で使われた特徴の出所を観察メモと照合できませんでした。対象と論点を保ち、根拠のある特徴を使うか、不確かさを伝えてください。指定されたJSONの形で返してください。" : "",
     isGenerationV16(version) && !isGenerationV19(version) && codes.includes("confirmation_detail_mismatch") ? "前の下書きでは選んだ確認特徴を照合できませんでした。その特徴を尋ねる文を作り、指定されたJSONの形で返してください。" : "",
+    isGenerationV24(version) && codes.includes("draft_structure_mismatch") ? "前の下書きは指定の出力形式を満たしていませんでした。公開する内容を、上で指定された JSON の形で返してください。" : "",
   ].join("");
 }
 
@@ -743,6 +744,7 @@ export function findLocalPublicationViolations(text: string, messages: readonly 
 }
 
 export type GenerationCodeContext = { action: PublicationAction; candidateName: string | null; v3: boolean; holistic: boolean; adaptive: boolean; factored: boolean; ai: boolean;
+  mechanicalOnly?: boolean;
   publicTexts: readonly string[]; dialoguePolicy?: DialoguePolicy; generationRetryVersion?: GenerationRetryVersion;
   /** The participant's public utterances so far (v10: the only source of direction words a quotation after "そちらでいう" may excuse). */
   humanTexts?: readonly string[];
@@ -756,13 +758,16 @@ export function generationGuardCodes(text: string, c: GenerationCodeContext): st
   const squeezed = text.normalize("NFKC").replace(/\s/gu, "");
   const issueHandling = isIssueHandlingGeneration(c.generationRetryVersion);
   const explicitNonAdoption = issueHandling && ["hold_open", "carry_over", "consult"].includes(c.action);
-  return [...new Set([...findGuardViolations(text, c.action).filter(code => !c.holistic || explicitNonAdoption || !isAgreementWordCode(code)),
+  const actCodes = c.mechanicalOnly ? findInternalLeaks(text) : [
+    ...findGuardViolations(text, c.action).filter(code => !c.holistic || explicitNonAdoption || !isAgreementWordCode(code)),
     ...(c.v3 ? findOrientationLeaks(text, c.dialoguePolicy, c.generationRetryVersion, c.humanTexts, c.recentHumanTexts, c.publicTexts) : []),
     ...(c.v3 ? findWorkingNoteLeaks(text, c.publicTexts) : []),
     ...(c.v3 && !usesV22GenerationRules(c.generationRetryVersion) && isGenerationV6(c.generationRetryVersion) && !["move_on", "defer", "close", "carry_over", "consult"].includes(c.action) &&
       (isGenerationV15(c.generationRetryVersion) || c.vetoed === true || c.action === "confirm" || c.action === "repair") ? (isGenerationV11(c.generationRetryVersion) ? findTopicShiftClaimsV11(text) : isGenerationV7(c.generationRetryVersion) ? findTopicShiftClaimsV7(text) : findTopicShiftClaims(text)) : []),
     ...(c.v3 && c.action === "agree" && c.candidateName !== null ? findAgreeNameMismatch(text, c.candidateName) : []),
     ...(c.v3 && c.action === "propose_name" && c.candidateName !== null ? findProposeNameMismatch(text, c.candidateName) : []),
+  ];
+  return [...new Set([...actCodes,
     ...(c.adaptive && /repair[_-]?prospect|repair_issue|candidate_narrowed|candidate_widened|other_figure_benefit|no_open_issue|issue_\d+/iu.test(squeezed) ? ["internal_field"] : []),
     ...(c.factored && /repair_?facts|reply_?vs_?previous|not_comparable|widened_or_shifted|same_?question|local_?gaps/iu.test(squeezed) ? ["internal_field"] : []),
     ...(/human[_-]?referent/iu.test(squeezed) ? ["internal_field"] : []),
