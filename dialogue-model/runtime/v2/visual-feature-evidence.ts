@@ -4,7 +4,7 @@ import { describePart } from "../observation/part-consumers.ts";
 import { rotationMemoryLayer } from "../decision/rotation-memory-guidance.ts";
 import type { RotationLayer } from "../decision/rotation-memory-guidance.ts";
 import { rotationSourceValue } from "../stimuli/rotation-memory-shape.ts";
-import type { OwnRotationMemory } from "../stimuli/rotation-memory-shape.ts";
+import type { OwnRotationMemory, OwnRotationView } from "../stimuli/rotation-memory-shape.ts";
 
 export type VisualFeatureSource = { figureId: string; path: (string | number)[] };
 export type ExtractedVisualFeature = { source: VisualFeatureSource; quote: string };
@@ -17,27 +17,65 @@ const exact = (value: unknown, keys: readonly string[]): value is Record<string,
 const index = (value: unknown): value is number => Number.isSafeInteger(value) && (value as number) >= 0;
 
 const ROTATION_LAYERS: readonly RotationLayer[] = ["nouns", "roles", "full"];
+type Path = (string | number)[];
+/** One construal the memory offers in a view: a whole one (whole/i) or a part one of a region (parts/Pk/j). */
+type Candidate = { unit: Path; noun: string; kind: "whole" | "parts" };
+const candidatesOf = (view: OwnRotationView, head: Path): Candidate[] => [
+  ...view.whole.map((w, i) => ({ unit: [...head, "whole", i], noun: w.noun, kind: "whole" as const })),
+  ...Object.entries(view.parts).flatMap(([id, list]) => list.map((c, j) => ({ unit: [...head, "parts", id, j], noun: c.noun, kind: "parts" as const }))),
+];
+/** In one view the same noun of the same kind is one candidate: the first in stored order stands for it (two regions may both offer 耳). */
+const standing = (all: readonly Candidate[], c: Candidate): Candidate => all.find(o => o.kind === c.kind && o.noun === c.noun) ?? c;
 
 /**
- * A source in the pre-made rotation memory is read the way the model saw it. The path may lead to a string in the stored projection
- * (["rotation","turned",1,"whole",0,"noun"]) or in any layer a call shows (["rotation","turned",1,"view"], ["rotation","turned",1,"whole",0]),
- * or be the unit itself. Every one of them means one unit, whichever layer showed it: a region, the current view or one turned view.
- * The unit's path is the source's identity, so a declaration made on one layer and an extraction made on another compare equal.
- * Null when the path is not a source of this memory.
+ * A source in the pre-made rotation memory, read the way the model saw it. A path may lead to a string of the stored projection
+ * (["rotation","turned",1,"whole",0,"noun"]), of a layer a call shows (["rotation","turned",1,"whole",0], ["rotation","turned",1,"view"]),
+ * or be a unit itself. The unit is what a statement relies on: a candidate of a view (whole/i, parts/Pk/j), a region's part
+ * candidates, a view as a whole, or a region of the figure (regions/i). A declaration and an extraction compare by their units,
+ * so a different candidate of the same view is a different source. `scope` is set for a unit that does not name one candidate
+ * (a view, a region's part candidates): the words an extraction quotes may narrow it to one. Null when the path is not a source here.
  */
-function rotationUnit(rotation: OwnRotationMemory, path: readonly (string | number)[]): { path: (string | number)[]; text: string } | null {
-  const [, area, k] = path;
-  let unit: (string | number)[];
-  if (area === "regions" && index(k) && k < rotation.regions.length) unit = ["rotation", "regions", k];
-  else if (area === "current") unit = ["rotation", "current"];
-  else if (area === "turned" && index(k) && k < rotation.turned.length) unit = ["rotation", "turned", k];
+function rotationSource(rotation: OwnRotationMemory, path: readonly (string | number)[]): { unit: Path; scope: Candidate[] | null; all: Candidate[] } | null {
+  const leaf = (): boolean => [rotation, ...ROTATION_LAYERS.map(layer => rotationMemoryLayer(rotation, layer) as unknown as OwnRotationMemory)]
+    .some(shape => !!rotationSourceValue(shape, path.slice(1))?.trim());
+  const rest = path.slice(1);
+  if (rest[0] === "regions") {
+    const i = rest[1];
+    return index(i) && i < rotation.regions.length && (rest.length === 2 || leaf()) ? { unit: ["rotation", "regions", i], scope: null, all: [] } : null;
+  }
+  let head: Path, view: OwnRotationView, tail: Path;
+  if (rest[0] === "current") { head = ["rotation", "current"]; view = rotation.current; tail = rest.slice(1); }
+  else if (rest[0] === "turned" && index(rest[1]) && rest[1] < rotation.turned.length) { head = ["rotation", "turned", rest[1]]; view = rotation.turned[rest[1]]; tail = rest.slice(2); }
   else return null;
-  const layers = ROTATION_LAYERS.map(layer => rotationMemoryLayer(rotation, layer) as unknown as OwnRotationMemory);
-  // The unit itself reads as its one-line description (the nouns layer); a deeper path must lead to a string of the stored projection or of a layer.
-  const text = path.length === unit.length
-    ? rotationSourceValue(layers[0], unit[1] === "turned" ? ["turned", unit[2] as number, "view"] : unit.slice(1))
-    : [rotation, ...layers].map(shape => rotationSourceValue(shape, path.slice(1))).find(value => value !== undefined && value.trim());
-  return text?.trim() ? { path: unit, text } : null;
+  const all = candidatesOf(view, head);
+  // The view itself, its one-line description or its part line.
+  if (tail.length === 0 || tail.length === 1 && (tail[0] === "parts" || tail[0] === "view" && head[1] === "turned")) return { unit: head, scope: all, all };
+  const at = (c: Candidate, n: number) => c.unit[head.length + n];
+  if (tail[0] === "whole" && index(tail[1]) && tail[1] < view.whole.length) {
+    const own = all.find(c => c.kind === "whole" && at(c, 1) === tail[1])!;
+    return tail.length === 2 || leaf() ? { unit: standing(all, own).unit, scope: null, all } : null;
+  }
+  if (tail[0] === "parts" && typeof tail[1] === "string" && Object.hasOwn(view.parts, tail[1])) {
+    const region = tail[1];
+    if (tail.length === 2) return { unit: [...head, "parts", region], scope: all.filter(c => c.kind === "parts" && at(c, 1) === region), all };
+    const own = all.find(c => c.kind === "parts" && at(c, 1) === region && at(c, 2) === tail[2]);
+    return own && (tail.length === 3 || leaf()) ? { unit: standing(all, own).unit, scope: null, all } : null;
+  }
+  return null;
+}
+
+/**
+ * An extraction that only reaches a view (or a region's part candidates) names the candidate through the words it quotes: every candidate of that
+ * scope whose noun is in the quote is the source. A quote that names none leaves the source as it is, so it does not equal a declared candidate.
+ */
+function narrow(memo: ObservationMemo, source: VisualFeatureSource, quote: string): VisualFeatureSource[] {
+  if (source.path[0] !== "rotation") return [source];
+  const rotation = memo.figures.find(candidate => candidate.id === source.figureId)?.rotation;
+  const found = rotation ? rotationSource(rotation, source.path) : null;
+  if (!found?.scope) return [source];
+  const units = new Map<string, Path>();
+  for (const c of found.scope) if (quote.includes(c.noun)) { const unit = standing(found.all, c).unit; units.set(JSON.stringify(unit), unit); }
+  return units.size ? [...units.values()].map(path => ({ figureId: source.figureId, path })) : [source];
 }
 
 function sourceValue(memo: ObservationMemo, source: VisualFeatureSource): string | undefined {
@@ -69,8 +107,8 @@ function readSource(value: unknown, memo: ObservationMemo, targets: readonly str
   const source = { figureId: value.figureId, path: [...value.path] };
   if (source.path[0] === "rotation") {
     const rotation = memo.figures.find(candidate => candidate.id === source.figureId)?.rotation;
-    const unit = rotation ? rotationUnit(rotation, source.path) : null;
-    return unit ? { figureId: source.figureId, path: unit.path } : null;
+    const found = rotation ? rotationSource(rotation, source.path) : null;
+    return found ? { figureId: source.figureId, path: found.unit } : null;
   }
   return sourceValue(memo, source)?.trim() ? source : null;
 }
@@ -106,7 +144,8 @@ export function readVisualFeatureEvidence(value: unknown, memo: ObservationMemo,
     const source = readSource(entry.source, memo, targets);
     const span = text === undefined ? undefined : literalSpan(text, entry.quote);
     if (!source || text !== undefined && (!span || span.text.length > 160)) return null;
-    sources.push({ source, quote: span?.text ?? entry.quote });
+    const quote = span?.text ?? entry.quote;
+    for (const narrowed of narrow(memo, source, quote)) sources.push({ source: narrowed, quote });
   }
   return { sources };
 }
