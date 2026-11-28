@@ -560,10 +560,12 @@ function prepare(input: JevDecisionInput, layout: JevQuestionLayout = "two_stage
   let publicationRecoveryContext: JevDecisionInput["publicationRecoveryContext"];
   if (input.publicationRecoveryContext !== undefined) {
     const value = input.publicationRecoveryContext;
+    const respondToRequest = object(value) && Object.hasOwn(value, "respondToRequest");
     const hasPurpose = object(value) && object(value.previous) && Object.hasOwn(value.previous, "visualPurpose");
     const handlingFields = issueHandling && object(value) && object(value.previous)
       ? ["issue", "destination"].filter(key => Object.hasOwn(value.previous, key)) : [];
-    if (!repairQuality || !exact(value, ["reason", "previous"]) || !includes(PUBLICATION_RECOVERY_REASONS, value.reason) ||
+    if (!repairQuality || !exact(value, ["reason", "previous", ...(respondToRequest ? ["respondToRequest"] : [])]) ||
+        respondToRequest && (!issueHandling || value.respondToRequest !== true) || !includes(PUBLICATION_RECOVERY_REASONS, value.reason) ||
         !exact(value.previous, ["action", "target", "name", "feature", ...(hasPurpose ? ["visualPurpose"] : []), ...handlingFields]) ||
         !includes(actions.filter(action => action !== "request_observation"), value.previous.action) ||
         !(value.previous.name === null || text(value.previous.name, 80)) ||
@@ -571,7 +573,7 @@ function prepare(input: JevDecisionInput, layout: JevQuestionLayout = "two_stage
         hasPurpose !== (visualPurpose && isVisualAction(value.previous.action)) ||
         hasPurpose && (value.previous.feature !== null || !isJevVisualPurpose(value.previous.visualPurpose))) fail("invalid_input");
     const target = cleanTarget(value.previous.target, slots);
-    publicationRecoveryContext = { reason: value.reason, previous: { action: value.previous.action,
+    publicationRecoveryContext = { reason: value.reason, ...(respondToRequest ? { respondToRequest: true } : {}), previous: { action: value.previous.action,
       target, name: value.previous.name, feature: value.previous.feature,
       ...(hasPurpose ? { visualPurpose: structuredClone(value.previous.visualPurpose) } : {}),
       ...(issueHandling ? validateHandlingFields({ ...value.previous, target }, slots) : {}) } };
@@ -908,7 +910,7 @@ function prepare(input: JevDecisionInput, layout: JevQuestionLayout = "two_stage
       add(MOVE_ON_SOURCE_QUESTION, ISSUE_HANDLING_MOVE_ON_INSTRUCTIONS, { ...ISSUE_HANDLING_MOVE_ON_CRITERIA });
       add("commitment_state", "今回の人間の公開発話に対し、対象の同定、候補や呼び名の採否、理解の可否の表明が関連しているか、関連していれば自分の材料がどの状態かを一つ選んでください。この答えは研究記録に使い、次に取る行動を選ぶ問いではありません。", { ...COMMITMENT_STATE_CRITERIA });
     } else if (input.humanLedMoveOn) add(MOVE_ON_SOURCE_QUESTION, MOVE_ON_SOURCE_INSTRUCTIONS, { ...MOVE_ON_SOURCE_CRITERIA });
-    if (publicationRecoveryContext) questions[PUBLICATION_CONTINUATION_QUESTION] = publicationContinuationQuestion();
+    if (publicationRecoveryContext) questions[PUBLICATION_CONTINUATION_QUESTION] = publicationContinuationQuestion(publicationRecoveryContext.respondToRequest);
   } else {
   add("action", "次の行動を一つ選んでください。request_observationは公開発話を生成する前の追加観察要求です。", Object.fromEntries(
     JEV_ACTIONS.filter(a => (a !== "request_observation" || reobservationAllowed) &&
