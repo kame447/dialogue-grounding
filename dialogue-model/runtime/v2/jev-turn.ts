@@ -2196,8 +2196,10 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
           (hasV22Rules && judgment.action === "confirm" ? "\n" + generation.actionScope.confirm : "") : generation.actionScope[judgment.action]) + "\n" +
           (issueHandling ? visualSelection && !humanLedTransition ? KEEP_ISSUE_V21 + "\n" : ""
             : isGenerationV6(generationRetryVersion) && (isVetoed(selectedIntervention) || visualSelection) ? VETOED_MOVE_V6 + "\n" : "");
+      // A memo that carries a rotation memory: the generation lines it contradicts or lacks are replaced (v23/v24 text only), and its legend sits next to the data once.
+      const rotationTurn = hasRotationMemory(memo);
       const actionMessage: Message = { role: "system", content: generationV23 ? generationActionPromptV23({
-        items: items.map(publicationItem), visualDetail, omitVisualSources: checksOff, humanLedTransition, closing,
+        items: items.map(publicationItem), visualDetail, omitVisualSources: checksOff, rotationSources: rotationTurn, humanLedTransition, closing,
         publicQuestions: repairQualityPublicQuestions(latest.seq, publicTurns, claims),
         reconsidered: reconsidered !== null, continuing: continuing !== null, namingRequest: record.namingRequest === true,
         respondToRequest: generationV24,
@@ -2228,8 +2230,6 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
           ...(execution.detailFigureIds ? { detailFigureIds: execution.detailFigureIds } : {}) }) };
       const shared = execution.sharedClaimIds && baseInput.sharedConstruals?.find(candidate => stateSame(candidate.claimIds, execution.sharedClaimIds));
       const retainedReferenceHistory = history && buildRetainedReferenceHistory(graph, history, publicTurns, latest.seq);
-      // A memo that carries a rotation memory: the generation lines it contradicts or lacks are replaced (v23/v24 text only), and its legend sits next to the data once.
-      const rotationTurn = hasRotationMemory(memo);
       const turnInstructions = (instructions: string) => rotationTurn && generationV23 ? applyGenerationRotationEdits(instructions) : instructions;
       const messages: Message[] = [{ role: "system", content: generationTask }, { role: "system", content: turnInstructions(multipleItems ? multiIssueInstructions : generationInstructions) },
         ...(!generationV23 && generation.concise ? [{ role: "system" as const, content: generation.concise }] : []),

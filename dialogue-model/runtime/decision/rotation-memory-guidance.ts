@@ -103,6 +103,7 @@ export const GENERATION_ROTATION_EDITS: readonly (readonly [from: string, to: st
     "今の向きに見立てがあればそれを自然に優先し、なければ最初から、別の向きの見立てを「見る角度によっては〜」「向きを変えて見ると〜」と添えて伝えてかまいません。" +
     "相手が今の見立てを受け入れなかったときや、相手の説明が別の向きの見立てに合うと気づいたときにも使えます。" +
     "どの向きにも全体の見立てがなければ、全体の形や、領域ごとの部分の見立て（耳・くちばし・柄など）から印象を伝えてください。"],
+  ["自分側の見え方を示し、相手には形の対応を尋ねてください。", "自分側の見え方を示してください。質問は、選んだ行動が質問のときだけにします。"],
   ["相手の方位は相手の見え方として扱い、自分と同じ配置や向きだと断定しないでください。",
     "相手の方位は相手の見え方として扱い、自分と同じ配置や向きだと断定しないでください。" +
     "「見る角度によっては」「向きを変えて見ると」は自分側の想像の見立てで、相手の画面の向きや相手の見え方を述べるものではありません。" +
@@ -119,11 +120,24 @@ export function applyGenerationRotationEdits(instructions: string): string {
   return result;
 }
 
+// ---- observation sources (postGenerationCheck: on only) ----
+/** Example paths into the saved rotation memory for a declared observation source: the first key is "rotation", the rest is the path inside the projection the memo carries (indexes count from 0 in the order the lines are written). */
+export const ROTATION_SOURCE_EXAMPLES: readonly (readonly (string | number)[])[] = Object.freeze([
+  ["rotation", "current", "whole", 0, "noun"], ["rotation", "current", "whole", 0, "roles", "P1"], ["rotation", "current", "parts", "P1", 0, "noun"], ["rotation", "turned", 1, "whole", 0, "noun"],
+]);
+export const ROTATION_FEATURE_SOURCES = "回転別メモを使った出所は、先頭を \"rotation\" にして、見立ての名詞・領域の役割・部分の見立てを指します。例は " +
+  ROTATION_SOURCE_EXAMPLES.map(path => JSON.stringify(path)).join("、") + " です。whole・parts の添字は各向きの行に並んだ順で0から数え、別の向きは current の代わりに turned と添字（0〜2）で指します。";
+
 // ---- extraction and re-observation ----
+/** The re-observation request of a rotation-memo turn names only the topic (plus the public quote): how to read it (support, contradiction, unknown, no pandering) is said once, in the observer's system instruction. */
+export const ROTATION_OBSERVE_TOPICS = Object.freeze({
+  orientation: "指定図形の向き・部分間の方向関係", part: "指定図形の部分と構成", contour: "指定図形の輪郭",
+  construal: "指定図形が相手の別の見立てにも見えるか", referent: "指定図形と公開発話の特徴の照合",
+} as const);
 export const EXTRACTION_ROTATION_USE = "相手の説明は、今の向きだけでなくrotationの別の向きの見立てや部分の候補とも照合し、合う図形をtargetsの候補に残してください。一致は候補の根拠にとどまり、同じ図形・名前の合意の確定ではありません。";
 export const AI_EXTRACTION_ROTATION_USE = "「向きを変えて見ると〜」「見る角度によっては〜」は、rotationに根拠がある自分側の想像の見立て（construal）として抽出してください。相手の画面の向きの主張ではありません。";
 export const REOBSERVATION_ROTATION_USE = "figuresのrotationは自分の図形を向きを変えて見たと想像した見立ての記録で、今の画像上の根拠ではありません。画像で確かめられる点だけをsupports・contradicts・unknownへ書いてください。";
 
 /** Every rotation text a call can carry, for the guard that keeps instruction text out of public utterances. */
 export const ROTATION_PRIVATE_TEXTS: readonly string[] = Object.freeze([...Object.values(ROTATION_LEGENDS), ROTATION_MATCH_USE,
-  EXTRACTION_ROTATION_USE, AI_EXTRACTION_ROTATION_USE, REOBSERVATION_ROTATION_USE, ...GENERATION_ROTATION_EDITS.map(([, to]) => to)]);
+  EXTRACTION_ROTATION_USE, AI_EXTRACTION_ROTATION_USE, REOBSERVATION_ROTATION_USE, ROTATION_FEATURE_SOURCES, ...GENERATION_ROTATION_EDITS.map(([, to]) => to)]);

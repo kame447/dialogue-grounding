@@ -12,10 +12,11 @@ import { SHAPE_TERMINOLOGY_GENERATION } from '../dialogue-model/runtime/shape-te
 import { ROTATION_MEMO_ABSENT, ROTATION_MEMO_COMPOSITION } from '../dialogue-model/runtime/observation/rotation-memo.ts';
 import { ROTATION_MEMORY_ENTRIES } from '../dialogue-model/runtime/stimuli/rotation-memory-data.ts';
 import { projectOwnRotationMemory } from '../dialogue-model/runtime/stimuli/rotation-memory.ts';
-import { AI_EXTRACTION_ROTATION_USE, COMMON_DIFFERENT_CONSTRUAL, EXTRACTION_ROTATION_USE, GENERATION_ROTATION_EDITS, REOBSERVATION_ROTATION_USE, ROTATION_ACCEPT_ANSWER,
+import { AI_EXTRACTION_ROTATION_USE, COMMON_DIFFERENT_CONSTRUAL, ROTATION_FEATURE_SOURCES, ROTATION_OBSERVE_TOPICS, ROTATION_SOURCE_EXAMPLES, EXTRACTION_ROTATION_USE, GENERATION_ROTATION_EDITS, REOBSERVATION_ROTATION_USE, ROTATION_ACCEPT_ANSWER,
   ROTATION_CONFIRM, ROTATION_LAYER_OF_CALL, ROTATION_LEGENDS, ROTATION_MATCH_USE, ROTATION_PROPOSE_NAME, applyGenerationRotationEdits, figureRotation, hasRotationMemory,
   rotationMemoryLayer, withRotationLayer } from '../dialogue-model/runtime/decision/rotation-memory-guidance.ts';
-import { GENERATION_INSTRUCTIONS_V23, GENERATION_INSTRUCTIONS_V24 } from '../dialogue-model/runtime/v2/generation-prompt-v23.ts';
+import { GENERATION_INSTRUCTIONS_V23, GENERATION_INSTRUCTIONS_V24, generationActionPromptV23 } from '../dialogue-model/runtime/v2/generation-prompt-v23.ts';
+import { readVisualFeatureSources } from '../dialogue-model/runtime/v2/visual-feature-evidence.ts';
 import { memoExtractionPrompt } from '../dialogue-model/runtime/local-grounding/extract.ts';
 import { memoAiExtractionPrompt } from '../dialogue-model/runtime/local-grounding/extract-ai.ts';
 import { OBSERVATION_TARGETED_INSTRUCTIONS, buildReobservationMessages } from '../dialogue-model/runtime/observation/observe.ts';
@@ -168,6 +169,8 @@ test('generation instructions: the contradicting lines are replaced for v23 and 
     assert.ok(text.includes('自然な見立てがなければ全体の形でかまいません。') && !text.includes('見る角度によっては'));
     assert.ok(!next.includes('自然な見立てがなければ全体の形でかまいません。') && next.includes('見る角度によっては') && next.includes('自分側の想像の見立て'));
     assert.ok(next.includes('領域のid（P1など）'));
+    // A direct answer is not given a shape question to ask: the viewpoint mark is asked of, a question only when the chosen action is one.
+    assert.ok(text.includes('相手には形の対応を尋ねてください') && !next.includes('相手には形の対応を尋ねてください') && next.includes('質問は、選んだ行動が質問のときだけにします'));
     assert.ok(!/[0-9]+度/u.test(GENERATION_ROTATION_EDITS.map(([, to]) => to).join('')));
   }
   assert.throws(() => applyGenerationRotationEdits('別の文面'), /out_of_sync/u);
@@ -262,4 +265,46 @@ test('end to end (offline, both strategies): the decision, local extraction, AI 
     assert.doesNotMatch(b.text, /"F\d{1,2}"|figureKey|angles|absolute/u);
     assert.ok(!b.text.includes('翼や尖った突起'));
   }
+});
+
+test('postGenerationCheck on: the observation-source examples for a rotation memory are asked of only when sources are, and each example resolves against the saved memo', () => {
+  const rotation = projectOwnRotationMemory({ figureKey: 'F1', rotation: 270 })!;
+  const memo = { observedAt: '2026-01-01T00:00:00.000Z', figures: [{ id: 's-000a', region: { x: 0, y: 0, w: 9, h: 9 }, holistic: [], analytic: { shapes: [], composition: COMPOSITION, relations: [] }, unknowns: [], reobservations: [], rotation }] };
+  for (const path of ROTATION_SOURCE_EXAMPLES) {
+    assert.ok(readVisualFeatureSources([{ figureId: 's-000a', path: [...path] }], memo as never, ['s-000a']), JSON.stringify(path));
+    assert.ok(ROTATION_FEATURE_SOURCES.includes(JSON.stringify(path)));
+  }
+  assert.equal(readVisualFeatureSources([{ figureId: 's-000a', path: ['rotation', 'current', 'whole', 7, 'noun'] }], memo as never, ['s-000a']), null);
+  const prompt = (rotationSources: boolean, omitVisualSources: boolean) => generationActionPromptV23({ items: [{ action: 'confirm', target: { kind: 'single', figureId: 's-000a' }, visualPurpose: { kind: 'clarify_reference' } }],
+    publicQuestions: [] as never, visualDetail: true, omitVisualSources, rotationSources, humanLedTransition: false, closing: null, reconsidered: false, continuing: false, namingRequest: false,
+    namingConflict: null, withdrawnName: null });
+  assert.ok(prompt(true, false).includes(ROTATION_FEATURE_SOURCES));
+  assert.ok(!prompt(false, false).includes(ROTATION_FEATURE_SOURCES));
+  assert.ok(!prompt(true, true).includes(ROTATION_FEATURE_SOURCES), 'with the checks off no sources are asked of, so none are explained');
+  assert.ok(memoAiExtractionPrompt(undefined, true, false, true).includes(ROTATION_FEATURE_SOURCES));
+  assert.ok(!memoAiExtractionPrompt(undefined, true, false, false).includes(ROTATION_FEATURE_SOURCES) && !memoAiExtractionPrompt(undefined, false, false, true).includes(ROTATION_FEATURE_SOURCES));
+});
+
+test('a re-observation of a rotation-memo turn names only the topic in the issue; how to read it is said once, in the system instruction', async () => {
+  const manifest = normal.run.manifest;
+  const profile = JSON.parse(JSON.stringify(researchTrialProfileV3(manifest.lunaRequest, manifest.timeouts, 'two_stage_v3', 'holistic_v5', 'bypass_acceptance_v3', 'jev_repair_quality_v1')));
+  const anchors = OWN.ownAnchors.slice(0, 3), slots = anchors.map((a: { id: string }) => a.id);
+  const memo = { observedAt: '2026-01-01T00:00:00.000Z', figures: anchors.map((a: { id: string; bbox: object }, i: number) => ({ id: a.id, region: { ...a.bbox }, reobservations: [], unknowns: [],
+    holistic: [], analytic: { shapes: [], composition: COMPOSITION, relations: [] }, rotation: rotationOf(i) })) };
+  const state = initialState({ profile, memo: memo as never, generationRetryVersion: 'jev_generation_retry_v24', agreeNameScopeVersion: 'jev_naming_v3' });
+  state.ledger = Object.fromEntries(slots.map((id: string) => [id, { status: 'unassigned', name: null }]));
+  state.graph.slots = slots;
+  state.observationMemo = structuredClone(memo);
+  const human = 'こちらの図形は魚みたいに見えますか？';
+  const captures: { provider: string; body: string }[] = [];
+  await runTurn(profile, 'repair-first', state, [{ id: 'event-1', seq: 1, speaker: 'human', text: human }], {
+    postGenerationCheck: 'off', action: 'confirm', target: 'figure_0', referent: 'figure_0', reobserve: true, speech: JSON.stringify({ text: '魚の形に見える部分を確かめてみます。' }), aiExtraction: '[]',
+    choose: (key: string) => key === 'human_move_on_source' ? 'other' : key === 'commitment_state' ? 'not_due' : key === 'draft_topic_shift' ? 'within_plan' : key === 'observe_aspect' ? 'construal' : undefined,
+    captureRequest: (provider: string, body: string) => captures.push({ provider, body }) } as never, { version: 'adaptive_repair_v3' }, 'jev_generation_retry_v24', { ...OWN, ownAnchors: anchors }, 'repair-first');
+  const request = captures.filter(c => c.provider === 'luna').map(c => JSON.parse(c.body).messages as { role: string; content: unknown }[]).find(messages => String(messages[0].content).startsWith('Jevから指定されたfigureIds'));
+  assert.ok(request, 'the re-observation request was sent');
+  const system = String(request[0].content), context = JSON.parse(String(request[1].content));
+  assert.equal(context.issue.question, ROTATION_OBSERVE_TOPICS.construal + '\n今回の公開人間発話（引用）: ' + human);
+  assert.ok(system.includes('迎合せず') && !context.issue.question.includes('迎合') && !context.issue.question.includes('支える部位'));
+  assert.equal(context.rotationLegend, ROTATION_LEGENDS.nouns);
 });

@@ -4,7 +4,7 @@ import { modelPartGeometry, hasPartGeometry, PART_INDEX_INSTRUCTIONS } from '../
 import { ROTATION_MEMO_ABSENT, ROTATION_MEMO_COMPOSITION } from '../observation/rotation-memo.ts';
 import { hasRotationMemory, figureRotation, rotationMemoryLayer, rotationLegendEntry, rotationNameCandidates, rotationFeatureCandidates, ROTATION_LAYER_OF_CALL,
   COMMON_DIFFERENT_CONSTRUAL, COMMON_DIFFERENT_CONSTRUAL_ROTATION, ROTATION_MATCH_USE, ROTATION_ACCEPT_ANSWER, ROTATION_ACCEPT_BACKCHANNEL,
-  ROTATION_REQUEST_OBSERVATION, ROTATION_CONFIRM, ROTATION_PROPOSE_NAME } from "./rotation-memory-guidance.ts";
+  ROTATION_REQUEST_OBSERVATION, ROTATION_CONFIRM, ROTATION_PROPOSE_NAME, ROTATION_OBSERVE_TOPICS } from "./rotation-memory-guidance.ts";
 import type { OwnRotationMemory } from "./rotation-memory-guidance.ts";
 import { ISSUE_HANDLING_MOVE_ON_CRITERIA, ISSUE_HANDLING_MOVE_ON_INSTRUCTIONS, MOVE_ON_SOURCE_QUESTION } from "./human-led-move-on.ts";
 import { COMMITMENT_STATES, ISSUE_HANDLING_VERSION, JEV_ACTIONS_V21, NON_BYPASS_ALTERNATIVES, SWITCH_FUNCTIONS, issueAlternativeTarget, issueHandlingMatchesSource, projectExtraHandling } from "./issue-handling.ts";
@@ -1622,7 +1622,7 @@ function decodeDetail(selected: JevActionTarget, p: ReturnType<typeof prepareDet
     if (selected.action === "request_observation") {
       const figureIds = p.subsets.find((_ids, i) => choices.observe_targets === `subset_${i}`)!;
       const aspect = choices.observe_aspect as JevObservationRequest["aspect"];
-      observe = { figureIds: [...figureIds], aspect, question: OBSERVE_QUESTIONS[aspect] + "\n今回の公開人間発話（引用）: " + p.human.slice(0, 160), partnerConstrual: null };
+      observe = { figureIds: [...figureIds], aspect, question: (p.rotationPresent ? ROTATION_OBSERVE_TOPICS[aspect as keyof typeof ROTATION_OBSERVE_TOPICS] : OBSERVE_QUESTIONS[aspect]) + "\n今回の公開人間発話（引用）: " + p.human.slice(0, 160), partnerConstrual: null };
     } else if (selected.action !== "accept" && !p.purposeOptions && !p.issueOptions) {
       const kind = ["propose_name", "agree"].includes(selected.action) ? "name" : "feature";
       const c = p.candidates.find((_c, i) => choices[kind] === `${kind}_${i}`)!;
