@@ -38,7 +38,7 @@ import { inferenceHistory } from '../v2/agreement-gate.ts';
 import { defaultGenerationRetryVersion, hasVersionedViewpoint, isGenerationV12, isGenerationV13, isGenerationV17, isGenerationV19, validGenerationRetryVersion, validAgreeNameScope } from '../v2/generation-guard.ts';
 import type { ShapeTerminologyVersion } from '../shape-terminology.ts';
 import type { GenerationRetryVersion } from '../v2/generation-guard.ts';
-import { isIssueHandlingGeneration, type DeferredAiExtractionGeneration } from '../v2/deferred-ai-extraction.ts';
+import { isGenerationV24, isIssueHandlingGeneration, isPostGenerationCheck, type PostGenerationCheck, type DeferredAiExtractionGeneration } from '../v2/deferred-ai-extraction.ts';
 import { ISSUE_HANDLING_VERSION } from '../decision/issue-handling.ts';
 
 type ParticipantRunBudget = RunBudget<BudgetLimits | null>;
@@ -69,6 +69,7 @@ type ParticipantJevVersionPin = Readonly<{
 export type JevResearchOptions<Ledger extends JevResearchLedger = RunBudget> = Readonly<{ profile: ResearchTrialProfileV3; observer: ObservationObserver;
   jevDecision: JevDecisionClient; localGrounding: JevTurnLocalOptions; ledger: Ledger; technicalTrial?: AdaptiveRepairTrial;
   generationRetryVersion?: GenerationRetryVersion;
+  postGenerationCheck?: PostGenerationCheck;
   newTrialAgreeNameScopeVersion?: JevTurnOptions["newTrialAgreeNameScopeVersion"]; pinnedVersions?: ParticipantJevVersionPin }>;
 type SelectedJevResearchOptions = JevResearchOptions<JevResearchLedger> & {
   namingRestoreVersion?: typeof AI_NAME_ACCEPTANCES_V1; participantPrompts?: true };
@@ -166,7 +167,7 @@ export function selectParticipantJev(restore: any, provided: unknown, context: {
       if (marker !== undefined && marker !== true && marker !== false) return invalid();
       if (marker !== true) {
         const state = restore.queueState?.privateState;
-        if (['profileSha256','interventionPolicy','technicalTrial','questionLayout','dialoguePolicy','generationRetryVersion','jevNamingRestoreVersion'].some(k => Object.hasOwn(restore.options ?? {},k)) ||
+        if (['profileSha256','interventionPolicy','technicalTrial','questionLayout','dialoguePolicy','generationRetryVersion','jevNamingRestoreVersion','postGenerationCheck'].some(k => Object.hasOwn(restore.options ?? {},k)) ||
             ['jevTraces','aiPublicSettlement','initialObservation','jevLedger'].some(k => Object.hasOwn(restore,k)) ||
             state && (['schemaVersion','interventionPolicy','observationMemo','repairHistory','aiPublic'].some(k=>Object.hasOwn(state,k)) ||
               state.judgments?.some((j: any) => j.jevTurn))) return invalid();
@@ -177,6 +178,7 @@ export function selectParticipantJev(restore: any, provided: unknown, context: {
     const raw = data(provided);
     const v = data(raw,['profile','observer','jevDecision','localGrounding','ledger',...(Object.hasOwn(raw,'technicalTrial')?['technicalTrial']:[]),
       ...(Object.hasOwn(raw,'generationRetryVersion')?['generationRetryVersion']:[]),
+      ...(Object.hasOwn(raw,'postGenerationCheck')?['postGenerationCheck']:[]),
       ...(Object.hasOwn(raw,'newTrialAgreeNameScopeVersion')?['newTrialAgreeNameScopeVersion']:[]),
       ...(Object.hasOwn(raw,'pinnedVersions')?['pinnedVersions']:[])]);
     const technicalTrial = Object.hasOwn(v,'technicalTrial') ? checkedTechnicalTrial(v.technicalTrial) : undefined;
@@ -210,6 +212,10 @@ export function selectParticipantJev(restore: any, provided: unknown, context: {
       ? restore ? savedGenerationVersion ?? 'jev_generation_retry_v2'
         : (pinned?.generationRetryVersion ?? requestedGenerationVersion) as GenerationRetryVersion | undefined ?? defaultGenerationRetryVersion(profile.questionLayout, profile.dialoguePolicy)
       : undefined;
+    const postGenerationCheck = v.postGenerationCheck;
+    if (isGenerationV24(generationRetryVersion)
+      ? !isPostGenerationCheck(postGenerationCheck) || restore && restore.options?.postGenerationCheck !== postGenerationCheck
+      : Object.hasOwn(v, 'postGenerationCheck') || restore && Object.hasOwn(restore.options ?? {}, 'postGenerationCheck')) return invalid();
     const issueHandling = isIssueHandlingGeneration(generationRetryVersion);
     if (issueHandling !== (profile.interventionPolicy.version === 'bypass_acceptance_v3')) return invalid();
     const requestedScope = v.newTrialAgreeNameScopeVersion;
@@ -322,6 +328,7 @@ export function selectParticipantJev(restore: any, provided: unknown, context: {
     const rebuilt = typeof (local.classifier as any)?.forPolicy === 'function' ? (local.classifier as any).forPolicy(profile.dialoguePolicy) : undefined;
     if (rebuilt) local = {...local,classifier:rebuilt};
     return {profile,observer,jevDecision,localGrounding:local,ledger:v.ledger,...(technicalTrial?{technicalTrial}:{}),...(generationRetryVersion?{generationRetryVersion}:{}),
+      ...(isPostGenerationCheck(postGenerationCheck) ? { postGenerationCheck } : {}),
       ...(pinned ? {participantPrompts:true as const} : {}),
       ...(!restore && newTrialAgreeNameScopeVersion !== undefined ? {newTrialAgreeNameScopeVersion} : {}),
       ...(namingRestoreVersion?{namingRestoreVersion}:{})};

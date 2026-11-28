@@ -22,6 +22,7 @@ function fixture() {
     async read() { return { protocol: null, mode: { value: 'unset', revision: 0 }, protocolHistory: [], modeHistory: [] }; },
     async saveProtocol(input: unknown) { calls.push({ op: 'saveProtocol', args: [input] }); return { ok: true }; },
     async saveMode(input: unknown) { calls.push({ op: 'saveMode', args: [input] }); return { ok: true }; },
+    async savePostGenerationCheck() { throw new Error('unexpected save'); },
   };
   const deps = { token: TOKEN, limiter: { async limit() { return { success: true }; } },
     async listPage() { return { items: [], next: null }; }, async getSummary() { return null; }, async getRecord() { return null; },

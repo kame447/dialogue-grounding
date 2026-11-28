@@ -15,10 +15,12 @@ const exact = (value: unknown, keys: readonly string[]): value is Record<string,
   Object.keys(value).length === keys.length && keys.every(key => Object.hasOwn(value, key));
 const itemIndex = (value: unknown, count: number): value is number => typeof value === "number" && Number.isSafeInteger(value) && value >= 0 && value < count;
 
-export function readIssuePublicationDraft(raw: string, count: number, memo: ObservationMemo, targets: readonly string[], combined: boolean) {
+export function readIssuePublicationDraft(raw: string, count: number, memo: ObservationMemo, targets: readonly string[], combined: boolean,
+  ignoreSources = false) {
   let value: unknown;
   try { value = JSON.parse(raw); } catch { return null; }
-  if (!exact(value, combined ? ["parts", "observationFeatures", "moveOn"] : ["parts", "observationFeatures"]) ||
+  const keys = combined ? ["parts", "moveOn"] : ["parts"];
+  if (!(exact(value, [...keys, "observationFeatures"]) || ignoreSources && exact(value, keys)) ||
       !Array.isArray(value.parts) || value.parts.length !== count) return null;
   const ids = new Set<number>(), parts: DraftPart[] = [];
   for (const part of value.parts) {
@@ -34,7 +36,7 @@ export function readIssuePublicationDraft(raw: string, count: number, memo: Obse
     moveOn = value.moveOn;
   }
   if (text.length + (moveOn === null ? 0 : moveOn.length + 1) > 12000) return null;
-  const sources = readVisualFeatureSources(value.observationFeatures, memo, targets);
+  const sources = ignoreSources ? [] : readVisualFeatureSources(value.observationFeatures, memo, targets);
   return sources && { text, parts, moveOn, sources };
 }
 

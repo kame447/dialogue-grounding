@@ -69,6 +69,9 @@ export type Plan = { action: string; target: string; issue?: string; prospect?: 
   aiActs?: readonly string[];
   /** The partner-referent estimate's top label (e.g. `multiple`, `figure_3`); default the first offered. */
   referent?: string;
+  postGenerationCheck?: import("../../dialogue-model/runtime/v2/deferred-ai-extraction.ts").PostGenerationCheck;
+  onDraftCheck?: () => void;
+  onDeferredPublication?: (job: import("../../dialogue-model/runtime/v2/deferred-ai-extraction.ts").DeferredAiPublicJob) => void;
   captureRequest?: (provider: 'luna' | 'jev', body: string) => void };
 const TEXTS: Record<string, string> = { local_extraction: '[]', ai_extraction: '[]' };
 
@@ -124,8 +127,8 @@ export async function runTurn(profile: any, label: Label, state: any, events: an
     completeDetail: (i: any, s: any, o: any) => native.completeDetail!(i, s, o),
     // The partner-referent estimate is asked only for a turn that scripts one (plan.referent), so every other record keeps its request stream.
     ...(plan.referent ? { estimateReferent: (i: any, o: any) => native.estimateReferent!(i, o) } : {}),
-    ...(profile.dialoguePolicy ? { classifyDraftAct: (i: any, o: any) => native.classifyDraftAct!(i, o),
-      ...(issueHandling ? { classifyDraftSharedClaim: (i: any, o: any) => native.classifyDraftSharedClaim!(i, o) } : {}) } : {}),
+    ...(profile.dialoguePolicy ? { classifyDraftAct: (i: any, o: any) => { plan.onDraftCheck?.(); return native.classifyDraftAct!(i, o); },
+      ...(issueHandling ? { classifyDraftSharedClaim: (i: any, o: any) => { plan.onDraftCheck?.(); return native.classifyDraftSharedClaim!(i, o); } } : {}) } : {}),
     ...(technicalTrial ? { estimateRepairProspect: (i: any, o: any) => native.estimateRepairProspect!(i, o) } : {}) };
   const runtime = createProfileDialogue(profile, { client, image: own.ownImage, anchors: [...own.ownAnchors], strategy: label,
     ...(state.graph?.memoryPruneVersion ? { memoryPruneVersion: state.graph.memoryPruneVersion } : {}),
@@ -136,7 +139,8 @@ export async function runTurn(profile: any, label: Label, state: any, events: an
     localGrounding: { classifier: createJevLocalTestClassifier({ enabled: true, readKey, fetchImpl, timeoutMs: profile.timeouts.localMs, researchLimits: { maxDeadlineMs: 600000 }, questionLayout: profile.questionLayout,
       ...(['holistic_v3', 'holistic_v5'].includes(profile.dialoguePolicy) ? { dialoguePolicy: profile.dialoguePolicy } : {}) })!,
       aiPublicTransport: { readKey, fetchImpl, timeoutMs: profile.timeouts.decisionMs } },
-    onJevTurnTrace: (t: any) => traces.push(t), generationRetryVersion, ...(technicalTrial ? { technicalTrial } : {}),
+    onJevTurnTrace: (t: any) => traces.push(t), generationRetryVersion, postGenerationCheck: plan.postGenerationCheck,
+    ...(technicalTrial ? { technicalTrial } : {}),
     ...(issueHandling ? { deferredAiExtractionProfileSha256: researchHash(profile) } : {}),
     ...(issueHandlingReplayHistory ? { issueHandlingReplayHistory } : {}) } as any);
   const at = '2000-01-01T00:00:00.000Z';
@@ -168,6 +172,7 @@ export async function runTurn(profile: any, label: Label, state: any, events: an
   if (issueHandling && disposition.status === 'committed' && job) {
     assert.ok('completeDeferredAiExtraction' in runtime && typeof runtime.completeDeferredAiExtraction === 'function');
     assert.equal(job.state, 'queued');
+    plan.onDeferredPublication?.(structuredClone(job));
     job.state = 'running';
     const pending = await runtime.completeDeferredAiExtraction(saved, outcome.publicEvents, traces.at(-1).aiPublic);
     assert.notEqual(pending.status, 'failed');
@@ -211,7 +216,7 @@ export async function buildRecords({ label = 'repair-first' as Label, technicalT
   promptSources?: Awaited<ReturnType<typeof promptSourceManifest>>;
   interventionVersion?: Parameters<typeof researchTrialProfileV3>[4];
   judgmentMaterialVersion?: JudgmentMaterialVersion;
-  figureCount?: 4 | 6;
+  figureCount?: 3 | 4 | 6;
 }) {
   const n = structuredClone(normal), tr = n.trials[0], m = n.run.manifest;
   const own = { ...OWN, ownAnchors: OWN.ownAnchors.slice(0, figureCount) };
@@ -221,7 +226,7 @@ export async function buildRecords({ label = 'repair-first' as Label, technicalT
   for (const s of [n.run, n.summary, tr]) { s.profile = structuredClone(profile); s.profileSha256 = digest; }
   tr.identity.profile = digest; tr.label = label; m.trials[0].label = label; n.summary.runOrder[0].label = label;
   let state: any = initialState({ profile, ledger, memo, generationRetryVersion, agreeNameScopeVersion });
-  if (figureCount === 4) {
+  if (figureCount !== 6) {
     const slots = own.ownAnchors.map((anchor: { id: string }) => anchor.id);
     state.ledger = Object.fromEntries(slots.map((slot: string) => [slot, state.ledger[slot]]));
     state.graph.slots = slots;
@@ -257,6 +262,7 @@ export async function buildRecords({ label = 'repair-first' as Label, technicalT
       common: { luna: a.luna.slice(0, a.boundary.luna), jev: a.jev.slice(0, a.boundary.jev), reobservations: structuredClone(a.reobservations) },
       tails: { 'repair-first': seg(a), 'bypass-enabled': seg(b) }, recorded: { label, expectedRequests: [] }, ...(technicalTrial ? { technicalTrial } : {}),
       ...(version ? { generationRetryVersion: version } : {}),
+      ...(version === "jev_generation_retry_v24" ? { postGenerationCheck: turns[i].plan.postGenerationCheck } : {}),
       ...(isIssueHandlingGeneration(version) ? { requestSeq: runs[label].requestSeq } : {}) };
     const probe: any = await pairedInterventionReplay(tape, own as any, MODEL, profile);
     assert.equal(probe.status === 'not_reached', false, String(probe.error));

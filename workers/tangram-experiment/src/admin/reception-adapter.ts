@@ -169,6 +169,7 @@ export function createReceptionAdminPort(options: Options): ReceptionAdminPort {
 type SettingsIndex = {
   readReceptionSettings(): Promise<unknown>; receptionProtocolHistory(): Promise<unknown>; receptionModeHistory(): Promise<unknown>;
   saveManagedReceptionProtocol(input: ProtocolFormInput): Promise<unknown>; saveReceptionMode(input: unknown): Promise<unknown>;
+  saveReceptionPostGenerationCheck(input: unknown): Promise<unknown>;
   listFigurePresets: FigurePresetPort['list']; readFigurePreset: FigurePresetPort['read']; saveFigurePreset: FigurePresetPort['save'];
 };
 const SAVE_ERRORS = ['conflict', 'invalid', 'protocol_unconfigured', 'unavailable'];
@@ -186,6 +187,7 @@ export function createReceptionSettingsPort(index: SettingsIndex): ReceptionSett
     },
     async saveProtocol(input) { return saveResult(await index.saveManagedReceptionProtocol(input)); },
     async saveMode(input) { return saveResult(await index.saveReceptionMode(input)); },
+    async savePostGenerationCheck(input) { return saveResult(await index.saveReceptionPostGenerationCheck(input)); },
     figurePresets: {
       async list() { return structuredClone(await index.listFigurePresets()); },
       async read(id) { return structuredClone(await index.readFigurePreset(id)); },

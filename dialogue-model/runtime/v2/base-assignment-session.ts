@@ -185,6 +185,7 @@ export function createBaseAssignmentSession(options: BaseSessionOptions): BaseSe
         ...(preparedObservation ? { preparedObservation } : {}),
         ...(recoveringAdmission ? { recoveringAdmission: true } : {}),
         ...(participantDialogueProfile ? { participantDialogueProfile } : {}),
+        ...(plan?.postGenerationCheck ? { postGenerationCheck: plan.postGenerationCheck } : {}),
         ...(restore ? {} : { rotationMode: assignmentRotationMode(a),
           ...(a.source.kind === 'reception_plan_v3' ? { figureSelection: assignmentFigureSelection(a) } : {}) }) }); }
       catch (error) { if (error === token.internal && error instanceof BaseSessionError) throw error; token.cause = failureCauseOf(error); return fail(); }

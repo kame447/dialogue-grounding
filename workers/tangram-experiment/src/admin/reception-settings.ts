@@ -4,11 +4,14 @@
 //   "reception-protocol:rev:<10>"    {revision, sha256, savedAt, protocol}  complete canonical v2 or v3 protocol (new saves are v3; saved v2 entries stay readable)
 //   "reception-mode:current"         {revision, value, savedAt, protocolRevision}
 //   "reception-mode:rev:<10>"        same as current, per revision
-// Neither key exists until a researcher saves. A history without its current
+//   "reception-post-generation-check:current" / "reception-post-generation-check:rev:<10>"
+//                                    {revision, value, savedAt}
+// No key exists until a researcher saves. A history without its current
 // pointer, or a pointer that disagrees with its history, is damage: it fails
 // closed and is never read as "unsaved" or "off".
 import { ReceptionError, validateReceptionProtocolV2, validateReceptionProtocolV3, receptionProtocolSha256 } from '../../../../dialogue-model/runtime/v2/reception.ts';
 import type { ReceptionProtocolV2, ReceptionProtocolV3 } from '../../../../dialogue-model/runtime/v2/reception.ts';
+import { isPostGenerationCheck, type PostGenerationCheck } from '../../../../dialogue-model/runtime/v2/deferred-ai-extraction.ts';
 import { FIGURE_SET_SIZE } from '../../../../dialogue-model/runtime/stimuli/figure-bank.ts';
 import { readFigurePreset } from './figure-presets.ts';
 import type { ProtocolFigureSelection, ProtocolFormInput } from './reception-port.ts';
@@ -23,7 +26,8 @@ export type StoredProtocol = ReceptionProtocolV2 | ReceptionProtocolV3;
 export type ProtocolEntry = { revision: number; savedAt: string; sha256: string; protocol: StoredProtocol };
 export type ModeEntry = { revision: number; value: 'on' | 'off'; savedAt: string; protocolRevision: number | null };
 export type ModeState = { value: 'unset'; revision: 0 } | { value: 'on' | 'off'; revision: number; savedAt: string };
-export type ReceptionSettings = { protocol: ProtocolEntry | null; mode: ModeState };
+type PostGenerationCheckEntry = { revision: number; value: PostGenerationCheck; savedAt: string };
+export type ReceptionSettings = { protocol: ProtocolEntry | null; mode: ModeState; postGenerationCheck?: PostGenerationCheckEntry };
 /** Reception is the default: only a researcher's explicit "off" closes it. The stored value is never rewritten. */
 export const receptionOpen = (mode: ModeState): boolean => mode.value !== 'off';
 export type ProtocolFields = Pick<ReceptionProtocolV3, 'allowedOrders' | 'seedPolicy' | 'referenceMemory' | 'betweenTrials' | 'receptionNumberFormat' | 'rotationMode' | 'figureSelection' | 'figureSetPolicy'>;
@@ -31,6 +35,7 @@ export type SaveResult = { ok: true; revision: number } | { ok: false; error: 'c
 
 const PROTOCOL = 'reception-protocol:current', PROTOCOL_REV = 'reception-protocol:rev:';
 const MODE = 'reception-mode:current', MODE_REV = 'reception-mode:rev:';
+const POST_GENERATION_CHECK = 'reception-post-generation-check:current', POST_GENERATION_CHECK_REV = 'reception-post-generation-check:rev:';
 const FIELDS = ['allowedOrders', 'seedPolicy', 'referenceMemory', 'betweenTrials', 'receptionNumberFormat', 'rotationMode', 'figureSelection', 'figureSetPolicy'];
 const revKey = (prefix: string, revision: number) => prefix + String(revision).padStart(10, '0');
 const broken = (): never => { throw new ReceptionError('reception_unavailable'); };
@@ -58,6 +63,11 @@ function modeEntry(value: unknown): ModeEntry {
   if (!positive(e.revision) || (e.value !== 'on' && e.value !== 'off') || !iso(e.savedAt) || e.protocolRevision !== null && !positive(e.protocolRevision)) return broken();
   return { revision: e.revision, value: e.value, savedAt: e.savedAt, protocolRevision: e.protocolRevision as number | null };
 }
+function postGenerationCheckEntry(value: unknown): PostGenerationCheckEntry {
+  const e = exact(value, ['revision', 'value', 'savedAt']);
+  if (!positive(e.revision) || !isPostGenerationCheck(e.value) || !iso(e.savedAt)) return broken();
+  return { revision: e.revision, value: e.value, savedAt: e.savedAt };
+}
 async function hasAny(storage: SettingsStorage, prefix: string): Promise<boolean> { return (await storage.list({ prefix })).size > 0; }
 
 /** One consistent snapshot; call inside a single storage transaction. */
@@ -83,14 +93,23 @@ export async function readSettings(storage: SettingsStorage): Promise<ReceptionS
         entry.protocolRevision !== null && (!protocol || protocol.revision < entry.protocolRevision)) broken();
       mode = { value: entry.value, revision: entry.revision, savedAt: entry.savedAt };
     }
-    return { protocol, mode };
+    const check = await storage.get(POST_GENERATION_CHECK);
+    if (check === undefined) {
+      if (await hasAny(storage, POST_GENERATION_CHECK_REV)) broken();
+      return { protocol, mode };
+    }
+    const entry = postGenerationCheckEntry(check);
+    const saved = postGenerationCheckEntry(await storage.get(revKey(POST_GENERATION_CHECK_REV, entry.revision)));
+    if (JSON.stringify(saved) !== JSON.stringify(entry)) broken();
+    return { protocol, mode, postGenerationCheck: entry };
   } catch { return broken(); }
 }
 
 /** Strict check of a snapshot after an RPC boundary (transport-only attributes already removed). */
 export function validateReceptionSettings(value: unknown): ReceptionSettings {
   try {
-    const s = exact(value, ['protocol', 'mode']);
+    const hasCheck = value !== null && typeof value === 'object' && Object.hasOwn(value, 'postGenerationCheck');
+    const s = exact(value, ['protocol', 'mode', ...(hasCheck ? ['postGenerationCheck'] : [])]);
     const protocol = s.protocol === null ? null : protocolEntry(s.protocol);
     const m = s.mode && typeof s.mode === 'object' && (s.mode as { value?: unknown }).value === 'unset'
       ? exact(s.mode, ['value', 'revision']) : exact(s.mode, ['value', 'revision', 'savedAt']);
@@ -100,7 +119,7 @@ export function validateReceptionSettings(value: unknown): ReceptionSettings {
       if ((m.value !== 'on' && m.value !== 'off') || !positive(m.revision) || !iso(m.savedAt)) broken();
       mode = { value: m.value as 'on' | 'off', revision: m.revision as number, savedAt: m.savedAt as string };
     }
-    return { protocol, mode };
+    return { protocol, mode, ...(hasCheck ? { postGenerationCheck: postGenerationCheckEntry(s.postGenerationCheck) } : {}) };
   } catch { return broken(); }
 }
 
@@ -176,6 +195,19 @@ export async function saveMode(storage: SettingsStorage, input: { expectedRevisi
   if (await storage.get(revKey(MODE_REV, revision)) !== undefined) return { ok: false, error: 'unavailable' };
   const entry: ModeEntry = { revision, value: input.value, savedAt: new Date(now).toISOString(), protocolRevision: settings.protocol?.revision ?? null };
   await storage.put({ [MODE]: entry, [revKey(MODE_REV, revision)]: entry });
+  return { ok: true, revision };
+}
+
+export async function savePostGenerationCheck(storage: SettingsStorage, input: { expectedRevision: unknown; value: unknown }, now: number): Promise<SaveResult> {
+  if (!expected(input?.expectedRevision) || !isPostGenerationCheck(input.value)) return { ok: false, error: 'invalid' };
+  let settings: ReceptionSettings;
+  try { settings = await readSettings(storage); } catch { return { ok: false, error: 'unavailable' }; }
+  const previous = settings.postGenerationCheck?.revision ?? 0;
+  if (input.expectedRevision !== previous) return { ok: false, error: 'conflict' };
+  const revision = previous + 1, historyKey = revKey(POST_GENERATION_CHECK_REV, revision);
+  if (await storage.get(historyKey) !== undefined) return { ok: false, error: 'unavailable' };
+  const entry = { revision, value: input.value, savedAt: new Date(now).toISOString() };
+  await storage.put({ [POST_GENERATION_CHECK]: entry, [historyKey]: entry });
   return { ok: true, revision };
 }
 

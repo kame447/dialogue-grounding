@@ -8,7 +8,7 @@ import type { AuditEntry, DeletionReason } from "./index-store.ts";
 import { OBJECT_ID, RECORD_ID } from "./summary.ts";
 import { formatReceptionNumber, receptionNumberDay } from '../../../../dialogue-model/runtime/v2/reception.ts';
 import type { ReceptionSummary } from '../../../../dialogue-model/runtime/v2/reception.ts';
-import { modeHistory, protocolHistory, readSettings, saveMode, saveProtocol, saveProtocolFromForm } from './reception-settings.ts';
+import { modeHistory, protocolHistory, readSettings, saveMode, savePostGenerationCheck, saveProtocol, saveProtocolFromForm } from './reception-settings.ts';
 import type { ModeEntry, ProtocolEntry, ReceptionSettings, SaveResult } from './reception-settings.ts';
 import { listFigurePresets, readFigurePreset, saveFigurePreset } from './figure-presets.ts';
 import type { FigurePresetMutation } from './figure-presets.ts';
@@ -53,6 +53,9 @@ export class AdminIndex extends DurableObject<ParticipantConfigurationEnv> {
       if (settings.protocol) await this.observations.prepare({ expectedProtocolRevision: settings.protocol.revision });
     }
     return result;
+  }
+  async saveReceptionPostGenerationCheck(input: { expectedRevision: unknown; value: unknown }): Promise<SaveResult> {
+    return this.ctx.storage.transaction(tx => savePostGenerationCheck(tx, input, Date.now()));
   }
   async receptionProtocolHistory(): Promise<ProtocolEntry[]> { return protocolHistory(this.ctx.storage); }
   async receptionModeHistory(): Promise<ModeEntry[]> { return modeHistory(this.ctx.storage); }

@@ -87,6 +87,7 @@ export type SavedProtocol = { revision: number; savedAt: string; sha256: string;
 export type SettingsView = {
   protocol: SavedProtocol | null;
   mode: { value: 'unset'; revision: 0 } | { value: 'on' | 'off'; revision: number; savedAt: string };
+  postGenerationCheck?: { value: 'on' | 'off'; revision: number; savedAt: string };
   protocolHistory: SavedProtocol[];
   modeHistory: { revision: number; value: 'on' | 'off'; savedAt: string; protocolRevision: number | null }[];
 };
@@ -100,5 +101,6 @@ export type ReceptionSettingsPort = {
   read(): Promise<SettingsView>;
   saveProtocol(input: ProtocolFormInput): Promise<SettingsSaveResult>;
   saveMode(input: { expectedRevision: number; value: 'on' | 'off' }): Promise<SettingsSaveResult>;
+  savePostGenerationCheck(input: { expectedRevision: number; value: 'on' | 'off' }): Promise<SettingsSaveResult>;
   figurePresets?: FigurePresetPort;
 };

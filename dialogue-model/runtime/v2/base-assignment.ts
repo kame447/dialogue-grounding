@@ -7,6 +7,7 @@ import type { ParticipantModelPin } from './participant-model-pin.ts';
 import type { ReceptionPlan, ReceptionPlanV1, ReceptionPlanV2, ReceptionPlanV3, RotationMode, ParticipantDialogueProfile } from './reception.ts';
 import type { ResolvedFigureSelection } from '../stimuli/figure-bank.ts';
 import type { InitialObservationGeneration } from '../observation/initial-observation-generation.ts';
+import type { PostGenerationCheck } from './deferred-ai-extraction.ts';
 export { BaseAssignmentError, validateBaseAssignmentConfig, validateBaseStart,
   canonicalBaseAssignmentConfig, validateBoundBaseRecord, assignmentRotationMode, assignmentFigureSelection } from './base-assignment-data.ts';
 export type Strategy = 'repair-first' | 'bypass-enabled';
@@ -65,6 +66,7 @@ export type MakeBaseTask = (options: { strategy: Strategy; seed: number; referen
   preparedObservation?: PreparedTrialObservationReference;
   openingMode?: OpeningMode;
   participantDialogueProfile?: ParticipantDialogueProfile;
+  postGenerationCheck?: PostGenerationCheck;
   recoveringAdmission?: true;
   participantRuntime?: { profile: ParticipantProductionProfile; assignmentId: string } }) => Promise<BaseTask>;
 export type BaseSessionOptions = { openingMode?: OpeningMode; ownerId: string; store: BaseStore; readConfig: () => Promise<BaseAssignmentConfig | null>;
