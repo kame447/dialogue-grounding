@@ -12,9 +12,10 @@ import {
 } from '../dialogue-model/runtime/stimuli/rotation-memory.ts';
 import { ROTATION_MEMORY_ENTRIES, ROTATION_MEMORY_SOURCES } from '../dialogue-model/runtime/stimuli/rotation-memory-data.ts';
 
-// The bundle under test is the AI proposal v1 (consensus-120 and part-construal-468), not yet confirmed by the researcher.
-// Content assertions below that name figures state facts of that proposal; regenerating from a confirmed export means
-// updating them on purpose. Structural assertions (relative rotation, symmetry, privacy) hold for any bundle.
+// The bundle first built is the AI proposal v1 (consensus-120 and part-construal-468), not confirmed by the researcher.
+// Tests that name figures or count candidates state facts of that proposal; they are skipped, with a reason, once the
+// bundle is regenerated from the researcher's confirmed export (another hash). Structural tests (relative rotation,
+// symmetry, privacy, validators, size guard) hold for any bundle and always run.
 
 type Template = {
   key: string; size: [number, number]; figureId: string; rotation: number;
@@ -29,6 +30,11 @@ const nounsOf = (view: OwnRotationView) => ({ whole: view.whole.map(c => c.noun)
 const nounsOfRecord = (view: RotationMemoryEntry['views'][AbsoluteRotation]) =>
   ({ whole: view.whole.map(c => c.noun), parts: view.parts.map(p => [p.id, p.candidates.map(c => c.noun)]) });
 const allProjections = () => ROTATION_MEMORY_ENTRIES.flatMap(e => ABSOLUTE_ROTATIONS.map(rotation => ({ key: e.figureKey, rotation, memory: project(e.figureKey, rotation) })));
+const AI_PROPOSAL_V1_SHA256 = '0188e2195275c400d214d1467176251d234a51a397e5bb8855be03db1994895e';
+const aiProposalOnly = ROTATION_MEMORY_DATA_SHA256 === AI_PROPOSAL_V1_SHA256 ? false : 'facts of the AI proposal v1; the bundle was regenerated from the confirmed export';
+/** A projection with a whole construal now, one in the first turned view, and parts: the shape many assertions need, found in any bundle. */
+const rich = (): OwnRotationMemory => (allProjections().find(({ memory }) => memory.current.whole.length > 0 && memory.turned[0].whole.length > 0
+  && Object.keys(memory.current.parts).length > 0 && memory.turned.some(t => Object.keys(t.parts).length > 0)) ?? assert.fail('no projection with whole and part candidates')).memory;
 
 // ---- bundle data ----
 
@@ -50,12 +56,21 @@ test('bundle: version, hash, catalog revision and provenance are consistent and 
   assert.throws(() => validateRotationMemoryPin({ ...rotationMemoryPin(), dataSha256: 'abc' }), TypeError);
 });
 
-test('bundle: 30 figures, 120 views and 468 region views are covered; counts of the AI proposal v1', () => {
+test('bundle: 30 bank figures, 120 views and 468 region views are covered, with a role for every region', () => {
   assert.deepEqual(ROTATION_MEMORY_ENTRIES.map(e => e.figureKey).sort(), FIGURE_BANK.map(f => f.id).sort());
   const views = ROTATION_MEMORY_ENTRIES.flatMap(e => ABSOLUTE_ROTATIONS.map(r => ({ e, v: e.views[r] })));
   assert.equal(ROTATION_MEMORY_ENTRIES.reduce((n, e) => n + e.regions.length, 0), 117);
   assert.equal(views.length, 120);
   assert.equal(views.reduce((n, { e }) => n + e.regions.length, 0), 468);
+  // Every whole candidate gives a role to every region of its view.
+  for (const { e, v } of views) for (const c of v.whole) assert.deepEqual(c.parts.map(p => p.id), e.regions.map(r => r.id));
+  // members are strings (split atoms such as "2a"/"2b" exist in eight figures)
+  assert.ok(ROTATION_MEMORY_ENTRIES.every(e => e.regions.every(r => r.members.every(m => typeof m === 'string'))));
+  assert.equal(ROTATION_MEMORY_ENTRIES.filter(e => e.regions.some(r => r.members.some(m => !/^\d+$/u.test(m)))).length, 8);
+});
+
+test('bundle: candidate counts of the AI proposal v1', { skip: aiProposalOnly }, () => {
+  const views = ROTATION_MEMORY_ENTRIES.flatMap(e => ABSOLUTE_ROTATIONS.map(r => ({ e, v: e.views[r] })));
   assert.equal(views.filter(({ v }) => v.whole.length > 0).length, 80);
   assert.equal(views.filter(({ v }) => v.whole.length === 0).length, 40);
   assert.equal(views.reduce((n, { v }) => n + v.whole.length, 0), 99);
@@ -64,11 +79,6 @@ test('bundle: 30 figures, 120 views and 468 region views are covered; counts of 
   assert.equal(partCandidates.length, 388);
   assert.deepEqual([partCandidates.filter(c => c.confidence === '低').length, partCandidates.filter(c => c.confidence === '中').length], [369, 19]);
   assert.ok(views.every(({ v }) => v.reviewStatus === 'ai_unreviewed'));
-  // Every whole candidate gives a role to every region of its view; every region of every view exists in all four views.
-  for (const { e, v } of views) for (const c of v.whole) assert.deepEqual(c.parts.map(p => p.id), e.regions.map(r => r.id));
-  // members are strings (split atoms such as "2a"/"2b" exist in eight figures)
-  assert.ok(ROTATION_MEMORY_ENTRIES.every(e => e.regions.every(r => r.members.every(m => typeof m === 'string'))));
-  assert.equal(ROTATION_MEMORY_ENTRIES.filter(e => e.regions.some(r => r.members.some(m => !/^\d+$/u.test(m)))).length, 8);
 });
 
 test('geometry: a bank rotation is a clockwise turn, and region IDs, members, positions and apexes agree in all four views', () => {
@@ -111,10 +121,13 @@ test('old template construals never reach the bundle', () => {
   const f6 = templates.find(t => t.figureId === 'F6' && t.rotation === 0)!;
   assert.ok(f6.initial.holistic.length > 0);
   for (const h of f6.initial.holistic) assert.ok(!text.includes(h.construal), 'the old F6@0 whole construal');
-  assert.deepEqual(nounsOf(project('F6', 0).current), { whole: [], parts: [] });
-  // F15@270 P3: the old "翼や尖った突起" is not offered; the adopted view keeps its own candidates.
+  // F15@270 P3: this is what the earlier template offered for the region the AI proposal did not agree on.
   const old = templates.find(t => t.figureId === 'F15' && t.rotation === 270)!.regions.find(r => r.id === 'P3')!;
   assert.ok(old.construal.candidates.includes('翼や尖った突起'));
+});
+
+test('old template construals do not return in the views they once filled (F6@0 whole, F15@270 P3 of the AI proposal v1)', { skip: aiProposalOnly }, () => {
+  assert.deepEqual(nounsOf(project('F6', 0).current), { whole: [], parts: [] });
   assert.ok(!('P3' in project('F15', 270).current.parts));
 });
 
@@ -135,7 +148,7 @@ test('projection: every relative view is the absolute view that many degrees clo
   }
 });
 
-test('projection: current view without candidates still offers the other views (independent audit fixtures)', () => {
+test('projection: current view without candidates still offers the other views (independent audit fixtures of the AI proposal v1)', { skip: aiProposalOnly }, () => {
   const f6 = project('F6', 0);
   assert.deepEqual(nounsOf(f6.current), { whole: [], parts: [] });
   assert.deepEqual(f6.turned.map(t => t.whole.map(c => c.noun)), [[], ['ウサギ'], ['ニワトリ', '馬']]);
@@ -152,7 +165,7 @@ test('projection: current view without candidates still offers the other views (
   assert.deepEqual(rotationNameCandidates(f1), ['カモ', 'タツノオトシゴ', 'ティーポット', 'リス', 'ペンギン']);
 });
 
-test('projection: regions that were not agreed carry no candidate and do not erase the rest of their view', () => {
+test('projection: regions that were not agreed carry no candidate and do not erase the rest of their view (AI proposal v1)', { skip: aiProposalOnly }, () => {
   assert.ok(!entry('F5').views[0].parts.some(p => p.id === 'P2'));
   assert.ok(!entry('F6').views[0].parts.some(p => p.id === 'P4'));
   const f15 = entry('F15').views[270];
@@ -239,10 +252,11 @@ test('projection: equal input gives equal bytes, a fresh object each time, and t
   const forward = allProjections().map(p => JSON.stringify(p.memory));
   const backward = [...allProjections().map(p => ({ ...p }))].reverse().map(p => JSON.stringify(project(p.key, p.rotation))).reverse();
   assert.deepEqual(forward, backward);
-  const a = project('F1', 270), b = project('F1', 270);
+  const target = allProjections().find(({ memory }) => memory.current.whole.length > 0) ?? assert.fail('no projection with a current whole construal');
+  const a = project(target.key, target.rotation), b = project(target.key, target.rotation);
   assert.notEqual(a, b);
   a.current.whole[0].noun = '改変'; a.regions[0].adjacent.push('P9'); a.turned.pop();
-  assert.equal(JSON.stringify(project('F1', 270)), JSON.stringify(b));
+  assert.equal(JSON.stringify(project(target.key, target.rotation)), JSON.stringify(b));
   assert.ok(Object.isFrozen(entry('F1')) && Object.isFrozen(entry('F1').views[0]) && Object.isFrozen(entry('F1').views[0].whole));
   assert.throws(() => { (entry('F1') as { figureKey: string }).figureKey = 'F2'; }, TypeError);
 });
@@ -261,7 +275,7 @@ test('projection: input edges — unknown figures give nothing, other rotations 
 
 test('validateOwnRotationMemory accepts every projection after a JSON round trip and rejects altered shapes', () => {
   for (const { memory } of allProjections()) assert.deepEqual(validateOwnRotationMemory(clone(memory)), memory);
-  const base = project('F1', 270);
+  const base = rich();
   const withEdit = (edit: (m: OwnRotationMemory) => unknown) => () => validateOwnRotationMemory(edit(clone(base)));
   const cases: [string, (m: OwnRotationMemory) => unknown][] = [
     ['extra top key', m => ({ ...m, extra: 1 })],
@@ -303,15 +317,21 @@ test('validateRotationMemoryEntry rejects broken bundle records', () => {
 });
 
 test('readers: rotationSourceValue, rotationNameCandidates and rotationFeatureCandidates', () => {
-  const p = project('F1', 270);
-  assert.equal(rotationSourceValue(p, ['current', 'whole', 0, 'noun']), 'カモ');
-  assert.equal(rotationSourceValue(p, ['turned', 0, 'whole', 0, 'noun']), 'タツノオトシゴ');
-  assert.equal(rotationSourceValue(p, ['turned', 0, 'whole', 0, 'roles', 'P1']), p.turned[0].whole[0].roles.P1);
-  assert.equal(rotationSourceValue(p, ['turned', 1, 'whole', 1, 'noun']), 'リス');
+  const p = rich();
+  const whole = p.current.whole[0];
+  const [roleId] = Object.keys(whole.roles);
+  assert.equal(rotationSourceValue(p, ['current', 'whole', 0, 'noun']), whole.noun);
+  assert.equal(rotationSourceValue(p, ['current', 'whole', 0, 'posture']), whole.posture);
+  assert.equal(rotationSourceValue(p, ['current', 'whole', 0, 'roles', roleId]), whole.roles[roleId]);
+  assert.equal(rotationSourceValue(p, ['turned', 0, 'whole', 0, 'noun']), p.turned[0].whole[0].noun);
   assert.equal(rotationSourceValue(p, ['regions', 0, 'shapeName']), p.regions[0].shapeName);
+  const [partId] = Object.keys(p.current.parts);
+  assert.equal(rotationSourceValue(p, ['current', 'parts', partId, 0, 'noun']), p.current.parts[partId][0].noun);
   const withParts = p.turned.find(t => Object.keys(t.parts).length)!;
   const [firstId] = Object.keys(withParts.parts);
   assert.equal(rotationSourceValue(p, ['turned', p.turned.indexOf(withParts), 'parts', firstId, 0, 'noun']), withParts.parts[firstId][0].noun);
+  // Names: the current view first, then the turned views in order, each noun once.
+  assert.deepEqual(rotationNameCandidates(p), [...new Set([p.current, ...p.turned].flatMap(view => view.whole.map(c => c.noun)))]);
   for (const path of [['turned', 9], ['current', 'whole', 7, 'noun'], ['current', 'wholeAnywhere'], ['wholeAnywhere'], ['turned', 0, 'rel'], ['__proto__'], ['constructor'], ['current', 'whole', '0', 'noun'], ['current', 'whole', 0.5, 'noun'], []])
     assert.equal(rotationSourceValue(p, path as (string | number)[]), undefined, JSON.stringify(path));
   const features = rotationFeatureCandidates(p);

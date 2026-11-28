@@ -1,12 +1,17 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createHash } from 'node:crypto';
-import { existsSync, readFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
-  buildFromFiles, buildRotationMemoryEntries, geometryFromTemplates, partsFromConstrual, positionWord, renderDataModule,
-  rotationMemoryDataSha256, wholeFromConsensus,
+  buildFromExportFile, buildFromFiles, buildRotationMemoryEntries, geometryFromTemplates, partsFromConstrual, positionWord, renderDataModule,
+  rotationMemoryDataSha256, sourcesFromReviewExport, wholeFromConsensus,
 } from '../docs/review/build-rotation-memory.ts';
-import { validateRotationMemoryEntry } from '../dialogue-model/runtime/stimuli/rotation-memory-shape.ts';
+import { validateRotationMemoryEntry, ABSOLUTE_ROTATIONS, type RotationMemoryEntry } from '../dialogue-model/runtime/stimuli/rotation-memory-shape.ts';
+import { ROTATION_MEMORY_ENTRIES } from '../dialogue-model/runtime/stimuli/rotation-memory-data.ts';
 
 // Synthetic inputs in the real file formats: one figure F1, two regions, four rotations.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -151,4 +156,148 @@ test('build: the committed data module is exactly what a fresh build of the repo
   });
   assert.equal(readFileSync(repoPath('dialogue-model/runtime/stimuli/rotation-memory-data.ts'), 'utf8'), fresh.text);
   assert.deepEqual([fresh.stats.figures, fresh.stats.views, fresh.stats.regionViews], [30, 120, 468]);
+});
+
+// ---- the review page's export (structured whole and part layers) ----
+
+const FREE_TEXT = 'FREE_TEXT_NEVER_PARSED';
+function exportDoc(edit: (doc: Doc) => void = () => {}): Doc {
+  const whole = wholeDoc().orientations, parts = partsDoc().entries;
+  const results = ROTATIONS.map((r, i) => ({
+    id: `F1@${r}`, figureId: 'F1', rotation: r, status: '確認済み', whole: FREE_TEXT, wholeBasis: [FREE_TEXT],
+    wholeConstrual: { reviewStatus: 'researcher_confirmed', candidates: whole[i].candidates, noConstrual: whole[i].noConstrual, noConstrualReason: '', needsTextCheck: false, ai: { agreementStatus: '合意', discussion: 'd' } },
+    parts: ['P1', 'P2'].map(regionId => {
+      const row = parts.find((e: Doc) => e.id === `F1@${r}#${regionId}`);
+      return { id: regionId, members: row.members, description: FREE_TEXT, candidates: [FREE_TEXT],
+        independentPart: { reviewStatus: 'researcher_confirmed', candidates: row.candidates, noCandidate: row.noCandidate, noCandidateReason: '', ai: { agreementStatus: row.agreementStatus, discussion: 'd' } } };
+    }),
+  }));
+  const doc = { schemaVersion: 'tangram_orientation_review_v1', catalogRevision: 'rev', wholeConstrualSchemaVersion: 'tangram_whole_construal_review_v1',
+    independentPartSchemaVersion: 'tangram_independent_part_review_v1', revision: 7, results };
+  edit(doc);
+  return doc;
+}
+const buildFromExport = (doc: Doc) => {
+  const source = sourcesFromReviewExport(doc);
+  return { source, ...buildRotationMemoryEntries(geometryFromTemplates(ROTATIONS.map(template)), source.whole, source.parts, source.statuses) };
+};
+
+test('export: the structured layers give the same bundle as the proposal files; free text is never read', () => {
+  const { source, entries } = buildFromExport(exportDoc());
+  const fromProposals = build(inputs()).entries;
+  assert.deepEqual(source.unconfirmed, []);
+  assert.deepEqual(entries.map(e => ROTATIONS.map(r => e.views[r as 0 | 90 | 180 | 270].reviewStatus)), [['researcher_confirmed', 'researcher_confirmed', 'researcher_confirmed', 'researcher_confirmed']]);
+  const withProposalStatus = structuredClone(entries);
+  for (const r of ROTATIONS) withProposalStatus[0].views[r as 0 | 90 | 180 | 270].reviewStatus = 'ai_unreviewed';
+  assert.deepEqual(withProposalStatus, fromProposals);
+  assert.ok(!JSON.stringify(entries).includes(FREE_TEXT));
+  assert.deepEqual(source.meta, { catalogRevision: 'rev', schemaVersion: 'tangram_orientation_review_v1', wholeSchemaVersion: 'tangram_whole_construal_review_v1', partSchemaVersion: 'tangram_independent_part_review_v1', rows: 4, revision: 7 });
+});
+
+test('export: directions that are not confirmed in every layer are listed, not refused, and never reported as confirmed', () => {
+  const { source, entries } = buildFromExport(exportDoc(doc => {
+    doc.results[0].status = '要修正';                                                   // F1@0: row not confirmed
+    doc.results[0].wholeConstrual.reviewStatus = 'ai_unreviewed';                          // F1@0: no proposal, no decision
+    doc.results[0].wholeConstrual.ai = null; doc.results[0].wholeConstrual.noConstrual = false; doc.results[0].wholeConstrual.candidates = [];
+    doc.results[1].wholeConstrual.reviewStatus = 'researcher_edited';                      // F1@90: edited by the researcher
+    doc.results[1].wholeConstrual.candidates[0].noun = '犬';
+    doc.results[2].parts[1].independentPart.reviewStatus = 'ai_unreviewed';                // F1@180: a part still the AI proposal
+    doc.results[3].wholeConstrual.needsTextCheck = true;                                   // F1@270: free text differs from the proposal
+    doc.results[2].parts[0].independentPart.reviewStatus = 'researcher_edited';            // an AI 未合意 region the researcher decided: accepted
+    doc.results[2].parts[0].independentPart.ai.agreementStatus = '未合意';
+    doc.results[2].parts[0].independentPart.candidates = [{ rank: 1, noun: '角', owner: '', basis: '単独', confidence: '低', evidence: 'e', weaknesses: '' }]; doc.results[2].parts[0].independentPart.noCandidate = false;
+  }));
+  const statusOf = (r: number) => entries[0].views[r as 0 | 90 | 180 | 270].reviewStatus;
+  assert.deepEqual(ROTATIONS.map(statusOf), ['ai_unreviewed', 'researcher_edited', 'ai_unreviewed', 'researcher_confirmed']);
+  assert.deepEqual(source.unconfirmed, [
+    { id: 'F1@0', reasons: ['行の状態が要修正', '全体の見立てが未入力'] },
+    { id: 'F1@180', reasons: ['P2の部分の見立てがAI案のまま'] },
+    { id: 'F1@270', reasons: ['自由文と要照合'] },
+  ]);
+  assert.deepEqual(entries[0].views[0].whole, [], 'a layer without any decision builds as no candidate');
+  assert.deepEqual(entries[0].views[90].whole.map(c => c.noun), ['犬', '猫']);
+  assert.deepEqual(entries[0].views[180].parts, [{ id: 'P1', candidates: [{ noun: '角', confidence: '低' }] }]);
+});
+
+test('export: foreign or malformed exports are refused', () => {
+  const refuse = (message: RegExp, edit: (doc: Doc) => void) => assert.throws(() => sourcesFromReviewExport(exportDoc(edit)), message);
+  refuse(/unsupported schemaVersion/u, doc => { doc.schemaVersion = 'other'; });
+  refuse(/whole-construal layer/u, doc => { delete doc.wholeConstrualSchemaVersion; });
+  refuse(/independent-part layer/u, doc => { doc.independentPartSchemaVersion = 'tangram_independent_part_review_v0'; });
+  refuse(/wholeConstrual/u, doc => { delete doc.results[0].wholeConstrual; });
+  refuse(/independentPart/u, doc => { delete doc.results[0].parts[0].independentPart; });
+  refuse(/unknown reviewStatus/u, doc => { doc.results[0].wholeConstrual.reviewStatus = 'confirmed'; });
+  refuse(/unknown row status/u, doc => { doc.results[0].status = 'ok'; });
+  refuse(/duplicate/u, doc => { doc.results[1].id = 'F1@0'; });
+  refuse(/without a construal cannot carry candidates/u, doc => { doc.results[1].wholeConstrual.noConstrual = true; });
+  refuse(/without a candidate cannot carry candidates/u, doc => { doc.results[1].parts[0].independentPart.noCandidate = true; });
+  refuse(/未合意 regions must carry no adopted candidate/u, doc => {
+    const part = doc.results[1].parts[0].independentPart; part.reviewStatus = 'ai_unreviewed'; part.ai.agreementStatus = '未合意';
+  });
+  refuse(/boolean/u, doc => { delete doc.results[0].wholeConstrual.needsTextCheck; });
+  // A confirmed export of another catalog or with another partition is refused when built.
+  const wrongMembers = exportDoc(doc => { doc.results[0].parts[0].members = ['9']; });
+  assert.throws(() => buildFromExport(wrongMembers), /members differ/u);
+});
+
+// The committed bundle written out as a fully confirmed review export, built again through files and the command line.
+function bundleAsExport(entries: readonly RotationMemoryEntry[], edit: (doc: Doc) => void = () => {}): Doc {
+  const results = entries.flatMap(e => ABSOLUTE_ROTATIONS.map(r => {
+    const v = e.views[r];
+    return {
+      id: `${e.figureKey}@${r}`, figureId: e.figureKey, rotation: r, status: '確認済み', whole: FREE_TEXT, wholeBasis: [FREE_TEXT],
+      wholeConstrual: { reviewStatus: 'researcher_confirmed', noConstrual: v.whole.length === 0, noConstrualReason: '', needsTextCheck: false, ai: { agreementStatus: '合意', discussion: '' },
+        candidates: v.whole.map(c => ({ rank: c.rank, noun: c.noun, posture: c.posture, direction: c.direction, confidence: c.confidence, parts: c.parts, evidence: 'e', weaknesses: '' })) },
+      parts: e.regions.map(region => {
+        const adopted = v.parts.find(p => p.id === region.id)?.candidates ?? [];
+        return { id: region.id, members: region.members, description: FREE_TEXT, candidates: [FREE_TEXT],
+          independentPart: { reviewStatus: 'researcher_confirmed', noCandidate: adopted.length === 0, noCandidateReason: '', ai: { agreementStatus: '合意', discussion: '' },
+            candidates: adopted.map((c, i) => ({ rank: i + 1, noun: c.noun, owner: c.owner ?? '', basis: '両方', confidence: c.confidence, evidence: 'e', weaknesses: '' })) } };
+      }),
+    };
+  }));
+  const doc = { schemaVersion: 'tangram_orientation_review_v1', catalogRevision: 'review-final-dae9359580d64a83', wholeConstrualSchemaVersion: 'tangram_whole_construal_review_v1',
+    independentPartSchemaVersion: 'tangram_independent_part_review_v1', revision: 42, results };
+  edit(doc);
+  return doc;
+}
+
+test('export: all 120 directions round trip through files and the command line; unconfirmed data cannot be written with --require-confirmed', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'rotation-memory-export-'));
+  try {
+    const geometry = fileURLToPath(repoPath('dialogue-model/runtime/stimuli/primary-regions-data.ts'));
+    const review = fileURLToPath(repoPath('docs/review/review-results-final.json'));
+    const confirmedFile = join(dir, 'confirmed-export.json');
+    writeFileSync(confirmedFile, JSON.stringify(bundleAsExport(ROTATION_MEMORY_ENTRIES)));
+    const built = await buildFromExportFile({ geometry, export: confirmedFile, review });
+    assert.deepEqual(built.unconfirmed, []);
+    assert.deepEqual(built.entries.map(e => ({ ...e, views: Object.fromEntries(ABSOLUTE_ROTATIONS.map(r => [r, { ...e.views[r], reviewStatus: 'ai_unreviewed' }])) })), structuredClone(ROTATION_MEMORY_ENTRIES));
+    assert.ok(built.entries.every(e => ABSOLUTE_ROTATIONS.every(r => e.views[r].reviewStatus === 'researcher_confirmed')));
+    assert.notEqual(built.dataSha256, rotationMemoryDataSha256(ROTATION_MEMORY_ENTRIES, 'review-final-dae9359580d64a83'), 'a confirmed bundle is a different bundle');
+    assert.match(built.text, /"export": \{\s+"path": "confirmed-export\.json",\s+"sha256": "[a-f0-9]{64}"/u);
+    assert.ok(!built.text.includes(dir), 'no directory of the machine in the data');
+    assert.ok(!built.text.includes(FREE_TEXT));
+
+    const run = (...args: string[]) => spawnSync(process.execPath, [fileURLToPath(repoPath('docs/review/build-rotation-memory.ts')), '--regions', geometry, '--review', review, ...args], { encoding: 'utf8' });
+    const out = join(dir, 'data.ts');
+    const ok = run('--export', confirmedFile, '--require-confirmed', '--out', out);
+    assert.equal(ok.status, 0, ok.stderr);
+    assert.equal(readFileSync(out, 'utf8'), built.text);
+    assert.equal(run('--export', confirmedFile, '--require-confirmed', '--out', out, '--check').status, 0);
+
+    const pendingFile = join(dir, 'pending-export.json');
+    writeFileSync(pendingFile, JSON.stringify(bundleAsExport(ROTATION_MEMORY_ENTRIES, doc => {
+      doc.results[0].wholeConstrual.needsTextCheck = true; doc.results[5].parts[0].independentPart.reviewStatus = 'ai_unreviewed'; doc.results[7].status = '未確認';
+    })));
+    const pendingOut = join(dir, 'pending-data.ts');
+    const refused = run('--export', pendingFile, '--require-confirmed', '--out', pendingOut);
+    assert.equal(refused.status, 1);
+    assert.match(refused.stdout, /not confirmed: 3/u);
+    assert.match(refused.stdout, /F1@0: 自由文と要照合/u);
+    assert.ok(!existsSync(pendingOut), 'nothing is written when a direction is not confirmed');
+    const listed = run('--export', pendingFile, '--out', pendingOut);
+    assert.equal(listed.status, 0, 'without --require-confirmed the list is a report, not a failure');
+    assert.ok(existsSync(pendingOut));
+    assert.equal(run('--require-confirmed', '--out', pendingOut).status, 1, 'the proposal files are never confirmed');
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });
