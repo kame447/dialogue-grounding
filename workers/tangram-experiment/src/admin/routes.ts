@@ -260,15 +260,15 @@ function figureFields(form: URLSearchParams): Pick<ProtocolFields, 'figureSelect
     figureSelection = { mode: 'preset', setId: set[0] };
   } else if (mode[0] === 'seeded_random') {
     const seeds = form.getAll('selectionSeed'), counts = form.getAll('figureCount');
-    if (seeds.length > 1 || counts.length > 1 || counts.some(value => value !== '4' && value !== '6')) return null;
-    const figureCount = counts.length ? Number(counts[0]) as 4 | 6 : undefined;
-    const size = figureCount === undefined ? {} : { figureCount };
+    const rawCount = counts[0] ?? '3';
+    const figureCount = Number(rawCount);
+    if (seeds.length > 1 || counts.length > 1 || !isSupportedFigureCount(figureCount) || String(figureCount) !== rawCount) return null;
     const raw = (seeds[0] ?? '').trim();
-    if (raw === '') figureSelection = { mode: 'seeded_random', selectionSeed: null, ...size };
+    if (raw === '') figureSelection = { mode: 'seeded_random', selectionSeed: null, figureCount };
     else {
       const seed = /^-?\d{1,16}$/u.test(raw) ? Number(raw) : NaN;
       if (!Number.isSafeInteger(seed)) return null;
-      figureSelection = { mode: 'seeded_random', selectionSeed: seed, ...size };
+      figureSelection = { mode: 'seeded_random', selectionSeed: seed, figureCount };
     }
   } else if (mode[0] === 'custom') {
     const ids = form.getAll('figureIds');
@@ -278,7 +278,7 @@ function figureFields(form: URLSearchParams): Pick<ProtocolFields, 'figureSelect
   if (policy[0] === 'per_trial' && figureSelection.mode !== 'seeded_random') return null;
   return { figureSelection, figureSetPolicy: policy[0] };
 }
-/** Every field must be selected explicitly; nothing missing is filled with a default. */
+/** Require the protocol choices. The random figure count defaults to three within its source. */
 function protocolForm(form: URLSearchParams): { expectedRevision: number; fields: ProtocolFields } | null {
   const keys = [...new Set(form.keys())];
   if (keys.some(k => k !== 'orders' && k !== 'expectedRevision' && !Object.hasOwn(SINGLE, k) && !FIGURE_KEYS.includes(k))) return null;
