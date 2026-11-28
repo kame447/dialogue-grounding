@@ -1,25 +1,28 @@
 // Builds the immutable rotation-memory bundle (dialogue-model/runtime/stimuli/rotation-memory-data.ts).
 //
-//   node docs/review/build-rotation-memory.ts [--regions <primary-regions-data.ts>] [--whole <consensus-120.json>]
-//     [--parts <part-construal-468.json>] [--review <review-results-final.json>] [--out <data module>] [--check]
+//   node docs/review/build-rotation-memory.ts [--regions <primary-regions-data.ts>] [--review <review-results-final.json>]
+//     ( [--whole <consensus-120.json>] [--parts <part-construal-468.json>]  |  --export <review page export> [--require-confirmed] )
+//     [--out <data module>] [--check]
 //
-// Inputs (all AI proposals the researcher has not confirmed yet, never answer keys):
-//   geometry  primary-regions-data.ts   ONLY the confirmed partition's geometry is read from it (regions, members, shape,
-//             area, position, apex, contacts). Its older construal fields (construal, initial, description wording) are
-//             never read, so an old proposal cannot reach the bundle.
-//   whole     the 120-orientation consensus (adopted `candidates` only; an empty list = no whole construal)
-//   parts     the 468-region independent part construals (adopted `candidates` only; 未合意 regions carry none)
-// Output: the bundle plus its version, catalog revision, SHA-256 and the SHA-256 of every input. Evidence and weakness
-// texts stay in the input files and are not part of the bundle. `--check` regenerates in memory and fails on any difference.
-//
-// A confirmed export of the review page can replace `whole`/`parts` once it carries structured candidates.
+// Inputs. Geometry always comes from primary-regions-data.ts: ONLY the confirmed partition's geometry is read from it
+// (regions, members, shape, area, position, apex, contacts). Its older construal fields (construal, initial, description
+// wording) are never read, so an old proposal cannot reach the bundle. The candidates come from one of:
+//   - the AI proposals: consensus-120.json (whole) and part-construal-468.json (parts); adopted `candidates` only. Nothing
+//     in them is confirmed by the researcher.
+//   - the review page's export (orientation-app, GET /api/export): the structured layers `wholeConstrual` and
+//     `parts[].independentPart` only. The free-text fields (`whole`, `wholeBasis`, role lines) are never parsed. A direction
+//     counts as confirmed when its row is 確認済み, nothing is flagged 自由文と要照合 and every layer is
+//     researcher_confirmed or researcher_edited. The others are listed in the report, not refused; --require-confirmed
+//     turns a non-empty list into a failure (for the build that is merged).
+// Output: the bundle plus its version, catalog revision, SHA-256 and the SHA-256 of every input. Evidence and weakness texts
+// stay in the input files and are not part of the bundle. `--check` regenerates in memory and fails on any difference.
 import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { basename, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import type {
-  AbsoluteRotation, Confidence, DirectionWord, PositionWord, RotationMemoryEntry, RotationMemoryPart, RotationMemoryViewRecord, RotationMemoryWhole,
+  AbsoluteRotation, Confidence, DirectionWord, PositionWord, ReviewStatus, RotationMemoryEntry, RotationMemoryPart, RotationMemoryViewRecord, RotationMemoryWhole,
 } from '../../dialogue-model/runtime/stimuli/rotation-memory-shape.ts';
 
 export const ROTATION_MEMORY_BUILD_VERSION = 'tangram_rotation_memory_v1';
@@ -49,8 +52,10 @@ const str = (v: unknown, where: string): string => typeof v === 'string' && v.tr
 const list = (v: unknown, where: string): unknown[] => Array.isArray(v) ? v : bad(where, 'an array is required');
 const rec = (v: unknown, where: string): Record<string, unknown> => isRecord(v) ? v : bad(where, 'an object is required');
 const num = (v: unknown, where: string): number => typeof v === 'number' && Number.isFinite(v) ? v : bad(where, 'a finite number is required');
+const flag = (v: unknown, where: string): boolean => typeof v === 'boolean' ? v : bad(where, 'a boolean is required');
 const confidence = (v: unknown, where: string): Confidence => v === '高' || v === '中' || v === '低' ? v : bad(where, 'confidence must be 高/中/低');
 const rotation = (v: unknown, where: string): AbsoluteRotation => v === 0 || v === 90 || v === 180 || v === 270 ? v : bad(where, 'rotation must be 0/90/180/270');
+const reviewStatus = (v: unknown, where: string): ReviewStatus => v === 'ai_unreviewed' || v === 'researcher_confirmed' || v === 'researcher_edited' ? v : bad(where, 'unknown reviewStatus');
 const regionNumber = (id: string) => Number(id.slice(1));
 const figureNumber = (id: string) => Number(id.slice(1));
 
@@ -99,11 +104,21 @@ export function positionWord([x, y]: readonly [number, number], [w, h]: readonly
 
 export type WholeSourceCandidate = { rank: number; noun: string; posture: string; direction: string; confidence: Confidence; parts: { id: string; role: string }[] };
 export type WholeSourceRow = { id: string; agreementStatus: string; noConstrual: boolean; candidates: WholeSourceCandidate[] };
-export type PartSourceRow = {
-  id: string; members: string[]; agreementStatus: string; noCandidate: boolean;
-  candidates: { rank: number; noun: string; owner: string | null; confidence: Confidence }[];
-};
+export type PartSourceCandidate = { rank: number; noun: string; owner: string | null; confidence: Confidence };
+export type PartSourceRow = { id: string; members: string[]; agreementStatus: string; noCandidate: boolean; candidates: PartSourceCandidate[] };
 export type SourceMeta = { schemaVersion: string; catalogRevision: string; status: string };
+
+function wholeCandidateOf(raw: unknown, where: string): WholeSourceCandidate {
+  const c = rec(raw, where);
+  return { rank: num(c.rank, `${where}.rank`), noun: str(c.noun, `${where}.noun`), posture: str(c.posture, `${where}.posture`), direction: str(c.direction, `${where}.direction`),
+    confidence: confidence(c.confidence, `${where}.confidence`),
+    parts: list(c.parts, `${where}.parts`).map(p => ({ id: str(rec(p, where).id, `${where}.parts.id`), role: str(rec(p, where).role, `${where}.parts.role`) })) };
+}
+function partCandidateOf(raw: unknown, where: string): PartSourceCandidate {
+  const c = rec(raw, where);
+  const owner = typeof c.owner === 'string' && c.owner.trim() ? oneLine(c.owner) : null;
+  return { rank: num(c.rank, `${where}.rank`), noun: str(c.noun, `${where}.noun`), owner, confidence: confidence(c.confidence, `${where}.confidence`) };
+}
 
 export function wholeFromConsensus(document: unknown): { rows: Map<string, WholeSourceRow>; meta: SourceMeta } {
   const doc = rec(document, 'whole');
@@ -114,13 +129,7 @@ export function wholeFromConsensus(document: unknown): { rows: Map<string, Whole
     const o = rec(raw, where);
     const id = str(o.id, `${where}.id`);
     if (rows.has(id)) bad(where, `duplicate ${id}`);
-    const candidates = list(o.candidates, `${where}.candidates`).map((rawCandidate, k): WholeSourceCandidate => {
-      const cw = `${where}.candidates[${k}]`;
-      const c = rec(rawCandidate, cw);
-      return { rank: num(c.rank, `${cw}.rank`), noun: str(c.noun, `${cw}.noun`), posture: str(c.posture, `${cw}.posture`), direction: str(c.direction, `${cw}.direction`),
-        confidence: confidence(c.confidence, `${cw}.confidence`),
-        parts: list(c.parts, `${cw}.parts`).map(p => ({ id: str(rec(p, cw).id, `${cw}.parts.id`), role: str(rec(p, cw).role, `${cw}.parts.role`) })) };
-    });
+    const candidates = list(o.candidates, `${where}.candidates`).map((rawCandidate, k) => wholeCandidateOf(rawCandidate, `${where}.candidates[${k}]`));
     const noConstrual = typeof o.noConstrual === 'boolean' && o.noConstrual === (candidates.length === 0) ? o.noConstrual : bad(where, 'noConstrual must match an empty candidate list');
     rows.set(id, { id, agreementStatus: str(o.agreementStatus, `${where}.agreementStatus`), noConstrual, candidates });
   }
@@ -136,18 +145,80 @@ export function partsFromConstrual(document: unknown): { rows: Map<string, PartS
     const e = rec(raw, where);
     const id = str(e.id, `${where}.id`);
     if (rows.has(id)) bad(where, `duplicate ${id}`);
-    const candidates = list(e.candidates, `${where}.candidates`).map((rawCandidate, k) => {
-      const cw = `${where}.candidates[${k}]`;
-      const c = rec(rawCandidate, cw);
-      const owner = typeof c.owner === 'string' && c.owner.trim() ? oneLine(c.owner) : null;
-      return { rank: num(c.rank, `${cw}.rank`), noun: str(c.noun, `${cw}.noun`), owner, confidence: confidence(c.confidence, `${cw}.confidence`) };
-    });
+    const candidates = list(e.candidates, `${where}.candidates`).map((rawCandidate, k) => partCandidateOf(rawCandidate, `${where}.candidates[${k}]`));
     const noCandidate = typeof e.noCandidate === 'boolean' && e.noCandidate === (candidates.length === 0) ? e.noCandidate : bad(where, 'noCandidate must match an empty candidate list');
     const agreementStatus = str(e.agreementStatus, `${where}.agreementStatus`);
     if (agreementStatus === '未合意' && candidates.length) bad(where, '未合意 regions must carry no adopted candidate');
     rows.set(id, { id, members: list(e.members, `${where}.members`).map(m => str(m, `${where}.members`)), agreementStatus, noCandidate, candidates });
   }
   return { rows, meta: { schemaVersion: str(doc.schemaVersion, 'parts'), catalogRevision: str(doc.catalogRevision, 'parts'), status: str(doc.status, 'parts') } };
+}
+
+// ---- The review page's export: structured layers only ----
+
+export type UnconfirmedDirection = { id: string; reasons: string[] };
+export type ExportSources = {
+  whole: Map<string, WholeSourceRow>; parts: Map<string, PartSourceRow>; statuses: Map<string, ReviewStatus>;
+  /** Directions that are not researcher-confirmed in every layer. Reported, never a reason to refuse the export. */
+  unconfirmed: UnconfirmedDirection[];
+  meta: { catalogRevision: string; schemaVersion: string; wholeSchemaVersion: string; partSchemaVersion: string; rows: number; revision: number | null };
+};
+
+/**
+ * Reads the review page's export (orientation-app, GET /api/export). Only `wholeConstrual` and `parts[].independentPart`
+ * are read. A layer that is still ai_unreviewed, a row that is not 確認済み and a row flagged needsTextCheck are listed
+ * in `unconfirmed`. A layer with no AI proposal and no decision (ai: null, ai_unreviewed, no candidate, no 見立てなし)
+ * builds as "no candidate" and is listed as 未入力. The per-direction reviewStatus is researcher_confirmed or
+ * researcher_edited only when every layer of the direction is reviewed.
+ */
+export function sourcesFromReviewExport(document: unknown): ExportSources {
+  const doc = rec(document, 'export');
+  if (doc.schemaVersion !== 'tangram_orientation_review_v1') bad('export', 'unsupported schemaVersion');
+  if (doc.wholeConstrualSchemaVersion !== 'tangram_whole_construal_review_v1') bad('export', 'the whole-construal layer is missing or of another version');
+  if (doc.independentPartSchemaVersion !== 'tangram_independent_part_review_v1') bad('export', 'the independent-part layer is missing or of another version');
+  const whole = new Map<string, WholeSourceRow>(), parts = new Map<string, PartSourceRow>(), statuses = new Map<string, ReviewStatus>();
+  const unconfirmed: UnconfirmedDirection[] = [];
+  const results = list(doc.results, 'export.results');
+  for (const [i, raw] of results.entries()) {
+    const where = `export.results[${i}]`;
+    const r = rec(raw, where);
+    const id = str(r.id, `${where}.id`);
+    if (whole.has(id)) bad(where, `duplicate ${id}`);
+    const status = r.status === '未確認' || r.status === '確認済み' || r.status === '要修正' ? r.status : bad(where, 'unknown row status');
+    const reasons: string[] = status === '確認済み' ? [] : [`行の状態が${status}`];
+    const w = rec(r.wholeConstrual, `${where}.wholeConstrual`);
+    const wholeStatus = reviewStatus(w.reviewStatus, `${where}.wholeConstrual`);
+    const wholeAi = w.ai === null ? null : rec(w.ai, `${where}.wholeConstrual.ai`);
+    const wholeCandidates = list(w.candidates, `${where}.wholeConstrual.candidates`).map((rawCandidate, k) => wholeCandidateOf(rawCandidate, `${where}.wholeConstrual.candidates[${k}]`));
+    const noConstrual = flag(w.noConstrual, `${where}.wholeConstrual.noConstrual`);
+    if (noConstrual && wholeCandidates.length) bad(where, 'a direction marked without a construal cannot carry candidates');
+    if (flag(w.needsTextCheck, `${where}.wholeConstrual.needsTextCheck`)) reasons.push('自由文と要照合');
+    if (wholeStatus === 'ai_unreviewed') reasons.push(wholeAi === null ? '全体の見立てが未入力' : '全体の見立てがAI案のまま');
+    whole.set(id, { id, agreementStatus: wholeAi === null ? 'AI案なし' : str(wholeAi.agreementStatus, `${where}.wholeConstrual.ai`), noConstrual, candidates: wholeCandidates });
+    const layers: ReviewStatus[] = [wholeStatus];
+    for (const [k, rawPart] of list(r.parts, `${where}.parts`).entries()) {
+      const pw = `${where}.parts[${k}]`;
+      const p = rec(rawPart, pw);
+      const partId = str(p.id, `${pw}.id`);
+      const ip = rec(p.independentPart, `${pw}.independentPart`);
+      const partStatus = reviewStatus(ip.reviewStatus, `${pw}.independentPart`);
+      const partAi = ip.ai === null ? null : rec(ip.ai, `${pw}.independentPart.ai`);
+      const candidates = list(ip.candidates, `${pw}.independentPart.candidates`).map((rawCandidate, n) => partCandidateOf(rawCandidate, `${pw}.independentPart.candidates[${n}]`));
+      const noCandidate = flag(ip.noCandidate, `${pw}.independentPart.noCandidate`);
+      if (noCandidate && candidates.length) bad(pw, 'a region marked without a candidate cannot carry candidates');
+      const agreementStatus = partAi === null ? 'AI案なし' : str(partAi.agreementStatus, `${pw}.independentPart.ai`);
+      if (partStatus === 'ai_unreviewed' && agreementStatus === '未合意' && candidates.length) bad(pw, '未合意 regions must carry no adopted candidate');
+      if (partStatus === 'ai_unreviewed') reasons.push(`${partId}の部分の見立てが${partAi === null ? '未入力' : 'AI案のまま'}`);
+      parts.set(`${id}#${partId}`, { id: `${id}#${partId}`, members: list(p.members, `${pw}.members`).map(m => str(m, `${pw}.members`)), agreementStatus, noCandidate, candidates });
+      layers.push(partStatus);
+    }
+    statuses.set(id, layers.some(s => s === 'ai_unreviewed') ? 'ai_unreviewed' : layers.some(s => s === 'researcher_edited') ? 'researcher_edited' : 'researcher_confirmed');
+    if (reasons.length) unconfirmed.push({ id, reasons });
+  }
+  return { whole, parts, statuses, unconfirmed, meta: {
+    catalogRevision: str(doc.catalogRevision, 'export'), schemaVersion: str(doc.schemaVersion, 'export'), wholeSchemaVersion: str(doc.wholeConstrualSchemaVersion, 'export'),
+    partSchemaVersion: str(doc.independentPartSchemaVersion, 'export'), rows: results.length, revision: Number.isSafeInteger(doc.revision) ? doc.revision as number : null,
+  } };
 }
 
 // ---- Bundle construction ----
@@ -159,7 +230,11 @@ export type BuildStats = {
 
 const sameJson = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 
-export function buildRotationMemoryEntries(geometry: readonly GeometryView[], whole: ReadonlyMap<string, WholeSourceRow>, parts: ReadonlyMap<string, PartSourceRow>): { entries: RotationMemoryEntry[]; stats: BuildStats } {
+/** `statuses` (keyed like `F1@0`) gives each view's reviewStatus; every view is ai_unreviewed when it is omitted. */
+export function buildRotationMemoryEntries(
+  geometry: readonly GeometryView[], whole: ReadonlyMap<string, WholeSourceRow>, parts: ReadonlyMap<string, PartSourceRow>,
+  statuses: ReadonlyMap<string, ReviewStatus> = new Map(),
+): { entries: RotationMemoryEntry[]; stats: BuildStats } {
   const byFigure = new Map<string, Map<number, GeometryView>>();
   for (const view of geometry) {
     const views = byFigure.get(view.figureId) ?? new Map<number, GeometryView>();
@@ -214,7 +289,7 @@ export function buildRotationMemoryEntries(geometry: readonly GeometryView[], wh
       }
       stats.views++; stats.wholeCandidates += wholeRows.length;
       if (wholeRows.length) stats.wholeViews++; else stats.noWholeViews++;
-      const record: RotationMemoryViewRecord = { layout, whole: wholeRows, parts: partRows, reviewStatus: 'ai_unreviewed' };
+      const record: RotationMemoryViewRecord = { layout, whole: wholeRows, parts: partRows, reviewStatus: statuses.get(key) ?? 'ai_unreviewed' };
       return [r, record] as const;
     })) as Record<AbsoluteRotation, RotationMemoryViewRecord>;
     stats.figures++;
@@ -231,8 +306,8 @@ export function buildRotationMemoryEntries(geometry: readonly GeometryView[], wh
 
 // ---- Output ----
 
-export type SourceRecord = { path: string; sha256: string } & Record<string, string | number>;
-export type BuildSources = { geometry: SourceRecord; whole: SourceRecord; parts: SourceRecord; review?: SourceRecord };
+export type SourceRecord = { path: string; sha256: string } & Record<string, string | number | null>;
+export type BuildSources = { geometry: SourceRecord; review?: SourceRecord } & ({ whole: SourceRecord; parts: SourceRecord } | { export: SourceRecord });
 
 const sha256 = (data: string | Buffer) => createHash('sha256').update(data).digest('hex');
 
@@ -244,13 +319,13 @@ export function rotationMemoryDataSha256(entries: readonly RotationMemoryEntry[]
 export function renderDataModule(entries: readonly RotationMemoryEntry[], sources: BuildSources, catalogRevision: string, version = ROTATION_MEMORY_BUILD_VERSION): { text: string; dataSha256: string } {
   const dataSha256 = rotationMemoryDataSha256(entries, catalogRevision, version);
   const text = [
-    '// Generated by docs/review/build-rotation-memory.ts from AI proposals the researcher has not confirmed yet. Not an answer key.',
+    '// Generated by docs/review/build-rotation-memory.ts. Candidates are AI proposals or the researcher\'s confirmed edits (see each view\'s reviewStatus), never an answer key.',
     '// Do not edit by hand: a changed bundle needs a new version and a new pin (see rotation-memory-shape.ts and rotation-memory.ts).',
     `import type { RotationMemoryEntry } from './rotation-memory-shape.ts';`,
     `export const ROTATION_MEMORY_VERSION = ${JSON.stringify(version)};`,
     `export const ROTATION_MEMORY_CATALOG_REVISION = ${JSON.stringify(catalogRevision)};`,
     `export const ROTATION_MEMORY_DATA_SHA256 = ${JSON.stringify(dataSha256)};`,
-    `export const ROTATION_MEMORY_SOURCES = ${JSON.stringify(sources, null, 1)};`,
+    `export const ROTATION_MEMORY_SOURCES: Record<string, Record<string, string | number | null>> = ${JSON.stringify(sources, null, 1)};`,
     'export const ROTATION_MEMORY_ENTRIES: readonly RotationMemoryEntry[] = [',
     entries.map(entry => JSON.stringify(entry)).join(',\n'),
     '];',
@@ -260,43 +335,70 @@ export function renderDataModule(entries: readonly RotationMemoryEntry[], source
 }
 
 type RegionsModule = { PRIMARY_REGION_CATALOG_REVISION?: unknown; PRIMARY_REGION_TEMPLATES?: unknown };
+export type BuildResult = { text: string; dataSha256: string; entries: RotationMemoryEntry[]; stats: BuildStats; catalogRevision: string; unconfirmed?: UnconfirmedDirection[] };
 
-export async function buildFromFiles(paths: { geometry: string; whole: string; parts: string; review?: string | undefined }) {
+/** The confirmed partition: geometry from primary-regions-data.ts, cross-checked against the confirmed review file when given. */
+async function loadGeometry(paths: { geometry: string; review?: string | undefined }) {
   const module = await import(pathToFileURL(resolve(paths.geometry)).href) as RegionsModule;
   const catalogRevision = str(module.PRIMARY_REGION_CATALOG_REVISION, 'geometry.catalogRevision');
   const geometry = geometryFromTemplates(module.PRIMARY_REGION_TEMPLATES);
-  const wholeRaw = readFileSync(paths.whole), partsRaw = readFileSync(paths.parts);
-  const whole = wholeFromConsensus(JSON.parse(wholeRaw.toString('utf8')));
-  const parts = partsFromConstrual(JSON.parse(partsRaw.toString('utf8')));
-  for (const meta of [whole.meta, parts.meta]) if (meta.catalogRevision !== catalogRevision) bad('sources', 'catalog revision differs from the geometry');
-  const sources: BuildSources = {
-    geometry: { path: REPO_PATHS.geometry, sha256: sha256(readFileSync(paths.geometry)), catalogRevision },
-    whole: { path: REPO_PATHS.whole, sha256: sha256(wholeRaw), schemaVersion: whole.meta.schemaVersion, status: whole.meta.status, orientations: whole.rows.size },
-    parts: { path: REPO_PATHS.parts, sha256: sha256(partsRaw), schemaVersion: parts.meta.schemaVersion, status: parts.meta.status, entries: parts.rows.size },
-  };
+  const sources: { geometry: SourceRecord; review?: SourceRecord } = { geometry: { path: REPO_PATHS.geometry, sha256: sha256(readFileSync(paths.geometry)), catalogRevision } };
   if (paths.review !== undefined) {
     const reviewRaw = readFileSync(paths.review), digest = sha256(reviewRaw);
     if (catalogRevision !== `review-final-${digest.slice(0, 16)}`) bad('review', 'the confirmed partition file does not match the catalog revision');
-    const results = list(rec(JSON.parse(reviewRaw.toString('utf8')), 'review').results, 'review.results');
-    for (const row of results) {
+    for (const row of list(rec(JSON.parse(reviewRaw.toString('utf8')), 'review').results, 'review.results')) {
       const r = rec(row, 'review.results');
       const view = geometry.find(g => g.figureId === r.figureId && g.rotation === 0);
       if (!view || !sameJson(list(r.groups, 'review.groups').map(g => list(g, 'review.groups').map(String)), view.regions.map(region => region.members))) bad(String(r.figureId), 'confirmed groups differ from the geometry members');
     }
     sources.review = { path: REPO_PATHS.review, sha256: digest };
   }
+  return { catalogRevision, geometry, sources };
+}
+
+export async function buildFromFiles(paths: { geometry: string; whole: string; parts: string; review?: string | undefined }): Promise<BuildResult> {
+  const { catalogRevision, geometry, sources: base } = await loadGeometry(paths);
+  const wholeRaw = readFileSync(paths.whole), partsRaw = readFileSync(paths.parts);
+  const whole = wholeFromConsensus(JSON.parse(wholeRaw.toString('utf8')));
+  const parts = partsFromConstrual(JSON.parse(partsRaw.toString('utf8')));
+  for (const meta of [whole.meta, parts.meta]) if (meta.catalogRevision !== catalogRevision) bad('sources', 'catalog revision differs from the geometry');
+  const sources: BuildSources = { ...base,
+    whole: { path: REPO_PATHS.whole, sha256: sha256(wholeRaw), schemaVersion: whole.meta.schemaVersion, status: whole.meta.status, orientations: whole.rows.size },
+    parts: { path: REPO_PATHS.parts, sha256: sha256(partsRaw), schemaVersion: parts.meta.schemaVersion, status: parts.meta.status, entries: parts.rows.size },
+  };
   const { entries, stats } = buildRotationMemoryEntries(geometry, whole.rows, parts.rows);
   return { ...renderDataModule(entries, sources, catalogRevision), entries, stats, catalogRevision };
+}
+
+/** Builds from the review page's export (structured layers). Not-yet-confirmed directions are returned in `unconfirmed`. */
+export async function buildFromExportFile(paths: { geometry: string; export: string; review?: string | undefined }): Promise<BuildResult> {
+  const { catalogRevision, geometry, sources: base } = await loadGeometry(paths);
+  const raw = readFileSync(paths.export);
+  const parsed = sourcesFromReviewExport(JSON.parse(raw.toString('utf8')));
+  if (parsed.meta.catalogRevision !== catalogRevision) bad('export', 'catalog revision differs from the geometry');
+  const sources: BuildSources = { ...base, export: { path: basename(paths.export), sha256: sha256(raw), schemaVersion: parsed.meta.schemaVersion,
+    wholeConstrualSchemaVersion: parsed.meta.wholeSchemaVersion, independentPartSchemaVersion: parsed.meta.partSchemaVersion, results: parsed.meta.rows, revision: parsed.meta.revision } };
+  const { entries, stats } = buildRotationMemoryEntries(geometry, parsed.whole, parsed.parts, parsed.statuses);
+  return { ...renderDataModule(entries, sources, catalogRevision), entries, stats, catalogRevision, unconfirmed: parsed.unconfirmed };
 }
 
 async function main() {
   const { values } = parseArgs({ options: {
     regions: { type: 'string' }, whole: { type: 'string' }, parts: { type: 'string' }, review: { type: 'string' }, out: { type: 'string' }, check: { type: 'boolean' },
+    export: { type: 'string' }, 'require-confirmed': { type: 'boolean' },
   } });
   const out = values.out ?? DEFAULT_PATHS.out;
-  const built = await buildFromFiles({ geometry: values.regions ?? DEFAULT_PATHS.geometry, whole: values.whole ?? DEFAULT_PATHS.whole,
-    parts: values.parts ?? DEFAULT_PATHS.parts, review: values.review ?? DEFAULT_PATHS.review });
+  if (values['require-confirmed'] && values.export === undefined) { console.error('--require-confirmed needs --export: the AI proposal files are never confirmed by the researcher'); process.exitCode = 1; return; }
+  const geometry = values.regions ?? DEFAULT_PATHS.geometry, review = values.review ?? DEFAULT_PATHS.review;
+  const built = values.export !== undefined
+    ? await buildFromExportFile({ geometry, export: values.export, review })
+    : await buildFromFiles({ geometry, whole: values.whole ?? DEFAULT_PATHS.whole, parts: values.parts ?? DEFAULT_PATHS.parts, review });
   console.log(`rotation memory ${ROTATION_MEMORY_BUILD_VERSION}: ${built.stats.figures} figures, ${built.stats.views} views (${built.stats.wholeViews} with a whole construal, ${built.stats.noWholeViews} without), ${built.stats.regionViews} region views (${built.stats.partRegionViews} with part candidates), ${Buffer.byteLength(built.text)} bytes, sha256 ${built.dataSha256}`);
+  if (built.unconfirmed !== undefined) {
+    console.log(`confirmed in every layer: ${built.stats.views - built.unconfirmed.length} of ${built.stats.views} directions; not confirmed: ${built.unconfirmed.length}`);
+    for (const row of built.unconfirmed) console.log(`  ${row.id}: ${row.reasons.join('、')}`);
+    if (values['require-confirmed'] && built.unconfirmed.length) { console.error('not every direction is confirmed; nothing was written'); process.exitCode = 1; return; }
+  }
   if (values.check) {
     if (readFileSync(out, 'utf8') !== built.text) { console.error('the data module differs from a fresh build'); process.exitCode = 1; } else console.log('the data module matches a fresh build');
     return;
