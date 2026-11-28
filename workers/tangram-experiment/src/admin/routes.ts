@@ -293,7 +293,7 @@ function protocolForm(form: URLSearchParams): { expectedRevision: number; fields
     betweenTrials: form.get('betweenTrials') as ProtocolFields['betweenTrials'], receptionNumberFormat: 'daily_seq3',
     rotationMode: form.get('rotationMode') as ProtocolFields['rotationMode'], ...figures } };
 }
-function modeForm(form: URLSearchParams): { expectedRevision: number; value: 'on' | 'off' } | null {
+function toggleForm(form: URLSearchParams): { expectedRevision: number; value: 'on' | 'off' } | null {
   const keys = [...form.keys()];
   if (keys.length !== 2 || ['expectedRevision', 'value'].some(k => form.getAll(k).length !== 1)) return null;
   const expectedRevision = unsigned(form.get('expectedRevision')), value = form.get('value');
@@ -302,10 +302,11 @@ function modeForm(form: URLSearchParams): { expectedRevision: number; value: 'on
 const NOT_SAVED = '保存していません';
 async function settingsMutation(request: Request, port: ReceptionSettingsPort, kind: string): Promise<Response> {
   const form = await receptionForm(request);
-  const input = form && (kind === 'protocol' ? protocolForm(form) : modeForm(form));
+  const input = form && (kind === 'protocol' ? protocolForm(form) : toggleForm(form));
   if (!input) return respond(400, renderMessage(NOT_SAVED, 'すべての項目を選んでください。'));
   let result;
-  try { result = 'fields' in input ? await port.saveProtocol(input) : await port.saveMode(input); }
+  try { result = 'fields' in input ? await port.saveProtocol(input) :
+    kind === 'post-generation-check' ? await port.savePostGenerationCheck(input) : await port.saveMode(input); }
   catch { return respond(503, renderMessage(NOT_SAVED, '設定を保存できませんでした。')); }
   if (result.ok) return plain(303, '', { Location: '/admin/reception-settings' });
   switch (result.error) {
@@ -356,7 +357,7 @@ export async function handleAdmin(request: Request, deps: AdminDeps): Promise<Re
   const nextPath = request.method === 'POST' && deps.prepareNext ? url.pathname.match(/^\/admin\/record\/([^/]+)\/prepare-next$/) : null;
   const receptionPath = request.method === 'POST' && deps.receptions ? url.pathname.match(/^\/admin\/reception\/([^/]+)\/(approve|cancel|force-end)$/) : null;
   const rolePath = url.pathname.match(/^\/admin\/(record|reception)\/([^/]+)\/participant-role$/u);
-  const settingsPath = request.method === 'POST' && deps.receptionSettings ? url.pathname.match(/^\/admin\/reception-settings\/(protocol|mode)$/) : null;
+  const settingsPath = request.method === 'POST' && deps.receptionSettings ? url.pathname.match(/^\/admin\/reception-settings\/(protocol|mode|post-generation-check)$/) : null;
   const observationsPath = url.pathname === '/admin/reception-settings/observations';
   if (observationsPath && !deps.preparedObservations) return notFound();
   if (!deps.receptions && (url.pathname === '/admin/receptions' || url.pathname === '/admin/entry' || url.pathname === '/admin/receptions.js')) return notFound();

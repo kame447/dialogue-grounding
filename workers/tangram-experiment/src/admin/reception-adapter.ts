@@ -168,6 +168,7 @@ export function createReceptionAdminPort(options: Options): ReceptionAdminPort {
 type SettingsIndex = {
   readReceptionSettings(): Promise<unknown>; receptionProtocolHistory(): Promise<unknown>; receptionModeHistory(): Promise<unknown>;
   saveReceptionProtocol(input: unknown): Promise<unknown>; saveReceptionMode(input: unknown): Promise<unknown>;
+  saveReceptionPostGenerationCheck(input: unknown): Promise<unknown>;
 };
 const SAVE_ERRORS = ['conflict', 'invalid', 'protocol_unconfigured', 'unavailable'];
 function saveResult(value: unknown) {
@@ -184,5 +185,6 @@ export function createReceptionSettingsPort(index: SettingsIndex): ReceptionSett
     },
     async saveProtocol(input) { return saveResult(await index.saveReceptionProtocol(input)); },
     async saveMode(input) { return saveResult(await index.saveReceptionMode(input)); },
+    async savePostGenerationCheck(input) { return saveResult(await index.saveReceptionPostGenerationCheck(input)); },
   };
 }

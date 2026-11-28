@@ -11,7 +11,7 @@ const PROTOCOL = '44444444-4444-4444-8444-444444444444';
 const saved = { revision: 2, savedAt: '2026-10-28T00:00:00.000Z', sha256: 'c'.repeat(64), protocol: { schemaVersion: 'reception_protocol_v2', protocolId: PROTOCOL, revision: 2,
   allowedOrders: [['bypass-enabled', 'repair-first'], ['repair-first']], seedPolicy: 'per_trial', referenceMemory: false, betweenTrials: 'questionnaire_required',
   receptionNumberFormat: 'daily_seq3', rotationMode: 'relative_0' } };
-function fixture(state: 'unsaved' | 'saved' = 'saved') {
+function fixture(state: 'unsaved' | 'saved' = 'saved', postGenerationCheck?: 'on' | 'off') {
   const calls: { op: string; args: unknown[] }[] = [];
   let result: any = { ok: true }, failure: Error | null = null;
   const port = {
@@ -19,9 +19,11 @@ function fixture(state: 'unsaved' | 'saved' = 'saved') {
       return state === 'unsaved' ? { protocol: null, mode: { value: 'unset', revision: 0 }, protocolHistory: [], modeHistory: [] }
         : { protocol: saved, mode: { value: 'off', revision: 1, savedAt: '2026-10-28T00:00:00.000Z' },
           protocolHistory: [saved, { ...saved, revision: 1, sha256: 'b'.repeat(64), protocol: { ...saved.protocol, revision: 1, rotationMode: 'relative_pm90' } }],
-          modeHistory: [{ revision: 1, value: 'off', savedAt: '2026-10-28T00:00:00.000Z', protocolRevision: 2 }] }; },
+          modeHistory: [{ revision: 1, value: 'off', savedAt: '2026-10-28T00:00:00.000Z', protocolRevision: 2 }],
+          ...(postGenerationCheck ? { postGenerationCheck: { value: postGenerationCheck, revision: 3, savedAt: saved.savedAt } } : {}) }; },
     async saveProtocol(input: unknown) { calls.push({ op: 'saveProtocol', args: [input] }); if (failure) throw failure; return result; },
     async saveMode(input: unknown) { calls.push({ op: 'saveMode', args: [input] }); if (failure) throw failure; return result; },
+    async savePostGenerationCheck(input: unknown) { calls.push({ op: 'savePostGenerationCheck', args: [input] }); if (failure) throw failure; return result; },
   };
   const deps: AdminDeps = { token: TOKEN, limiter: { async limit() { return { success: true }; } },
     async listPage() { return { items: [], next: null }; }, async getSummary() { return null; }, async getRecord() { return null; },
@@ -33,12 +35,12 @@ const get = (headers: Record<string, string> = {}) => new Request(ORIGIN + '/adm
 const protocolBody = () => new URLSearchParams([['expectedRevision', '2'], ['orders', 'be-rf'], ['orders', 'rf'], ['seedPolicy', 'shared'], ['referenceMemory', 'on'],
   ['betweenTrials', 'none'], ['rotationMode', 'relative_pm90'], ['receptionNumberFormat', 'daily_seq3'],
   ['figureMode', 'preset'], ['figureSetId', 'legacy-v1'], ['figureSetPolicy', 'shared']]);
-function post(kind: 'protocol' | 'mode', body: string | URLSearchParams = kind === 'protocol' ? protocolBody() : new URLSearchParams({ expectedRevision: '1', value: 'on' }),
+function post(kind: 'protocol' | 'mode' | 'post-generation-check', body: string | URLSearchParams = kind === 'protocol' ? protocolBody() : new URLSearchParams({ expectedRevision: '1', value: 'on' }),
   headers: Record<string, string> = {}) {
   return new Request(`${ORIGIN}/admin/reception-settings/${kind}`, { method: 'POST', headers: { Authorization: 'Bearer ' + TOKEN, Origin: ORIGIN,
     'Sec-Fetch-Site': 'same-origin', 'Content-Type': 'application/x-www-form-urlencoded', ...headers }, body: String(body) });
 }
-const requests = () => [get(), post('protocol'), post('mode')];
+const requests = () => [get(), post('protocol'), post('mode'), post('post-generation-check')];
 
 test('settings routes are absent without the port and fail closed without token or limiter', async () => {
   const { receptionSettings: _, ...deps } = fixture().deps;
@@ -60,13 +62,32 @@ test('credentials and the existing rate limit guard every settings route; cookie
 });
 
 test('settings POSTs require same origin, and GET or HEAD never saves', async () => {
-  for (const kind of ['protocol', 'mode'] as const) for (const headers of [{ Origin: 'https://evil.test' }, { Origin: '' }, { Origin: ORIGIN, 'Sec-Fetch-Site': 'cross-site' }, { Origin: 'null', 'Sec-Fetch-Site': 'cross-site' }] as Record<string, string>[]) {
+  for (const kind of ['protocol', 'mode', 'post-generation-check'] as const) for (const headers of [{ Origin: 'https://evil.test' }, { Origin: '' }, { Origin: ORIGIN, 'Sec-Fetch-Site': 'cross-site' }, { Origin: 'null', 'Sec-Fetch-Site': 'cross-site' }] as Record<string, string>[]) {
     const f = fixture(); assert.equal((await handleAdmin(post(kind, undefined, headers), f.deps)).status, 403); assert.equal(f.calls.length, 0);
   }
   for (const method of ['GET', 'HEAD']) for (const kind of ['protocol', 'mode']) {
     const f = fixture(); const r = await handleAdmin(new Request(`${ORIGIN}/admin/reception-settings/${kind}?${protocolBody()}`, { method, headers: { Authorization: 'Bearer ' + TOKEN } }), f.deps);
     assert.equal(r.status, 404); assert.equal(writes(f).length, 0);
   }
+});
+
+test('post-generation checking displays a default of OFF and saves only an explicit toggle', async () => {
+  const first = fixture('unsaved');
+  const page = await (await handleAdmin(get(), first.deps)).text();
+  assert.match(page, /<h2>生成後チェック<\/h2><p class="state">現在：OFF（既定）<\/p>/u);
+  assert.match(page, /action="\/admin\/reception-settings\/post-generation-check"[^>]*><input type="hidden" name="expectedRevision" value="0"/u);
+  assert.equal(writes(first).length, 0);
+  for (const value of ['on', 'off'] as const) {
+    const f = fixture('saved', value);
+    assert.match(await (await handleAdmin(get(), f.deps)).text(), new RegExp('生成後チェック</h2><p class="state">現在：' + value.toUpperCase() + '</p>'));
+    const response = await handleAdmin(post('post-generation-check', new URLSearchParams({ expectedRevision: '3', value })), f.deps);
+    assert.equal(response.status, 303);
+    assert.equal(response.headers.get('Location'), '/admin/reception-settings');
+    assert.deepEqual(writes(f), [{ op: 'savePostGenerationCheck', args: [{ expectedRevision: 3, value }] }]);
+  }
+  const invalid = fixture();
+  assert.equal((await handleAdmin(post('post-generation-check', 'expectedRevision=0&value=ON'), invalid.deps)).status, 400);
+  assert.equal(writes(invalid).length, 0);
 });
 
 test('a valid protocol form saves exactly the selected values in the fixed order list; success redirects', async () => {

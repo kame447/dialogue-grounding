@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import {
-  approveReception, createReception, effectiveFigureSelection, effectiveRotationMode, receptionProtocolSha256,
+  approveReception, createReception, effectiveFigureSelection, effectiveRotationMode, PILOT012_V24_PARTICIPANT_PROFILE, receptionProtocolSha256,
   validateReceptionPlan, validateReceptionProtocolV2, validateReceptionProtocolV3,
 } from '../../../dialogue-model/runtime/v2/reception.ts';
 import type {
@@ -18,7 +18,7 @@ import type { ObservationInput } from '../../../dialogue-model/runtime/observati
 import type { ParticipantUsageLedger } from '../../../dialogue-model/runtime/web/participant-usage.ts';
 import { createParticipantTerraObserver, type ParticipantService } from './participant-runtime.ts';
 
-export type PreparedObservationParticipant = Omit<ParticipantPlanSettings, 'preparedObservations'>;
+export type PreparedObservationParticipant = Omit<ParticipantPlanSettings, 'preparedObservations' | 'postGenerationCheck'>;
 export type PreparedObservationRequest = {
   protocol: ReceptionProtocolV2 | ReceptionProtocolV3;
   orderIndex: number;
@@ -50,7 +50,7 @@ export class PreparedObservationError extends Error {
 const RECIPE_SCHEMA = 'prepared_observation_recipe_v1';
 const POOL_SCHEMA = 'prepared_observation_pool_v1';
 const RECIPE_KEYS = ['schemaVersion', 'poolKey', 'bundleId', 'createdAt', 'protocol', 'orderIndex', 'participant', 'randomSeeds', 'plan'];
-const PLAN_KEYS = ['schemaVersion', 'protocolId', 'protocolRevision', 'protocolSha256', 'order', 'betweenTrials', 'approvedAt', 'trials'];
+const PLAN_KEYS = ['schemaVersion', 'protocolId', 'protocolRevision', 'protocolSha256', 'order', 'betweenTrials', 'approvedAt', 'trials', 'postGenerationCheck'];
 const BUNDLE_KEYS = ['poolKey', 'bundleId', 'preparedAt', 'randomSeeds', 'plan', 'entries'];
 const PLACEHOLDER_ID = '00000000-0000-4000-8000-000000000000';
 const PLACEHOLDER_DATE = '2000-01-01T00:00:00.000Z';
@@ -82,6 +82,8 @@ function request(value: PreparedObservationRequest): PreparedObservationRequest 
   // Reuse the plan's participant validation, including relationships between pin,
   // profile, generation and pruning versions. Unknown participant fields fail too.
   const checked = validateReceptionPlan({ ...supplied,
+    // The template needs a valid plan, but the approved check setting is not observation material.
+    ...(supplied.participantDialogueProfile === PILOT012_V24_PARTICIPANT_PROFILE ? { postGenerationCheck: 'off' } : {}),
     schemaVersion: 'reception_plan_v2', protocolId: protocol.protocolId, protocolRevision: protocol.revision,
     protocolSha256: receptionProtocolSha256(JSON.stringify(protocol)), order: protocol.allowedOrders[orderIndex],
     betweenTrials: protocol.betweenTrials, approvedAt: PLACEHOLDER_DATE,

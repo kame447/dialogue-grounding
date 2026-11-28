@@ -197,6 +197,9 @@ export function validateBoundBaseRecord(record: unknown, assignment: unknown): v
     const dialogueProfile = assignmentParticipantDialogueProfile(a);
     if (dialogueProfile === undefined ? Object.hasOwn(options, 'participantDialogueProfile')
       : options.participantDialogueProfile !== dialogueProfile) throw new Error('dialogue_profile');
+    const postGenerationCheck = plan?.postGenerationCheck;
+    if (postGenerationCheck === undefined ? Object.hasOwn(options, 'postGenerationCheck')
+      : options.postGenerationCheck !== postGenerationCheck) throw new Error('post_generation_check');
     if (generation ? options.initialObservationGeneration !== generation : Object.hasOwn(options, 'initialObservationGeneration')) {
       throw new Error('observation_generation');
     }
