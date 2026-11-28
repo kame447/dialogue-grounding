@@ -52,6 +52,7 @@ const deferred = () => {
 type PublicEvent = { id: string; text: string; at: string; clientId?: string; speaker: 'human' | 'ai' };
 type TrialView = {
   sessionId: string; events: PublicEvent[]; aiStatus: string; status: string; busy: boolean;
+  recovering?: true; dialogueRecovery?: string;
   closed: boolean; submitted: boolean; aiSubmitted: boolean; scene: { shapes: Array<{ id: string }> };
 };
 type PrivateRecord = {
@@ -151,6 +152,7 @@ async function participant(t: TestContext, strategy: Label, options: { lunaPosts
   });
   assert.equal(prepared.profile.dialoguePolicy, 'holistic_v5');
   let task: AppTask | undefined;
+  let recovery: { callback: () => void; delayMs: number } | undefined;
   let saved: PrivateRecord | undefined;
   let cookie: string | undefined;
   let url = '';
@@ -161,6 +163,14 @@ async function participant(t: TestContext, strategy: Label, options: { lunaPosts
         const onPersist = value.onPersist;
         task = await createNamingTaskV2({
           ...value, ...await prepared.taskOptions({ ...value, referenceMemory: value.referenceMemory ?? true }), createTrial: () => scene,
+          recoveryTimers: {
+            set(callback, delayMs) {
+              assert.equal(recovery, undefined, 'at most one recovery timer');
+              recovery = { callback, delayMs };
+              return 1 as unknown as ReturnType<typeof setTimeout>;
+            },
+            clear() { recovery = undefined; },
+          },
           async onPersist(record: unknown) { saved = structuredClone(record) as PrivateRecord; await onPersist?.(record); },
         });
         return task;
@@ -194,7 +204,7 @@ async function participant(t: TestContext, strategy: Label, options: { lunaPosts
   }
   return {
     generation, providerPosts, record, read,
-    async restart() { await close(); task = undefined; await open(); return read(); },
+    async restart() { task?.stopForAdmin(); await close(); task = undefined; await open(); return read(); },
     script(action: typeof mode, ...texts: typeof drafts) { mode = action; drafts = [...texts]; },
     async message(text: string, clientId: string) {
       const response = await request('/api/message', { text, clientId, expectedRecordId });
@@ -203,7 +213,15 @@ async function participant(t: TestContext, strategy: Label, options: { lunaPosts
       return response.json.eventId;
     },
     async settle() { assert.ok(task); await task.whenIdle(); return read(); },
-    retry: () => request('/api/retry', { expectedRecordId }),
+    async advanceRecovery(ms: number) {
+      assert.ok(recovery);
+      assert.equal(recovery.delayMs, ms);
+      const { callback } = recovery;
+      recovery = undefined;
+      callback();
+      await task!.whenIdle();
+      return read();
+    },
     names: (state: TrialView) => request('/api/names', {
       expectedRecordId, confirm: true, expectedEventCount: state.events.length,
       names: Object.fromEntries(state.scene.shapes.map(shape => [shape.id, null])),
@@ -363,7 +381,7 @@ function interruptionOffered(rendered: Awaited<ReturnType<typeof browser>>) {
 }
 
 for (const strategy of strategies) {
-  test(strategy + ' saves the unanswered event and restarts it exactly once through /api/retry', { timeout: 20000 }, async t => {
+  test(strategy + ' saves the unanswered event and automatically commits it exactly once after cold GET', { timeout: 20000 }, async t => {
     const app = await participant(t, strategy);
     const before = await previousTurn(app);
     app.script('confirm', ...bad);
@@ -371,22 +389,21 @@ for (const strategy of strategies) {
     const failed = await app.settle();
     const record = assertRetained(app, failed, before.record, eventId);
     assert.deepEqual(app.generation.slice(-2).map(draft => draft.text), [...bad]);
-    const recovery = await browser(failed);
-    assert.ok(visible(recovery.ids['chat-recovery']));
-    assert.ok(!recovery.ids['retry-chat'].disabled, 'the paused trial still has one recovery action');
+    assert.equal(failed.recovering, true);
+    assert.equal(failed.dialogueRecovery, 'active');
+    assert.equal(failed.aiStatus, 'thinking');
+    assert.equal(failed.busy, true);
 
     const failedSends = app.providerPosts.length;
     const restored = await app.restart();
     assert.equal(restored.sessionId, failed.sessionId);
     assert.deepEqual(restored.events, failed.events);
-    assert.equal(app.providerPosts.length, failedSends, 'loading a paused trial must not resubmit the input');
+    assert.equal(app.providerPosts.length, failedSends, 'GET observes the delay before resuming');
     assert.deepEqual(app.record().queueState.pendingHumanEventIds, [eventId]);
     assert.deepEqual(app.record().queueState.privateState, record.queueState.privateState);
 
     app.script('confirm', generated);
-    const retry = await app.retry();
-    assert.equal(retry.status, 200);
-    const resumed = await app.settle();
+    const resumed = await app.advanceRecovery(2_000);
     assert.equal(resumed.aiStatus, 'idle');
     assert.equal(resumed.closed, false);
     assert.deepEqual(resumed.events.slice(0, -1), failed.events);
@@ -404,9 +421,8 @@ for (const strategy of strategies) {
     assert.deepEqual(committed.queueState.privateState.ledger, record.queueState.privateState.ledger);
 
     const sends = app.providerPosts.length;
-    await app.retry();
     assert.deepEqual((await app.read()).events, resumed.events);
-    assert.equal(app.providerPosts.length, sends, 'a repeated recovery operation cannot send again after commit');
+    assert.equal(app.providerPosts.length, sends, 'polling cannot send again after commit');
     assertNoPublicFailure(resumed);
   });
 
@@ -422,7 +438,6 @@ for (const strategy of strategies) {
     const sendCount = app.providerPosts.length;
     // Deliberately offer a good model reply if the server accidentally sends.
     app.script('confirm', generated);
-    for (const _ of [0, 1]) await app.retry();
     const blocked = await app.read();
     assert.deepEqual(blocked.events, failed.events);
     for (const refusal of [await app.names(blocked), await app.submitAI()]) {
@@ -482,6 +497,27 @@ for (const strategy of strategies) {
     }
   });
 }
+
+test('automatic recovery keeps the same accepted input beyond two retries at the delay ceiling', async t => {
+  const app = await participant(t, 'repair-first');
+  app.script('confirm', ...bad);
+  const eventId = await app.message(human, 'long-recovery');
+  const initial = await app.settle();
+  for (const delay of [2_000, 4_000, 8_000, 16_000, 30_000, 60_000, 60_000]) {
+    app.script('confirm', ...bad);
+    const stillRecovering = await app.advanceRecovery(delay);
+    assert.equal(stillRecovering.recovering, true);
+    assert.equal(stillRecovering.dialogueRecovery, 'active');
+    assert.deepEqual(stillRecovering.events, initial.events);
+    assert.deepEqual(app.record().queueState.pendingHumanEventIds, [eventId]);
+  }
+  app.script('confirm', generated);
+  const recovered = await app.advanceRecovery(60_000);
+  assert.equal(recovered.recovering, undefined);
+  assert.deepEqual(recovered.events.slice(0, -1), initial.events);
+  assert.equal(recovered.events.at(-1)?.text, generated);
+  assert.deepEqual(app.record().queueState.pendingHumanEventIds, []);
+});
 
 const stages = ['shape', 'binding', 'execution', 'replay'];
 const recordsFor = (label: Label, dialoguePolicy: 'holistic_v1' | 'holistic_v2' | 'holistic_v3' | 'holistic_v4' | 'holistic_v5',

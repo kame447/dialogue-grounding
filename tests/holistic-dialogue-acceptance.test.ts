@@ -101,6 +101,7 @@ function targetLabel(target: Turn['target']) {
 }
 
 function session(strategy: Strategy, observation: Memo = memo, trialProfile = profile, lunaCalls = 90, transientStatus?: number) {
+  let recover: (() => void) | undefined;
   let current: Turn | undefined;
   let choseAgreement = false;
   const draftAt = (turn: Turn, index: number) => choseAgreement && index === 0 ? turn.agreeSpeech : turn.drafts[index];
@@ -185,6 +186,10 @@ function session(strategy: Strategy, observation: Memo = memo, trialProfile = pr
     };
     return createNamingTaskV2({
       strategy, seed, runDir: null, createTrial: () => trial, restore: restore ?? null,
+      recoveryTimers: {
+        set(callback) { recover = callback; return 0 as unknown as ReturnType<typeof setTimeout>; },
+        clear() { recover = undefined; },
+      },
       utteranceStyle: trialProfile.utteranceStyle,
       client: { async complete(messages: Message[], { phase, timeoutMs }: { phase: string; timeoutMs?: number }) {
         if (phase === 'final_submission') {
@@ -229,7 +234,7 @@ function session(strategy: Strategy, observation: Memo = memo, trialProfile = pr
   }
   return {
     async start() { task = await create(); },
-    async restore() { task = await create(JSON.parse(JSON.stringify(record())) as SavedTrial); },
+    async restore() { task.stopForAdmin(); task = await create(JSON.parse(JSON.stringify(record())) as SavedTrial); },
     async restoreFrom(saved: unknown) { task = await create(JSON.parse(JSON.stringify(saved)) as SavedTrial); },
     /** The ordinary restore entrance, from a record whose generation version is the given one (a version pinned by a saved record decides the trial). */
     async restoreAs(version: string) {
@@ -242,11 +247,15 @@ function session(strategy: Strategy, observation: Memo = memo, trialProfile = pr
       if (state && Object.hasOwn(state, 'agreeNameScopeVersion')) state.agreeNameScopeVersion = ({ 11: 'scoped_v6', 10: 'scoped_v5', 9: 'scoped_v5', 8: 'scoped_v5', 7: 'scoped_v4', 6: 'scoped_v3' } as Record<number, string>)[Number(version.replace('jev_generation_retry_v', ''))] ?? state.agreeNameScopeVersion;
       task = await create(saved);
     },
-    interrupt() { return task.interruptDialogue(); },
     async resumeWith(turn: Turn) {
       current = turn;
       generationRequests = [];
-      await Promise.all([task.retry(), task.retry()]);
+      if (recover) {
+        const scheduled = recover;
+        recover = undefined;
+        scheduled();
+        await task.whenIdle();
+      }
       return generationRequests.length;
     },
     async say(turn: Turn) {
@@ -877,20 +886,19 @@ test('New v5 recovers a transient 503 within the same generation and the existin
   }
 });
 
-test('New v5 can pause and resume a saved pending turn, or remain incomplete at the existing limit', async () => {
+test('New v5 automatically recovers a saved turn and preserves a genuine research limit', async () => {
   const rejected = { ...broad, drafts: ['上端に穴があります。', '右端に穴があります。'] };
   for (const strategy of strategies) {
     const ready = session(strategy);
     await ready.start();
     const failed = await ready.say(rejected);
     const pending = failed.after.queueState.pendingHumanEventIds;
-    assert.equal(ready.publicState().dialogueRecovery, 'retry');
-    await ready.interrupt();
-    assert.equal(ready.record().dialogueInterruption, 'participant_paused');
+    assert.equal(ready.publicState().dialogueRecovery, 'active');
+    assert.equal(ready.publicState().recovering, true);
     assert.deepEqual(ready.record().queueState.pendingHumanEventIds, pending);
     assert.deepEqual(ready.record().ownLedger, failed.before.ownLedger);
     await ready.restore();
-    assert.equal(ready.publicState().dialogueRecovery, 'paused');
+    assert.equal(ready.publicState().recovering, true);
     assert.equal(await ready.resumeWith(broad), 1);
     assert.equal(ready.publicState().dialogueRecovery, 'active');
     assert.deepEqual(ready.record().queueState.pendingHumanEventIds, []);

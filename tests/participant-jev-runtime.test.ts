@@ -120,17 +120,20 @@ test('J-R2: frozen synthetic private state is reusable across labels without cha
   assert.equal(h.counts().observations,1);
 });
 
-test('J-F1: a generation failure requires retry; explicit retry can then complete normally',async()=>{
+test('J-F1: a generation failure recovers on the scheduled attempt',async()=>{
   let generation=0;
   const h=setup({client:{async complete(_messages:any,options:any){
     if(['local_extraction','ai_extraction'].includes(options.phase))return{text:'[]'};
     if(options.phase==='generation'&&++generation===1)throw Error('synthetic-failure-with-private-body');
     return{text:'理解しました。'};
   }}});
-  const task=await createNamingTaskV2(h.options);task.message('この形を確認します','retry');await task.whenIdle();
-  assert.equal(task.getState().aiStatus,'error');
+  let recover: (() => void) | undefined;
+  const task=await createNamingTaskV2({...h.options,recoveryTimers:{
+    set(callback){recover=callback;return 0 as unknown as ReturnType<typeof setTimeout>;},clear(){recover=undefined;},
+  }});task.message('この形を確認します','retry');await task.whenIdle();
+  assert.equal(task.getState().recovering,true);
   assert.ok(!JSON.stringify(task.getState()).includes('synthetic-failure-with-private-body'));
-  await task.retry();assert.equal(task.getState().aiStatus,'idle');
+  assert.ok(recover);recover();await task.whenIdle();assert.equal(task.getState().aiStatus,'idle');
   assert.deepEqual(h.record().jevTraces.map((r:any)=>r.status),['error','committed']);
 });
 
@@ -218,7 +221,7 @@ for (const strategy of ['repair-first', 'bypass-enabled'] as const) {
     task.message(proposal, 'first');
     await task.whenIdle();
     await task.submitHuman({ names: Object.fromEntries(task.getState().scene.shapes.map(({ id }: { id: string }) => [id, null])) });
-    await assert.rejects(task.submitAI(), { code: 'submission_error' });
+    assert.equal(task.getState().recovering, true);
     assert.equal(h.finalRequests.length, 2);
     assert.equal(h.record().finalError, 'submission_error');
     assert.equal(h.record().aiSubmission, null);
@@ -235,7 +238,7 @@ for (const strategy of ['repair-first', 'bypass-enabled'] as const) {
     await task.whenIdle();
     const record = h.record();
     assert.equal(h.generationCalls(), 2);
-    assert.equal(task.getState().aiStatus, 'error');
+    assert.equal(task.getState().recovering, true);
     assert.equal(record.jevTraces[0].errorCode, 'unsafe_generation');
     assert.equal(record.jevTraces[0].generationGuard.fallback, false);
     assert.equal(record.jevTraces[0].publicSpeech, null);

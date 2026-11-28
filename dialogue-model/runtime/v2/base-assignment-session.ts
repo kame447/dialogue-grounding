@@ -5,7 +5,7 @@ import { validateBaseStart, validateBaseAssignmentConfig, canonicalBaseAssignmen
 import { BaseAssignmentError, data, readAssignment, readOwner, UUID, OWNER, safeInt,
   assignmentOpeningMode, assignmentPreparedObservation, assignmentRotationMode, assignmentMemoryPruneVersion, assignmentParticipantModelPin, assignmentParticipantDialogueProfile, assignmentFigureSelection } from './base-assignment-data.ts';
 import type { BaseSessionOptions, BaseSession, BaseSessionErrorCode, BaseOwnerState, BaseAssignment,
-  AdmissionKey, BaseRecord, RawBaseRecord, BaseTask, BaseArchiveWrite, FailureCode, FailureCause, RestoreResult } from './base-assignment.ts';
+  AdmissionKey, BaseAssignedEnvelope, BaseRecord, RawBaseRecord, BaseTask, BaseArchiveWrite, FailureCode, FailureCause, RestoreResult, StartIntent } from './base-assignment.ts';
 /** Closed sub-reasons of a store/session rejection (code trial_unavailable). Diagnostics only: the HTTP mapping uses `code`, and the reason never carries text. */
 export type PersistReason = 'cas_conflict' | 'owner_expired' | 'record_deleted' | 'owner_state_invalid' | 'store_invalid' | 'store_io' | 'size_limit';
 export class BaseSessionError extends Error {
@@ -21,6 +21,10 @@ function requireRunnableAssignment(assignment: BaseAssignment, adapter: BaseSess
         assignmentMemoryPruneVersion(assignment) !== participantMemoryPruneVersion(profile))) fail();
 }
 const copy = <T>(v: T): T => structuredClone(v);
+export function needsAssignmentPreparation(entry: BaseAssignedEnvelope): boolean {
+  return entry.status === 'preparing' || entry.status === 'failed' &&
+    ['start_interrupted', 'initialization_failed', 'record_write_failed'].some(code => code === entry.errorCode);
+}
 /** External ports cannot select an internal error by throwing a matching string. */
 async function port<T>(fn: () => T | Promise<T>): Promise<T> {
   try { return await fn(); }
@@ -58,6 +62,8 @@ export function createBaseAssignmentSession(options: BaseSessionOptions): BaseSe
   let live: AdmissionKey | null = null;
   let cached: { key: AdmissionKey; task: BaseTask } | null = null;
   let restoring: Promise<RestoreResult> | null = null;
+  let preparationFailures = 0, nextPreparationAt = 0;
+  const recoverPreparation = options.adapter === 'worker_binding';
   async function state(): Promise<BaseOwnerState> {
     const input = await port(() => options.store.read());
     try {
@@ -107,11 +113,12 @@ export function createBaseAssignmentSession(options: BaseSessionOptions): BaseSe
           configSha256: Array.from(digest, b => b.toString(16).padStart(2, '0')).join('') }, createdAt: new Date(ms).toISOString() });
     } catch { return fail(); }
   }
-  async function admit(old: BaseOwnerState, key: AdmissionKey) {
+  async function admit(old: BaseOwnerState, key: AdmissionKey, intent?: StartIntent) {
     const a = await assignment();
     requireRunnableAssignment(a, options.adapter);
     const next = copy(old);
-    next.admissions[key] = { schemaVersion: 'base_assigned_session_v1', assignment: a, status: 'preparing', record: null, errorCode: null };
+    next.admissions[key] = { schemaVersion: 'base_assigned_session_v1', assignment: a, status: 'preparing', record: null, errorCode: null,
+      ...(intent ? { startIntent: intent } : {}) };
     next.activeKey = key;
     const previous = old.activeKey && old.admissions[old.activeKey]?.record;
     await commit(old, next, previous ? [{ assignmentId: previous.assignment.assignmentId, record: previous }] : [], 'busy');
@@ -128,7 +135,7 @@ export function createBaseAssignmentSession(options: BaseSessionOptions): BaseSe
       });
     } catch { /* Preserve the last committed preparing snapshot on storage failure. */ }
   }
-  async function construct(key: AdmissionKey, a: BaseAssignment, restore: BaseRecord | null): Promise<BaseTask> {
+  async function construct(key: AdmissionKey, a: BaseAssignment, restore: BaseRecord | null, admitting = !restore, recoveringAdmission = false): Promise<BaseTask> {
     const token: { failed: boolean; internal: unknown; failureCode: FailureCode; cause: FailureCause } = { failed: false, internal: null, failureCode: 'initialization_failed', cause: 'unknown' };
     const onPersist = async (raw: RawBaseRecord) => {
       try {
@@ -156,8 +163,8 @@ export function createBaseAssignmentSession(options: BaseSessionOptions): BaseSe
         throw error;
       }
     };
+    let task: BaseTask | undefined;
     try {
-      let task: BaseTask;
       const pin = assignmentParticipantModelPin(a);
       const plan = a.source.kind === 'reception_plan_v2' || a.source.kind === 'reception_plan_v3' ? a.source.plan : null;
       const limits = plan?.participantLimits;
@@ -176,27 +183,41 @@ export function createBaseAssignmentSession(options: BaseSessionOptions): BaseSe
         ...(initialObservationGeneration ? { initialObservationGeneration } : {}),
         ...(openingMode ? { openingMode } : {}),
         ...(preparedObservation ? { preparedObservation } : {}),
+        ...(recoveringAdmission ? { recoveringAdmission: true } : {}),
         ...(participantDialogueProfile ? { participantDialogueProfile } : {}),
         ...(restore ? {} : { rotationMode: assignmentRotationMode(a),
           ...(a.source.kind === 'reception_plan_v3' ? { figureSelection: assignmentFigureSelection(a) } : {}) }) }); }
       catch (error) { if (error === token.internal && error instanceof BaseSessionError) throw error; token.cause = failureCauseOf(error); return fail(); }
       if (!task || ['getState', 'persistNow', 'whenIdle', 'message', 'retry', 'submitHuman', 'submitAI'].some(k => typeof (task as unknown as Record<string, unknown>)[k] !== 'function')) return fail();
-      const view = await port(() => task.getState());
+      const readyTask = task;
+      const view = await port(() => readyTask.getState());
       await serial(async () => {
         const old = await state(), e = old.admissions[key];
         if (!e || !e.record || e.record.status === 'interrupted' || e.status === 'failed' || e.record.recordId !== view.sessionId || old.activeKey !== key) return fail();
         validateBoundBaseRecord(e.record, a);
-        if (!restore) {
+        if (admitting) {
           token.failureCode = 'record_write_failed';
           const next = copy(old); next.admissions[key]!.status = 'active';
           await commit(old, next, [{ assignmentId: a.assignmentId, record: e.record }]);
         }
-        cached = { key, task };
+        cached = { key, task: readyTask };
       });
+      preparationFailures = 0;
+      nextPreparationAt = 0;
       return task;
     } catch (error) {
       token.failed = true;
-      if (!restore) await failed(key, a.assignmentId, token.failureCode, token.cause);
+      // A task can begin work before the admission is active. Invalidate it
+      // before another construction is permitted for the same assignment.
+      task?.stopForAdmin?.();
+      if (admitting) {
+        await failed(key, a.assignmentId, token.failureCode, token.cause);
+        if (recoverPreparation || recoveringAdmission) {
+          const delays = [2000, 4000, 8000, 16000, 30000, 60000];
+          nextPreparationAt = options.now() + delays[preparationFailures];
+          preparationFailures = Math.min(preparationFailures + 1, delays.length - 1);
+        }
+      }
       if (error instanceof BaseSessionError && error.code === 'owner_expired') throw error;
       return fail();
     } finally { if (live === key) live = null; }
@@ -209,7 +230,19 @@ export function createBaseAssignmentSession(options: BaseSessionOptions): BaseSe
         if (key === null) return { kind: 'empty' as const };
         const e = old.admissions[key]!;
         if (e.record?.status === 'interrupted') return { kind: 'empty' as const };
+        const intent = e.startIntent ? { startIntentId: e.startIntent.id } : {};
         requireRunnableAssignment(e.assignment, options.adapter);
+        if ((recoverPreparation || e.startIntent) && needsAssignmentPreparation(e)) {
+          if (live === key || options.now() < nextPreparationAt) return { kind: 'preparing' as const, intent };
+          if (e.record && !await archived(e.record.recordId)) return fail();
+          if (e.status === 'failed') {
+            const next = copy(old), entry = next.admissions[key]!;
+            entry.status = 'preparing'; entry.errorCode = null; delete entry.failureCause;
+            await commit(old, next, []);
+          }
+          live = key;
+          return { kind: 'resume_preparation' as const, key, assignment: e.assignment, record: e.record, intent };
+        }
         if (e.status === 'preparing') {
           if (live === key) return fail('busy');
           const next = copy(old); next.admissions[key]!.status = 'failed'; next.admissions[key]!.errorCode = 'start_interrupted';
@@ -217,21 +250,27 @@ export function createBaseAssignmentSession(options: BaseSessionOptions): BaseSe
         }
         if (e.status === 'failed' || !e.record) return fail();
         if (!await archived(e.record.recordId)) return fail();
-        return { kind: 'active' as const, key, assignment: e.assignment, record: e.record, task: cached?.key === key ? cached.task : null };
+        return { kind: 'active' as const, key, assignment: e.assignment, record: e.record, task: cached?.key === key ? cached.task : null, intent };
       });
       if (ready.kind === 'empty') return { kind: 'empty', task: null };
-      return { kind: 'restored', task: ready.task ?? await construct(ready.key, ready.assignment, ready.record) };
+      if (ready.kind === 'preparing') return { kind: 'preparing', task: null, ...ready.intent };
+      if (ready.kind === 'resume_preparation') {
+        const construction = construct(ready.key, ready.assignment, ready.record, true, true).then(() => {}, () => {});
+        options.onPreparing?.(construction);
+        return { kind: 'preparing', task: null, ...ready.intent };
+      }
+      return { kind: 'restored', task: ready.task ?? await construct(ready.key, ready.assignment, ready.record), ...ready.intent };
     })();
     restoring = work;
     work.then(() => { if (restoring === work) restoring = null; }, () => { if (restoring === work) restoring = null; });
     return work;
   }
   return {
-    async start(body) {
+    async start(body, intent) {
       try { validateBaseStart(body); } catch { return fail('invalid_request'); }
       const ready = await serial(async () => {
         const old = await state();
-        if (old.activeKey === null) return { kind: 'new' as const, ...await admit(old, 'initial') };
+        if (old.activeKey === null) return { kind: 'new' as const, ...await admit(old, 'initial', intent) };
         const e = old.admissions[old.activeKey]!;
         requireRunnableAssignment(e.assignment, options.adapter);
         if (e.status === 'preparing') return fail('busy');
@@ -244,7 +283,7 @@ export function createBaseAssignmentSession(options: BaseSessionOptions): BaseSe
       return { kind: 'completed', task: result.task };
     },
     restore,
-    async prepareNext(id) {
+    async prepareNext(id, intent) {
       const ready = await serial(async () => {
         const old = await state();
         if (typeof id !== 'string' || !UUID.test(id)) return fail('not_found');
@@ -267,7 +306,7 @@ export function createBaseAssignmentSession(options: BaseSessionOptions): BaseSe
         if (current.status === 'failed' || !current.record) return fail();
         if (current.record.status !== 'completed') return fail('busy');
         if (current.record.recordId !== id) return fail('not_found');
-        return { kind: 'new' as const, ...await admit(old, key) };
+        return { kind: 'new' as const, ...await admit(old, key, intent) };
       });
       if (ready.kind === 'existing') return { kind: 'existing', recordId: ready.recordId, participantPath: '/' };
       const task = await construct(ready.key, ready.assignment, null);

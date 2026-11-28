@@ -56,6 +56,7 @@ function legacyOptions(strategy: Label, { rejectGeneration = false } = {}) {
   const phases: string[] = [];
   let scores = 0;
   let saved: SavedTrial | undefined;
+  let recover: (() => void) | undefined;
   const client = { async complete(_messages: unknown, { phase }: { phase: string }) {
     phases.push(phase);
     if (phase === 'generation' && rejectGeneration) throw new Error('synthetic provider failure');
@@ -64,6 +65,10 @@ function legacyOptions(strategy: Label, { rejectGeneration = false } = {}) {
   } };
   const options = {
     seed, strategy, client, runDir: null, now: () => Date.parse(at), createTrial: () => trial,
+    recoveryTimers: {
+      set(callback: () => void) { recover = callback; return 0 as unknown as ReturnType<typeof setTimeout>; },
+      clear() { recover = undefined; },
+    },
     jevResearch: {
       profile: legacyProfile, technicalTrial, generationRetryVersion: legacyGeneration,
       observer: {
@@ -81,7 +86,8 @@ function legacyOptions(strategy: Label, { rejectGeneration = false } = {}) {
     },
     onPersist(record: SavedTrial) { saved = structuredClone(record); },
   } satisfies Parameters<typeof createNamingTaskV2>[0];
-  return { options, phases, scoreCalls: () => scores, record() { assert.ok(saved); return saved; } };
+  return { options, phases, scoreCalls: () => scores, record() { assert.ok(saved); return saved; },
+    recover() { assert.ok(recover); recover(); } };
 }
 
 test('frozen v16 trial restores before submission and preserves its completed score on a second restore', async () => {
@@ -193,7 +199,7 @@ test('v17 keeps the human turn pending if the unresolved draft also fails', asyn
   });
 });
 
-test('generation transport failure preserves the queued event and private state through restore and retry', async () => {
+test('generation transport failure preserves the event and state through automatic recovery after restore', async () => {
   const started = legacyOptions('repair-first', { rejectGeneration: true });
   const task = await createNamingTaskV2(started.options);
   const privateBefore = task.researcherView().privateState;
@@ -201,8 +207,9 @@ test('generation transport failure preserves the queued event and private state 
   await task.whenIdle();
   const failed = task.getState();
   const saved = started.record();
-  assert.equal(failed.aiStatus, 'error');
-  assert.equal(failed.dialogueRecovery, 'retry');
+  assert.equal(failed.aiStatus, 'thinking');
+  assert.equal(failed.recovering, true);
+  assert.equal(failed.dialogueRecovery, 'active');
   assert.equal(failed.events.at(-1)?.id, eventId);
   assert.deepEqual(saved.queueState.pendingHumanEventIds, [eventId]);
   assert.deepEqual(task.researcherView().privateState, privateBefore);
@@ -212,9 +219,10 @@ test('generation transport failure preserves the queued event and private state 
   const resumed = legacyOptions('repair-first');
   const restored = await createNamingTaskV2({ ...resumed.options, restore: saved });
   assert.deepEqual(restored.getState().events, failed.events);
-  assert.equal(restored.getState().aiStatus, 'error');
+  assert.equal(restored.getState().recovering, true);
   assert.deepEqual(resumed.phases, []);
-  await restored.retry();
+  resumed.recover();
+  await restored.whenIdle();
   const completed = restored.getState();
   assert.deepEqual(completed.events.slice(0, -1), failed.events);
   assert.equal(completed.events.at(-1)?.text, reply);
@@ -275,18 +283,19 @@ test('v17 restores the failed opening, publishes only the retried Terra output, 
         observer,
       },
     });
-    return { task, record: fixture.record };
+    return { task, record: fixture.record, recover: fixture.recover };
   }
 
   const started = await open();
-  assert.equal(started.task.getState().dialogueRecovery, 'retry');
+  assert.equal(started.task.getState().recovering, true);
   assert.deepEqual(started.task.getState().events, []);
   assert.equal(started.record().queueState.errorCode, 'ai_unavailable');
   assert.deepEqual(started.record().jevTraces, []);
   const resumed = await open(started.record());
   assert.equal(calls, 1);
   assert.equal(observations, 1);
-  await resumed.task.retry();
+  resumed.recover();
+  await resumed.task.whenIdle();
   const events: { speaker: string; text: string }[] = resumed.task.getState().events;
   assert.deepEqual(events.map(({ speaker, text }) => ({ speaker, text })), [{ speaker: 'ai', text: opening }]);
   assert.equal(resumed.record().events[0]?.origin, 'generated_opening');

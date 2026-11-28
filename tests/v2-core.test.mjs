@@ -102,10 +102,10 @@ test("submissions use each side's own opaque ids and are scored only after both"
   const client = fakeClient({ finalName: (ids) => Object.fromEntries(ids.map((id, i) => [id, i === 0 ? "ちがう" : nameOf(trial.key.ai[id])])) });
   const task = await createNamingTaskV2({ client, strategy: "repair-first", seed: 24, runDir: "" });
   const names = Object.fromEntries(humanIds.map((id, i) => [id, i === 5 ? null : nameOf(trial.key.human[id])]));
-  await task.submitHuman({ names });
+  const submitted = task.submitHuman({ names });
   assert.equal(task.getState().result, undefined);
   assert.throws(() => task.message("まだ話せる？"), /dialogue_closed/);
-  await task.submitAI();
+  await submitted;
   const state = task.getState();
   const expected = humanIds.filter((id, i) => i !== 5 && trial.key.human[id] !== trial.key.ai[aiIds[0]]).length;
   assert.equal(state.result.matchedCount, expected);
@@ -120,9 +120,7 @@ test("administrative stop discards an in-flight final result and blocks new task
   const task = await createNamingTaskV2({ client, strategy: "repair-first", seed: 24, runDir: "",
     onPersist: async (record) => { writes.push(structuredClone(record)); } });
   const names = Object.fromEntries(task.getState().scene.shapes.map(({ id }) => [id, "合成名"]));
-  await task.submitHuman({ names });
-  const final = task.submitAI();
-  const rejected = assert.rejects(final, { code: "trial_interrupted" });
+  const rejected = assert.rejects(task.submitHuman({ names }), { code: "trial_interrupted" });
   await sent;
   const writesBeforeEnd = writes.length;
   task.stopForAdmin();
@@ -220,24 +218,29 @@ test("background and explicit record writes never collide", async () => {
   }
 });
 
-test("an upstream error keeps the message pending and blocks submission until retry", async () => {
+test("an upstream error keeps the message pending and blocks submission until automatic recovery", async () => {
   let fail = true;
   const base = fakeClient();
   const client = { calls: base.calls, async complete(messages, options = {}) {
     if (options.phase === "generation" && fail) { const error = new Error("upstream"); error.status = 503; throw error; }
     return base.complete(messages, options);
   } };
-  const task = await createNamingTaskV2({ client, strategy: "repair-first", seed: 29, runDir: "" });
+  let scheduled;
+  const task = await createNamingTaskV2({ client, strategy: "repair-first", seed: 29, runDir: "",
+    recoveryTimers: { set(callback) { scheduled = callback; }, clear() { scheduled = undefined; } } });
   task.message("これはどう？");
   await task.whenIdle();
-  assert.equal(task.getState().aiStatus, "error");
+  assert.equal(task.getState().recovering, true);
+  assert.equal(task.getState().aiStatus, "thinking");
   assert.deepEqual(task.getState().events.map((e) => e.speaker), ["ai", "human"], "the opening and human message are preserved");
   const ids = task.getState().scene.shapes.map((s) => s.id);
-  await assert.rejects(task.submitHuman({ names: Object.fromEntries(ids.map((id) => [id, null])) }), /ai_retry_required/);
-  await assert.rejects(task.submitAI(), /ai_retry_required/);
+  await assert.rejects(task.submitHuman({ names: Object.fromEntries(ids.map((id) => [id, null])) }), /ai_busy/);
+  await assert.rejects(task.submitAI(), /ai_busy/);
   assert.equal(task.researcherView().privateState.judgments.length, 0, "failed generation committed nothing");
   fail = false;
-  await task.retry();
+  assert.ok(scheduled);
+  scheduled();
+  await task.whenIdle();
   assert.deepEqual(task.getState().events.map((e) => e.speaker), ["ai", "human", "ai"]);
   await task.submitHuman({ names: Object.fromEntries(ids.map((id) => [id, null])) });
 });
