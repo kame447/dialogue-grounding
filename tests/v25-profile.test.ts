@@ -14,7 +14,7 @@ import { initialState, normal, OLD, runTurn } from './support/s4-v3-records.ts';
 
 test('the v25 profile is a pilot012 profile that carries the post-generation check setting; the older profiles keep theirs', () => {
   assert.equal(PILOT012_V25_PARTICIPANT_PROFILE, 'participant_dialogue_v25_generation_cleanup');
-  for (const profile of [PILOT012_V24_PARTICIPANT_PROFILE, PILOT012_V25_PARTICIPANT_PROFILE]) {
+  for (const profile of [PILOT012_V24_PARTICIPANT_PROFILE, PILOT012_V25_PARTICIPANT_PROFILE] as const) {
     assert.equal(isParticipantDialogueProfile(profile), true, profile);
     assert.equal(isPilot012ParticipantDialogueProfile(profile), true, profile);
     assert.equal(hasPostGenerationCheckProfile(profile), true, profile);
@@ -55,8 +55,9 @@ for (const [name, dialogueProfile] of [['v24', PILOT012_V24_PARTICIPANT_PROFILE]
     assert.ok(old);
     assert.equal(Object.hasOwn(old, 'postGenerationCheck'), false);
     assert.throws(() => validateReceptionPlan({ ...old, postGenerationCheck }));
-    assert.equal(validateReceptionPlan({ ...plan, participantDialogueProfile: dialogueProfile === PILOT012_V24_PARTICIPANT_PROFILE ? PILOT012_V25_PARTICIPANT_PROFILE : PILOT012_V24_PARTICIPANT_PROFILE })
-      .participantDialogueProfile !== dialogueProfile, true, 'both profiles validate; the saved one is what runs');
+    const other = dialogueProfile === PILOT012_V24_PARTICIPANT_PROFILE ? PILOT012_V25_PARTICIPANT_PROFILE : PILOT012_V24_PARTICIPANT_PROFILE;
+    assert.equal((validateReceptionPlan({ ...plan, participantDialogueProfile: other }) as { participantDialogueProfile?: string }).participantDialogueProfile, other,
+      'both profiles validate; the saved one is what runs');
     await assert.rejects(approveReception(pending, { ...params, participantDialogueProfile: PILOT012_V23_PARTICIPANT_PROFILE, postGenerationCheck: 'on' }));
   });
 }

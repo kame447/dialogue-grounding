@@ -29,7 +29,7 @@ test('v23 and v24 generation requests keep every byte of the production main (39
 test('the extraction prompts and the rotation texts of v24 keep every byte (the new flag changes nothing without it, and nothing when no source is read)', () => {
   const matrix = (sourceRules?: boolean) => {
     const out: string[] = [];
-    for (const terminology of [undefined, SHAPE_TERMINOLOGY_GENERATION]) for (const visual of [false, true]) for (const parts of [false, true]) for (const rotation of [false, true]) {
+    for (const terminology of [undefined, SHAPE_TERMINOLOGY_GENERATION] as const) for (const visual of [false, true]) for (const parts of [false, true]) for (const rotation of [false, true]) {
       out.push(sourceRules === undefined ? memoAiExtractionPrompt(terminology, visual, parts, rotation) : memoAiExtractionPrompt(terminology, visual, parts, rotation, sourceRules));
     }
     return out;
@@ -40,7 +40,7 @@ test('the extraction prompts and the rotation texts of v24 keep every byte (the 
     guidance.EXTRACTION_ROTATION_USE, guidance.AI_EXTRACTION_ROTATION_USE, guidance.ROTATION_LEGENDS];
   assert.equal(digestOf([JSON.stringify(rotation)]), '2020220c394d84a533fd8b59a17dd4b5d0b2f6428e9137f876589a5e18760800');
   // With the rules on, the extraction that reads no source (the memory-only extraction of the default OFF) is still the earlier text.
-  for (const terminology of [undefined, SHAPE_TERMINOLOGY_GENERATION]) for (const parts of [false, true]) for (const rotationMemo of [false, true]) {
+  for (const terminology of [undefined, SHAPE_TERMINOLOGY_GENERATION] as const) for (const parts of [false, true]) for (const rotationMemo of [false, true]) {
     assert.equal(memoAiExtractionPrompt(terminology, false, parts, rotationMemo, true), memoAiExtractionPrompt(terminology, false, parts, rotationMemo));
   }
 });
@@ -81,10 +81,11 @@ const CASES: Case[] = [
   ['close', { items: [{ action: 'close', target: { kind: 'none' } }], closing: { initiator: 'ai', unresolved: true } }],
   ['confirm + repair', { items: [{ action: 'confirm', target, issue }, { action: 'repair', target, visualPurpose: { kind: 'resolve_mismatch' } }], visualDetail: true }],
 ];
+const prompt = (input: Record<string, unknown>) => generationActionPromptV23(input as never);
 /** The whole request text a model reads before the plan's JSON: the common instructions and the action message. */
 const requestText = (version: 'v24' | 'v25', input: Record<string, unknown>) =>
   (version === 'v25' ? GENERATION_INSTRUCTIONS_V25 : GENERATION_INSTRUCTIONS_V24) + '\n' +
-  generationActionPromptV23({ ...base, ...input, ...(version === 'v25' ? { tidied: true } : {}) }).split('\n').slice(0, -2).join('\n');
+  prompt({ ...base, ...input, ...(version === 'v25' ? { tidied: true } : {}) }).split('\n').slice(0, -2).join('\n');
 
 // The four themes v24 said more than once. A sentence counts for a theme by the words that carry it; a sentence about the public questions (hold_open, carry_over answer the
 // questions already asked in public before they move on) is a different statement and is not counted.
@@ -116,14 +117,14 @@ test('v25 says each theme once in every request, where v24 said some of them two
 test('the actions v25 did not touch say exactly what v24 said (the action message), and only the three texts that restated a theme differ', () => {
   const changed = new Set<string>();
   for (const [name, input] of CASES) {
-    const v24 = generationActionPromptV23({ ...base, ...input }), v25 = generationActionPromptV23({ ...base, ...input, tidied: true });
+    const v24 = prompt({ ...base, ...input }), v25 = prompt({ ...base, ...input, tidied: true });
     if (v24 !== v25) changed.add(name);
   }
   assert.deepEqual([...changed].sort(), ['accept (continuing)', 'confirm', 'confirm (continuing)', 'confirm (continuing, visual detail)', 'confirm (visual detail)',
     'confirm + repair', 'repair (visual detail)'].sort());
   // consult, hold_open, carry_over, revisit, close, propose_name, agree and a plain accept keep the action message of v24, with or without the flag.
   for (const [name, input] of CASES) if (!changed.has(name)) {
-    assert.equal(generationActionPromptV23({ ...base, ...input, tidied: true }), generationActionPromptV23({ ...base, ...input }), name);
+    assert.equal(prompt({ ...base, ...input, tidied: true }), prompt({ ...base, ...input }), name);
   }
 });
 
@@ -138,30 +139,30 @@ test('consult: v24 asked for the AI\'s own view with every question and for no o
   assert.deepEqual(own(v25).map(sentence => sentence.startsWith('図形についての質問は、')), [true], 'v25: only a question about the figure does');
   assert.equal(v25.includes('質問するときも'), false);
   // The consult text itself is the one of v24 (the cleanup chose the strategy's meaning over the common sentence).
-  assert.equal(generationActionPromptV23({ ...base, ...consult, tidied: true }), generationActionPromptV23({ ...base, ...consult }));
+  assert.equal(prompt({ ...base, ...consult, tidied: true }), prompt({ ...base, ...consult }));
   // The questions that ask how to go on (consult, carry_over, close) name their own content; none of them is "a question about the figure".
   for (const name of ['consult', 'carry_over', 'close']) {
-    const text = generationActionPromptV23({ ...base, ...CASES.find(([n]) => n === name)![1], tidied: true });
+    const text = prompt({ ...base, ...CASES.find(([n]) => n === name)![1], tidied: true });
     assert.equal(text.includes('図形についての質問'), false, name);
   }
 });
 
 test('the three texts v25 shortened keep what is the action\'s own and drop only what the common instructions say', () => {
-  const confirm = generationActionPromptV23({ ...base, ...CASES.find(([name]) => name === 'confirm (visual detail)')![1], tidied: true });
+  const confirm = prompt({ ...base, ...CASES.find(([name]) => name === 'confirm (visual detail)')![1], tidied: true });
   assert.ok(confirm.includes('選んだ論点について確認がまだ必要なら、答えを得ていない点を形の参照枠に沿って尋ねてください。観察メモにない特徴、対象の一致、名前の合意は断定しないでください。'));
   assert.ok(confirm.includes('肯否・訂正済みの点と未解決の点を区別してください。'));
   assert.ok(confirm.includes('根拠が不足する場合はその不確かさを示してください。'));
   for (const gone of ['聞かれたことには、自分の観察で答えられる点を先に述べてください', '具体的な特徴への質問は先に扱い', '必要な情報を尋ねてください', '一点だけ']) assert.equal(confirm.includes(gone), false, gone);
-  const continuing = generationActionPromptV23({ ...base, ...CASES.find(([name]) => name === 'confirm (continuing)')![1], tidied: true });
+  const continuing = prompt({ ...base, ...CASES.find(([name]) => name === 'confirm (continuing)')![1], tidied: true });
   assert.ok(continuing.includes('【未確定のまま答える】答えは今の論点の範囲にとどめ、名前を新しく提案・採用・撤回したり、未確定の対象を一つに決めたりしないでください。'));
   assert.ok(continuing.includes('次の返答に相手の情報が必要なときだけ、未回答の具体的な点を尋ねてください。何を確かめるかを相手に委ねないでください。'));
-  const accepted = generationActionPromptV23({ ...base, ...CASES.find(([name]) => name === 'accept (continuing)')![1], tidied: true });
+  const accepted = prompt({ ...base, ...CASES.find(([name]) => name === 'accept (continuing)')![1], tidied: true });
   assert.ok(accepted.includes('未確定の対象を一つに決めたりしないでください。新たな質問は加えないでください。'));
   for (const text of [continuing, accepted]) for (const gone of ['直接答えてください', '何が未確定かを短く明示', '答えられる内容と限界', '訂正や依頼の言い直しがあれば反映してください']) assert.equal(text.includes(gone), false, gone);
 });
 
 // ---- 3. postGenerationCheck on only (#275) ----
-const sources = (extra: Record<string, unknown>) => generationActionPromptV23({ ...base, items: [{ action: 'confirm', target, visualPurpose: { kind: 'clarify_reference' } }], visualDetail: true, ...extra });
+const sources = (extra: Record<string, unknown>) => prompt({ ...base, items: [{ action: 'confirm', target, visualPurpose: { kind: 'clarify_reference' } }], visualDetail: true, ...extra });
 test('the noun-unit sentence follows the rotation sources line of a v25 request that asks for sources, and is in no other request', () => {
   const unit = guidance.ROTATION_SOURCE_NOUN_UNIT_V25;
   assert.equal(guidance.ROTATION_FEATURE_SOURCES_V25, guidance.ROTATION_FEATURE_SOURCES + unit);
