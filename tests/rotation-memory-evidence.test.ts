@@ -5,6 +5,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { validateOwnRotationMemory } from '../dialogue-model/runtime/stimuli/rotation-memory-shape.ts';
+import { FIGURE_BANK } from '../dialogue-model/runtime/stimuli/figure-bank.ts';
+import { projectOwnRotationMemory } from '../dialogue-model/runtime/stimuli/rotation-memory.ts';
 import { rotationInitialMemo } from '../dialogue-model/runtime/observation/rotation-memo.ts';
 import type { ObservationMemo } from '../dialogue-model/runtime/observation/contract.ts';
 import { readVisualFeatureEvidence, readVisualFeatureSources, sameVisualFeatureSources } from '../dialogue-model/runtime/v2/visual-feature-evidence.ts';
@@ -48,13 +50,13 @@ test('every path to one candidate reads as that candidate, whichever layer showe
   assert.deepEqual(declared(['rotation', 'regions', 1]), unit(['rotation', 'regions', 1]));
 });
 
-test('a view, its line and a region of part candidates are coarse units; the same noun twice in a view is one candidate', () => {
+test('a view, its line and a region of part candidates are coarse units; a part candidate is told apart by its region', () => {
   const t0 = ['rotation', 'turned', 0];
   for (const path of [t0, [...t0, 'view'], [...t0, 'parts']]) assert.deepEqual(declared(path), unit(t0), JSON.stringify(path));
   assert.deepEqual(declared(['rotation', 'current']), unit(['rotation', 'current']));
   assert.deepEqual(declared([...t0, 'parts', 'P2']), unit([...t0, 'parts', 'P2']));
-  // 耳 is offered by P1 and by P3: the first in stored order stands for both.
-  assert.deepEqual(declared([...t0, 'parts', 'P3', 0, 'noun']), unit([...t0, 'parts', 'P1', 0]));
+  // 耳 is offered by P1 and by P3: they are two candidates, each named by its region.
+  assert.deepEqual(declared([...t0, 'parts', 'P3', 0, 'noun']), unit([...t0, 'parts', 'P3', 0]));
   assert.deepEqual(declared([...t0, 'parts', 'P1', 0]), unit([...t0, 'parts', 'P1', 0]));
 });
 
@@ -89,8 +91,13 @@ test('part candidates are told apart per candidate, and per region by the words 
   assert.ok(!agree([...t0, 'parts', 'P2', 1, 'noun'], [...t0, 'view'], '横にすると腕のように見えます。'), 'declared 袖, quoted 腕');
   assert.ok(agree([...t0, 'parts', 'P2', 1], [...t0, 'parts', 'P2'], '横にすると袖のように見えます。'), 'a region-level extraction narrows to the region’s candidate');
   assert.ok(!agree([...t0, 'parts', 'P2', 1], [...t0, 'parts', 'P2'], '横にすると腕のように見えます。'));
-  // The same noun on two regions is one candidate for matching: declared on P3, quoted without a region.
-  assert.ok(agree([...t0, 'parts', 'P3', 0, 'noun'], [...t0, 'view'], '横にすると耳のように見えます。'));
+  // The same noun on two regions (耳 on P1 and on P3): the regions are told apart, and a view with a quote of the noun does not say which.
+  assert.ok(!agree([...t0, 'parts', 'P1', 0], [...t0, 'parts', 'P3', 0, 'noun'], '右の部分が耳のように見えます。'), 'declared P1, extracted P3');
+  assert.ok(agree([...t0, 'parts', 'P3', 0], [...t0, 'parts', 'P3', 0, 'noun'], '右の部分が耳のように見えます。'), 'the same region');
+  assert.ok(!agree([...t0, 'parts', 'P3', 0], [...t0, 'view'], '右の部分が耳のように見えます。'), 'a view and 耳 do not tell P1 from P3');
+  assert.ok(!agree([...t0, 'parts', 'P1', 0], [...t0, 'view'], '右の部分が耳のように見えます。'));
+  assert.ok(agree([...t0, 'parts', 'P3', 0], [...t0, 'parts', 'P3'], '右の部分が耳のように見えます。'), 'a named region narrows to its own 耳');
+  assert.ok(!agree([...t0, 'parts', 'P1', 0], [...t0, 'parts', 'P3'], '右の部分が耳のように見えます。'));
   // A part noun is not a whole construal of the view.
   assert.ok(!agree([...t0, 'whole', 0], [...t0, 'view'], '横にすると腕のように見えます。'));
 });
@@ -127,4 +134,31 @@ test('sources of earlier memos read exactly as before', () => {
   const evidence = (path: (string | number)[], quote: string) => readVisualFeatureEvidence({ sources: [{ source: { figureId: id, path }, quote }] }, earlier, [id], quote)!;
   assert.ok(sameVisualFeatureSources(ok(['analytic', 'shapes', 0])!, evidence(['analytic', 'shapes', 0], '尖った形です。')));
   assert.ok(!sameVisualFeatureSources(ok(['analytic', 'shapes', 1])!, evidence(['analytic', 'shapes', 0], '尖った形です。')));
+});
+
+test('over the whole bundle: no two regions that offer the same noun are ever taken for one another', () => {
+  let pairs = 0;
+  for (const figure of FIGURE_BANK) for (const rotationNow of [0, 90, 180, 270]) {
+    const own = projectOwnRotationMemory({ figureKey: figure.id, rotation: rotationNow })!;
+    const bundleMemo = rotationInitialMemo([{ id, bbox: { x: 0, y: 0, w: 10, h: 10 }, centroid: { x: 5, y: 5 } }], new Map([[id, own]]), '2026-11-28T00:00:00.000Z');
+    const read = (path: (string | number)[]) => readVisualFeatureSources([{ figureId: id, path }], bundleMemo, [id]);
+    const seen = (path: (string | number)[], quote: string) => readVisualFeatureEvidence({ sources: [{ source: { figureId: id, path }, quote }] }, bundleMemo, [id], quote);
+    const same = (path: (string | number)[], other: (string | number)[], quote: string) => {
+      const d = read(path), e = seen(other, quote);
+      return !!d && !!e && sameVisualFeatureSources(d, e);
+    };
+    const views = [{ head: ['rotation', 'current'], view: own.current }, ...own.turned.map((view, k) => ({ head: ['rotation', 'turned', k], view }))];
+    for (const { head, view } of views) {
+      const offers = Object.entries(view.parts).flatMap(([region, list]) => list.map((c, j) => ({ region, j, noun: c.noun })));
+      for (const a of offers) for (const b of offers) {
+        if (a.region === b.region || a.noun !== b.noun) continue;
+        pairs++;
+        const quote = `向こうの部分が${a.noun}に見えます。`;
+        assert.ok(!same([...head, 'parts', a.region, a.j], [...head, 'parts', b.region, b.j, 'noun'], quote), `${figure.id} ${rotationNow} ${a.region}/${b.region}`);
+        assert.ok(same([...head, 'parts', a.region, a.j], [...head, 'parts', a.region, a.j, 'noun'], quote));
+        assert.ok(!same([...head, 'parts', a.region, a.j], [...head, 'view'], quote), 'a view and the noun do not tell the region');
+      }
+    }
+  }
+  assert.ok(pairs > 0, 'the bundle has regions that offer the same noun');
 });

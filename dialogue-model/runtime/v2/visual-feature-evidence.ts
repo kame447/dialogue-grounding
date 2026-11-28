@@ -24,24 +24,22 @@ const candidatesOf = (view: OwnRotationView, head: Path): Candidate[] => [
   ...view.whole.map((w, i) => ({ unit: [...head, "whole", i], noun: w.noun, kind: "whole" as const })),
   ...Object.entries(view.parts).flatMap(([id, list]) => list.map((c, j) => ({ unit: [...head, "parts", id, j], noun: c.noun, kind: "parts" as const }))),
 ];
-/** In one view the same noun of the same kind is one candidate: the first in stored order stands for it (two regions may both offer 耳). */
-const standing = (all: readonly Candidate[], c: Candidate): Candidate => all.find(o => o.kind === c.kind && o.noun === c.noun) ?? c;
 
 /**
  * A source in the pre-made rotation memory, read the way the model saw it. A path may lead to a string of the stored projection
  * (["rotation","turned",1,"whole",0,"noun"]), of a layer a call shows (["rotation","turned",1,"whole",0], ["rotation","turned",1,"view"]),
- * or be a unit itself. The unit is what a statement relies on: a candidate of a view (whole/i, parts/Pk/j), a region's part
- * candidates, a view as a whole, or a region of the figure (regions/i). A declaration and an extraction compare by their units,
- * so a different candidate of the same view is a different source. `scope` is set for a unit that does not name one candidate
- * (a view, a region's part candidates): the words an extraction quotes may narrow it to one. Null when the path is not a source here.
+ * or be a unit itself. The unit is what a statement relies on: a candidate of a view (whole/i, parts/Pk/j: a part candidate is told apart
+ * by its region too, two regions may both offer 尾), a region's part candidates, a view as a whole, or a region of the figure (regions/i).
+ * A declaration and an extraction compare by their units. `scope` is set for a unit that does not name one candidate (a view, a region's
+ * part candidates): the words an extraction quotes may narrow it to one. Null when the path is not a source here.
  */
-function rotationSource(rotation: OwnRotationMemory, path: readonly (string | number)[]): { unit: Path; scope: Candidate[] | null; all: Candidate[] } | null {
+function rotationSource(rotation: OwnRotationMemory, path: readonly (string | number)[]): { unit: Path; scope: Candidate[] | null } | null {
   const leaf = (): boolean => [rotation, ...ROTATION_LAYERS.map(layer => rotationMemoryLayer(rotation, layer) as unknown as OwnRotationMemory)]
     .some(shape => !!rotationSourceValue(shape, path.slice(1))?.trim());
   const rest = path.slice(1);
   if (rest[0] === "regions") {
     const i = rest[1];
-    return index(i) && i < rotation.regions.length && (rest.length === 2 || leaf()) ? { unit: ["rotation", "regions", i], scope: null, all: [] } : null;
+    return index(i) && i < rotation.regions.length && (rest.length === 2 || leaf()) ? { unit: ["rotation", "regions", i], scope: null } : null;
   }
   let head: Path, view: OwnRotationView, tail: Path;
   if (rest[0] === "current") { head = ["rotation", "current"]; view = rotation.current; tail = rest.slice(1); }
@@ -49,33 +47,35 @@ function rotationSource(rotation: OwnRotationMemory, path: readonly (string | nu
   else return null;
   const all = candidatesOf(view, head);
   // The view itself, its one-line description or its part line.
-  if (tail.length === 0 || tail.length === 1 && (tail[0] === "parts" || tail[0] === "view" && head[1] === "turned")) return { unit: head, scope: all, all };
+  if (tail.length === 0 || tail.length === 1 && (tail[0] === "parts" || tail[0] === "view" && head[1] === "turned")) return { unit: head, scope: all };
   const at = (c: Candidate, n: number) => c.unit[head.length + n];
   if (tail[0] === "whole" && index(tail[1]) && tail[1] < view.whole.length) {
-    const own = all.find(c => c.kind === "whole" && at(c, 1) === tail[1])!;
-    return tail.length === 2 || leaf() ? { unit: standing(all, own).unit, scope: null, all } : null;
+    return tail.length === 2 || leaf() ? { unit: [...head, "whole", tail[1]], scope: null } : null;
   }
   if (tail[0] === "parts" && typeof tail[1] === "string" && Object.hasOwn(view.parts, tail[1])) {
     const region = tail[1];
-    if (tail.length === 2) return { unit: [...head, "parts", region], scope: all.filter(c => c.kind === "parts" && at(c, 1) === region), all };
-    const own = all.find(c => c.kind === "parts" && at(c, 1) === region && at(c, 2) === tail[2]);
-    return own && (tail.length === 3 || leaf()) ? { unit: standing(all, own).unit, scope: null, all } : null;
+    if (tail.length === 2) return { unit: [...head, "parts", region], scope: all.filter(c => c.kind === "parts" && at(c, 1) === region) };
+    const j = tail[2];
+    return index(j) && j < view.parts[region].length && (tail.length === 3 || leaf()) ? { unit: [...head, "parts", region, j], scope: null } : null;
   }
   return null;
 }
 
 /**
- * An extraction that only reaches a view (or a region's part candidates) names the candidate through the words it quotes: every candidate of that
- * scope whose noun is in the quote is the source. A quote that names none leaves the source as it is, so it does not equal a declared candidate.
+ * An extraction that only reaches a view (or a region's part candidates) names the candidate through the words it quotes. A noun that one
+ * candidate of that scope has names that candidate. A noun that several candidates have (two regions both offering 尾) does not tell which
+ * one: the source then stays as it is, which no declared candidate equals, like a quote that names none (the source is not verified).
  */
 function narrow(memo: ObservationMemo, source: VisualFeatureSource, quote: string): VisualFeatureSource[] {
   if (source.path[0] !== "rotation") return [source];
   const rotation = memo.figures.find(candidate => candidate.id === source.figureId)?.rotation;
   const found = rotation ? rotationSource(rotation, source.path) : null;
   if (!found?.scope) return [source];
-  const units = new Map<string, Path>();
-  for (const c of found.scope) if (quote.includes(c.noun)) { const unit = standing(found.all, c).unit; units.set(JSON.stringify(unit), unit); }
-  return units.size ? [...units.values()].map(path => ({ figureId: source.figureId, path })) : [source];
+  const byNoun = new Map<string, Candidate[]>();
+  for (const c of found.scope) if (quote.includes(c.noun)) byNoun.set(c.kind + ":" + c.noun, [...byNoun.get(c.kind + ":" + c.noun) ?? [], c]);
+  const named = [...byNoun.values()].filter(group => group.length === 1).map(([c]) => c.unit);
+  const unresolved = named.length === 0 || [...byNoun.values()].some(group => group.length > 1);
+  return [...named.map(path => ({ figureId: source.figureId, path })), ...(unresolved ? [source] : [])];
 }
 
 function sourceValue(memo: ObservationMemo, source: VisualFeatureSource): string | undefined {
