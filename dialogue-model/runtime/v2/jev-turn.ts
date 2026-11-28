@@ -52,7 +52,7 @@ import { ISSUE_HANDLING_GENERATION, isGenerationV23, isGenerationV24, isIssueHan
 import { isJevVisualPurpose, SEMANTIC_DRAFT_ACTS, visualPurposeMatchesSource } from "../decision/contract.ts";
 import { createMemoAiExtractor, memoAiExtractionPrompt, AiPublicError, aiHash, emptyAiEvidence } from "../local-grounding/extract-ai.ts";
 import { isGenerationV18, SHAPE_TERMINOLOGY_GENERATION, withShapeTerminology } from "../shape-terminology.ts";
-import { generationTaskV23, GENERATION_INSTRUCTIONS_V23, CONCISE_GENERATION_V23, generationActionPromptV23, MULTIPLE_CANDIDATES_V23, PRIVATE_NAMING_STATE_V23 } from "./generation-prompt-v23.ts";
+import { generationTaskV23, GENERATION_INSTRUCTIONS_V23, GENERATION_INSTRUCTIONS_V24, CONCISE_GENERATION_V23, generationActionPromptV23, MULTIPLE_CANDIDATES_V23, PRIVATE_NAMING_STATE_V23 } from "./generation-prompt-v23.ts";
 import { readVisualFeatureDraft, readVisualFeatureEvidence, sameVisualFeatureSources,
   VISUAL_FEATURE_SELECTION_V19, VISUAL_FEATURE_SOURCES_V19, VISUAL_FEATURE_DRAFT_V19 } from "./visual-feature-evidence.ts";
 import type { VisualFeatureEvidence, VisualFeatureSource } from "./visual-feature-evidence.ts";
@@ -134,6 +134,10 @@ function publicationFeatureTargets(execution: PublicationScope, slots: readonly 
 const planFeatureTargets = (items: readonly RuntimeExecution[], slots: readonly string[], issueHandling: boolean) =>
   [...new Set(items.filter(item => needsVisualFeatureEvidence(item.action, issueHandling))
     .flatMap(item => publicationFeatureTargets(item, slots)))];
+function continuationFeatureTargets(original: RuntimeExecution, slots: readonly string[]) {
+  const scope = publicationFeatureTargets(original, slots);
+  return scope.length ? scope : slots;
+}
 type GeneratedPublication = {
   recovery: PublicationReconsideration | null;
   continuation: PublicationContinuation | null;
@@ -1127,9 +1131,9 @@ function validateGeneratedPublication(j: CommittedAct, ledger: OwnLedger, ownSlo
   if (publication.agreementWithheld !== (agreementWithheld ? true : undefined)) throw Error();
   if (issueHandling && !stateSame(publication.close, execution.action === "close" ? closeContext(ledger, selected) : undefined)) throw Error();
   const items = executionItems(execution);
-  const visualDetail = isGenerationV19(generation) && !checksOff && !continuation &&
-    items.some(item => needsVisualFeatureEvidence(item.action, issueHandling));
-  const visualTargets = visualDetail ? planFeatureTargets(items, ownSlots, issueHandling) : [];
+  const visualDetail = isGenerationV19(generation) && !checksOff && (continuation ? isGenerationV24(generation) :
+    items.some(item => needsVisualFeatureEvidence(item.action, issueHandling)));
+  const visualTargets = visualDetail ? (continuation ? continuationFeatureTargets(original, ownSlots) : planFeatureTargets(items, ownSlots, issueHandling)) : [];
   if (items.length > 1 ? !validIssuePublicationParts(publication.parts, items.length, undefined, transition?.start) : Object.hasOwn(publication, "parts")) throw Error();
   if (Object.hasOwn(publication, "visualFeatures") !== visualDetail ||
       visualDetail && (!memo || !readVisualFeatureEvidence(publication.visualFeatures, memo, visualTargets))) throw Error();
@@ -1577,7 +1581,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
       !/^[a-f0-9]{64}$/u.test(deferredProfile))) throw new JevTurnError("invalid_state");
   const terminology = isGenerationV18(generationRetryVersion) || visualFeatureGeneration ? SHAPE_TERMINOLOGY_GENERATION : undefined;
   const generationInstructions = withShapeTerminology(generationV23
-    ? GENERATION_INSTRUCTIONS_V23 + (generation.concise ? "\n" + CONCISE_GENERATION_V23 : "")
+    ? (generationV24 ? GENERATION_INSTRUCTIONS_V24 : GENERATION_INSTRUCTIONS_V23) + (generation.concise ? "\n" + CONCISE_GENERATION_V23 : "")
     : visualFeatureGeneration ? generation.instructions.replace(
     "形の分析（部分の形・つながり・配置）は、判断にdiscriminatingFeatureがあるときだけ、その特徴を1つに絞って述べて相手の反応を待ってください。",
     "形の分析（部分の形・つながり・配置）は、相手が尋ねた点や判断で示された論点の解消に必要な範囲で、観察に根拠がある特徴を扱ってください。",
@@ -2044,7 +2048,8 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
         const input = { ...finalInput, reobservationAllowed: false,
           publicationRecoveryContext: { previous: { action, target, name, feature, ...(visualPurpose ? { visualPurpose } : {}),
             ...("issue" in originalExecution ? { issue: originalExecution.issue } : {}),
-            ...("destination" in originalExecution ? { destination: originalExecution.destination } : {}) }, reason } };
+            ...("destination" in originalExecution ? { destination: originalExecution.destination } : {}) }, reason,
+            ...(generationV24 ? { respondToRequest: true as const } : {}) } };
         const window = interventionDeadline(decisionTimeoutMs!, signal);
         errorCode = "decision_failed";
         const sink: { evidence?: unknown } = {};
@@ -2089,8 +2094,8 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
       const visualSelection = judgment.action === "confirm" || judgment.action === "repair";
       const items = executionItems(execution);
       const multipleItems = items.length > 1;
-      const visualDetail = visualFeatureGeneration && !continuing && items.some(item => needsVisualFeatureEvidence(item.action, issueHandling));
-      const visualTargets = planFeatureTargets(items, slots, issueHandling);
+      const visualDetail = visualFeatureGeneration && (continuing ? generationV24 : items.some(item => needsVisualFeatureEvidence(item.action, issueHandling)));
+      const visualTargets = continuing && generationV24 ? continuationFeatureTargets(originalExecution, slots) : planFeatureTargets(items, slots, issueHandling);
       withdrawal = !continuing && reconsidered && execution.action === "repair" && reconsidered.reason !== "publication_mismatch"
         ? readNamingWithdrawal(namingDetail(selectedDecision, selectedIntervention), state.ledger, execution.target, turnIndex, agreeTurns)
         : null;
@@ -2188,6 +2193,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
         items: items.map(publicationItem), visualDetail, omitVisualSources: checksOff, humanLedTransition, closing,
         publicQuestions: repairQualityPublicQuestions(latest.seq, publicTurns, claims),
         reconsidered: reconsidered !== null, continuing: continuing !== null, namingRequest: record.namingRequest === true,
+        respondToRequest: generationV24,
         reconfirmation: reconfirmName ? RECONFIRM_NAME_V22 : undefined,
         namingConflict, withdrawnName: withdrawal?.prior.name ?? null,
       }) : actInstructions + "\n" + scope +
