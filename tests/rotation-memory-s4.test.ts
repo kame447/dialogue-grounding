@@ -109,6 +109,18 @@ test('a memo that lacks one own figure (the bundle does not know it) keeps that 
   assert.deepEqual(statuses(records), ALL_PASS);
 });
 
+test('a second look at a figure without a memory keeps the earlier bytes while the other figures of the memo carry theirs', async () => {
+  const records = await record('request_observation', 'off', { lacking: 0 });
+  const memo = records.trials[0].attempts[0].observationMemo;
+  assert.equal(memo.figures[0].rotation, undefined);
+  assert.ok(memo.figures[1].rotation !== undefined);
+  assert.deepEqual(statuses(records), ALL_PASS);
+  const look = records.trials[0].replay[0].result.sides[0].requests.find((r: { phase: string }) => r.phase === 'observation_targeted');
+  assert.ok(look, 'the record holds the second look');
+  assert.equal(holds(look.payload, table.REOBSERVATION_ROTATION_USE), false);
+  assert.equal(holds(look.payload, table.ROTATION_LEGEND_NOUNS), false);
+});
+
 // ---- 2. One character of what the memory adds ----
 /** The texts of the table. Each is tried in every record of MUTATION_RECORDS that holds it. */
 const TEXTS: [string, string][] = [
