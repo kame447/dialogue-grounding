@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { isPartObservationVersion, type PartObservationVersion } from '../stimuli/part-geometry.ts';
+import { validateRotationMemoryPin, type RotationMemoryPin } from './rotation-memory-pin.ts';
 import { isOpeningMode, type OpeningMode } from './opening-mode.ts';
 import { validatePreparedObservations } from './prepared-observations.ts';
 import type { PreparedObservationReference } from './prepared-observations.ts';
@@ -73,6 +74,8 @@ export function participantMemoryPruneVersion(profile?: ParticipantDialogueProfi
 export type ParticipantPlanSettings = {
   preparedObservations?: PreparedObservationReference;
   partObservationVersion?: PartObservationVersion;
+  /** The rotation-memory bundle this reception froze at approval. Exclusive with preparedObservations and partObservationVersion. */
+  rotationMemory?: RotationMemoryPin;
   openingMode?: OpeningMode;
   memoryPruneVersion?: MemoryPruneVersion;
   participantModelPin?: ParticipantModelPin;
@@ -217,6 +220,7 @@ function participantPlan(value: unknown) {
   const hasPrune = Object.hasOwn(fields, 'memoryPruneVersion');
   const hasOpeningMode = Object.hasOwn(fields, 'openingMode');
   const hasParts = Object.hasOwn(fields, 'partObservationVersion');
+  const hasRotationMemory = Object.hasOwn(fields, 'rotationMemory');
   const hasPin = Object.hasOwn(fields, 'participantModelPin');
   const hasLimits = Object.hasOwn(fields, 'participantLimits');
   const hasProfile = Object.hasOwn(fields, 'participantRuntimeProfile');
@@ -225,11 +229,13 @@ function participantPlan(value: unknown) {
   const hasPostGenerationCheck = Object.hasOwn(fields, 'postGenerationCheck');
   if ((hasLimits || hasProfile || hasGeneration) && !hasPin || hasLimits && hasProfile) return fail();
   const p = object(value, [...PLAN_KEYS, ...(hasPrepared ? ['preparedObservations'] : []), ...(hasOpeningMode ? ['openingMode'] : []), ...(hasParts ? ['partObservationVersion'] : []),
-    ...(hasPrune ? ['memoryPruneVersion'] : []), ...(hasPin ? ['participantModelPin'] : []), ...(hasLimits ? ['participantLimits'] : []),
+    ...(hasRotationMemory ? ['rotationMemory'] : []), ...(hasPrune ? ['memoryPruneVersion'] : []), ...(hasPin ? ['participantModelPin'] : []), ...(hasLimits ? ['participantLimits'] : []),
     ...(hasProfile ? ['participantRuntimeProfile'] : []), ...(hasGeneration ? ['initialObservationGeneration'] : []),
     ...(hasDialogueProfile ? ['participantDialogueProfile'] : []), ...(hasPostGenerationCheck ? ['postGenerationCheck'] : [])]);
   if (hasOpeningMode && !isOpeningMode(p.openingMode)) return fail();
   if (hasParts && (!isPartObservationVersion(p.partObservationVersion) || !hasPin || !hasProfile)) return fail();
+  // A rotation-memory plan reads static data at the start: it never claims a prepared Terra memo and carries no part geometry.
+  if (hasRotationMemory && (!hasPin || !hasProfile || hasParts || hasPrepared)) return fail();
   if (hasProfile && p.participantRuntimeProfile !== PARTICIPANT_PRODUCTION_PROFILE) return fail();
   const generation = isInitialObservationGeneration(p.initialObservationGeneration) ? p.initialObservationGeneration : undefined;
   if (hasGeneration && generation === undefined) return fail();
@@ -248,9 +254,14 @@ function participantPlan(value: unknown) {
   const limits = hasLimits ? validateParticipantLimits(p.participantLimits) : undefined;
   const preparedObservations = hasPrepared ? validatePreparedObservations(p.preparedObservations, Array.isArray(p.trials) ? p.trials.length : 0) : undefined;
   if (preparedObservations && (!pin || !hasProfile || !iso(p.approvedAt) || preparedObservations.preparedAt > p.approvedAt)) return fail();
+  let rotationMemory: RotationMemoryPin | undefined;
+  if (hasRotationMemory) {
+    try { rotationMemory = validateRotationMemoryPin(p.rotationMemory); } catch { return fail(); }
+  }
   const participant: ParticipantPlanSettings = {
     ...(preparedObservations ? { preparedObservations } : {}),
     ...(hasParts ? { partObservationVersion: p.partObservationVersion as PartObservationVersion } : {}),
+    ...(rotationMemory ? { rotationMemory } : {}),
     ...(hasOpeningMode ? { openingMode: p.openingMode as OpeningMode } : {}),
     ...(hasPrune ? { memoryPruneVersion } : {}),
     ...(pin ? { participantModelPin: pin } : {}),
@@ -397,6 +408,7 @@ export async function approveReception(value: unknown, options: ParticipantPlanS
   const participant = {
     ...(options.preparedObservations !== undefined ? { preparedObservations: options.preparedObservations } : {}),
     ...(options.partObservationVersion !== undefined ? { partObservationVersion: options.partObservationVersion } : {}),
+    ...(options.rotationMemory !== undefined ? { rotationMemory: options.rotationMemory } : {}),
     ...(options.openingMode !== undefined ? { openingMode: options.openingMode } : {}),
     ...(options.memoryPruneVersion !== undefined ? { memoryPruneVersion: options.memoryPruneVersion } : {}),
     ...(options.participantModelPin !== undefined ? { participantModelPin: options.participantModelPin } : {}),

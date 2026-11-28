@@ -4,6 +4,7 @@ import { isOpeningMode } from './opening-mode.ts';
 import { preparedTrialObservation, validatePreparedTrialObservation } from './prepared-observations.ts';
 import { validateObservationMemo } from '../observation/observe.ts';
 import { researchHash } from './research-profile.ts';
+import { sameRotationMemoryPin, validateRotationMemoryRecord } from './rotation-memory-pin.ts';
 import { CLAIM_PRUNE_V2 } from '../memory/reference-graph.mjs';
 import { createHash } from 'node:crypto';
 import type { BaseAssignmentConfig, BaseAssignment, BaseRecord, BaseOwnerState, StartIntent } from './base-assignment.ts';
@@ -121,6 +122,10 @@ export function assignmentPartObservationVersion(a: BaseAssignment) {
   return a.source.kind === 'reception_plan_v2' || a.source.kind === 'reception_plan_v3'
     ? a.source.plan.partObservationVersion : undefined;
 }
+export function assignmentRotationMemory(a: BaseAssignment) {
+  return a.source.kind === 'reception_plan_v2' || a.source.kind === 'reception_plan_v3'
+    ? a.source.plan.rotationMemory : undefined;
+}
 export function assignmentOpeningMode(a: BaseAssignment) {
   return a.source.kind === 'server_config_v1' ? a.source.openingMode
     : a.source.kind === 'reception_plan_v1' ? undefined : a.source.plan.openingMode;
@@ -192,6 +197,16 @@ export function validateBoundBaseRecord(record: unknown, assignment: unknown): v
     const profile = plan?.participantRuntimeProfile;
     const partObservationVersion = assignmentPartObservationVersion(a);
     if (partObservationVersion ? options.partObservationVersion !== partObservationVersion : Object.hasOwn(options, 'partObservationVersion')) throw new Error('part_observation_version');
+    const rotationMemory = assignmentRotationMemory(a);
+    const recordedRotation = Object.hasOwn(options, 'rotationMemory') ? validateRotationMemoryRecord(options.rotationMemory) : undefined;
+    // The record's pin is the plan's. The bundle actually used is only recorded: a different one never refuses a restore.
+    if (rotationMemory ? !recordedRotation || !sameRotationMemoryPin(recordedRotation.pin, rotationMemory) : recordedRotation !== undefined) throw new Error('rotation_memory');
+    if (rotationMemory) {
+      // The saved projection is the initial memo itself; its recorded hash is checked, the current bundle never is.
+      const initialMemo = validateObservationMemo(data(queue.privateState).observationMemo);
+      for (const figure of initialMemo.figures) figure.reobservations = [];
+      if (researchHash(initialMemo) !== data(r.initialObservation).memoSha256) throw new Error('rotation_memory');
+    }
     const openingMode = assignmentOpeningMode(a);
     if (openingMode ? options.openingMode !== openingMode : Object.hasOwn(options, 'openingMode')) throw new Error('opening_mode');
     const memoryPruneVersion = assignmentMemoryPruneVersion(a);

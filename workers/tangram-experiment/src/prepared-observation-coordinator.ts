@@ -5,6 +5,7 @@ import { resolveParticipantConfiguration } from './participant-configuration.ts'
 import type { ParticipantConfigurationEnv } from './participant-configuration.ts';
 import { preparedObservationPoolKey, prepareObservationBundle, validatePreparedObservationBundle } from './prepared-observation-recipe.ts';
 import { usesThreeFigures } from './admin/reception-settings.ts';
+import { rotationMemoryFor } from './rotation-memory-source.ts';
 import type { ReceptionSettings } from './admin/reception-settings.ts';
 import type { PreparedObservationPoolStatus } from './admin/prepared-observation-port.ts';
 import {
@@ -40,6 +41,10 @@ export class PreparedObservationCoordinator {
       return { settings, supported: false as const, specs: [] as PreparedPoolSpec[], proxy: undefined };
     }
     const { participant, proxy } = await resolveParticipantConfiguration(this.options.env, protocol);
+    // A new reception reads the rotation-memory bundle at its start and claims no stock, so nothing is prepared for it. Approval reads the same rule.
+    if (rotationMemoryFor(participant, protocol.referenceMemory)) {
+      return { settings, supported: false as const, specs: [] as PreparedPoolSpec[], proxy: undefined };
+    }
     if (!participant.participantModelPin || !proxy) throw new PreparedObservationPoolError('unavailable');
     const specs = await Promise.all(protocol.allowedOrders.map(async (_order, orderIndex) => ({
       protocol, orderIndex, participant,
